@@ -1,0 +1,30 @@
+/**
+ * plan.mjs — planTool
+ * Enter or exit plan mode for read-only exploration.
+ */
+export const planTool = {
+  readonly: true,
+  name: "plan",
+  description:
+    "Enter or exit plan mode. In plan mode, only read-only tools are allowed — useful for exploring code before committing changes.\n" +
+    "Parameters:\n" +
+    "- action (required): enter | exit",
+  parameters: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["enter", "exit"] },
+    },
+    required: ["action"],
+  },
+  async execute({ action }, ctx) {
+    if (action === "enter") {
+      ctx.agent._planMode = true
+      return "Plan mode activated — read-only tools only. Exit plan mode before making changes."
+    }
+    if (action === "exit") {
+      ctx.agent._planMode = false
+      return "Plan mode deactivated — all tools available."
+    }
+    return `Error: unknown action "${action}". Use "enter" or "exit".`
+  },
+}
