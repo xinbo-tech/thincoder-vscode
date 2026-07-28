@@ -2,6 +2,8 @@
  * md.js — zero-dependency markdown → HTML renderer
  */
 
+import { highlight, normalizeLang } from "./highlight.js"
+
 /** Full markdown → HTML */
 export function md(raw) {
   if (!raw) return ""
@@ -11,8 +13,10 @@ export function md(raw) {
   // 1. Fenced code blocks → placeholders
   let text = raw.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
     const i = blocks.length
+    const norm = normalizeLang(lang)
     const l = lang ? `<span class="code-lang">${esc(lang)}</span>` : ""
-    blocks.push(`<pre class="code-block">${l}<code>${esc(code.trimEnd())}</code></pre>`)
+    const hl = highlight(code.trimEnd(), norm)
+    blocks.push(`<pre class="code-block">${l}<code>${hl}</code></pre>`)
     return `\x00B${i}\x00`
   })
 

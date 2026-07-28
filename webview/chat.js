@@ -2,6 +2,7 @@
  * chat.js — main orchestration: state, events, token handling
  */
 import { md } from "./md.js"
+import { renderDiff, lineDiff } from "./diff.js"
 import {
   showWelcome, showBanner, addUser, addAssistantHistory, newBlock,
   addTool, finishTool, setLoading, showError, scrollDown,
@@ -643,7 +644,7 @@ window.addEventListener("message", (e) => {
   const m = e.data
   switch (m.type) {
     case "userMessage":      addUser(ctx, m.text); break
-    case "assistantMessage": addAssistantHistory(ctx, m.text); break
+    case "assistantMessage": addAssistantHistory(ctx, m.text); attachCopyButtons(ctx.messagesEl.lastElementChild); break
     case "token":            onToken(m.text); break
     case "reasoning":        onReasoning(m.text); break
     case "toolCall":         addTool(ctx, m.name, m.args); break
@@ -713,12 +714,16 @@ window.addEventListener("message", (e) => {
       const el = document.createElement("div")
       el.className = "permission-prompt"
       const argsPreview = m.args ? m.args.slice(0, 150) + (m.args.length > 150 ? "…" : "") : ""
-      el.innerHTML = `<div class="permission-prompt-text">ThinCoder wants to run <code>${escHtml(m.tool)}</code>${argsPreview ? `<br><span style="font-size:11px;opacity:0.7">${escHtml(argsPreview)}</span>` : ""}</div>
-        <div class="permission-prompt-actions">
-          <button class="perm-btn approve">✓ Approve</button>
-          <button class="perm-btn approve-all">✓✓ Approve All</button>
-          <button class="perm-btn deny">✕ Deny</button>
-        </div>`
+      let diffHtml = ""
+      if (m.diff && m.diff.old !== m.diff.new) {
+        const lines = lineDiff(m.diff.old, m.diff.new)
+        diffHtml = '<div class="diff-preview"><div class="diff-header">' + escHtml(m.diff.path) + '</div>' + renderDiff(lines) + '</div>'
+      }
+      let html = '<div class="permission-prompt-text">ThinCoder wants to run <code>' + escHtml(m.tool) + '</code>'
+      if (argsPreview) html += '<br><span style="font-size:11px;opacity:0.7">' + escHtml(argsPreview) + '</span>'
+      html += '</div>' + diffHtml
+      html += '<div class="permission-prompt-actions">'
+      el.innerHTML = html
       el.querySelector(".approve").addEventListener("click", () => {
         el.remove()
         vscode.postMessage({ type: "permissionResponse", approved: true })
@@ -843,6 +848,26 @@ function onToken(text) {
 
 function finish(aborted) {
   if (aborted && ctx.currentBubble) { ctx.currentRaw += "\n\n*[Stopped]*"; ctx.currentBubble.innerHTML = md(ctx.currentRaw) }
+  if (ctx.currentBubble) attachCopyButtons(ctx.currentBubble)
   ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
   setLoading(ctx, false)
+}
+
+/** Attach copy buttons to all code blocks in a container */
+function attachCopyButtons(container) {
+  const blocks = container.querySelectorAll?.(".code-block") || []
+  for (const block of blocks) {
+    if (block.querySelector(".code-copy-btn")) continue // already has one
+    const btn = document.createElement("button")
+    btn.className = "code-copy-btn"
+    btn.textContent = "Copy"
+    btn.addEventListener("click", async () => {
+      const code = block.querySelector("code")?.textContent || ""
+      try { await navigator.clipboard.writeText(code) } catch { /* */ }
+      btn.textContent = "Copied!"
+      btn.classList.add("copied")
+      setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied") }, 2000)
+    })
+    block.appendChild(btn)
+  }
 }

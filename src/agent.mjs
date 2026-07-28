@@ -227,7 +227,38 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         // Permission gate
         const mutationTools = new Set(["write", "edit", "insert_after", "apply_patch", "delete", "bash"])
         if (!autoApprove && tool && mutationTools.has(toolName) && depth === 0 && callbacks.onPermissionRequired) {
-          const approved = await callbacks.onPermissionRequired(toolName, args)
+          // Compute diff preview for file-based tools
+          let diffInfo = null
+          if (toolName !== "bash" && args.path) {
+            try {
+              const abs = join(cwd, args.path)
+              const oldContent = existsSync(abs) ? readFileSync(abs, "utf8") : ""
+              let newContent = ""
+              if (toolName === "write") {
+                newContent = args.content || ""
+              } else if (toolName === "edit") {
+                if (args.replace_all) {
+                  newContent = oldContent.replaceAll(args.old_string, args.new_string)
+                } else {
+                  newContent = oldContent.replace(args.old_string, args.new_string)
+                }
+              } else if (toolName === "insert_after") {
+                const lines = oldContent.split("\n")
+                let target = (args.after_line != null) ? args.after_line : lines.length
+                if (target < 0) target = 0
+                if (target > lines.length) target = lines.length
+                lines.splice(target, 0, args.content || "")
+                newContent = lines.join("\n")
+              } else if (toolName === "delete") {
+                newContent = "" // deletion — show all as removed
+              }
+              // apply_patch — too complex to preview inline, skip diff
+              if (newContent !== oldContent) {
+                diffInfo = { old: oldContent, new: newContent, path: args.path }
+              }
+            } catch { /* best-effort — permission still works without diff */ }
+          }
+          const approved = await callbacks.onPermissionRequired(toolName, args, diffInfo)
           if (!approved) return { tool_call_id: tc.id, toolName, content: "Denied by user (permission mode).", meta: null }
         }
 

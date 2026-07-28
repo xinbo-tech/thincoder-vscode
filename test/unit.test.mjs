@@ -373,6 +373,111 @@ describe("generate-title — text extraction logic", () => {
   })
 })
 
-// ─── Report ───────────────────────────────────────────────────
+// ─── highlight.js ──────────────────────────────────────────
+
+import { tokenize, highlight, normalizeLang } from "../webview/highlight.js"
+
+describe("highlight — tokenize", () => {
+  it("tokenizes JS keywords", () => {
+    const tokens = tokenize("const x = 1", "js")
+    assert(tokens.some(t => t.type === "keyword" && t.value === "const"))
+  })
+
+  it("tokenizes strings", () => {
+    const tokens = tokenize('"hello world"', "js")
+    assert(tokens.some(t => t.type === "string" && t.value === '"hello world"'))
+  })
+
+  it("tokenizes numbers", () => {
+    const tokens = tokenize("42 3.14 0xFF", "js")
+    const nums = tokens.filter(t => t.type === "number")
+    assert.equal(nums.length, 3)
+  })
+
+  it("tokenizes line comments", () => {
+    const tokens = tokenize("// this is a comment", "js")
+    assert(tokens.some(t => t.type === "comment"))
+  })
+
+  it("tokenizes block comments", () => {
+    const tokens = tokenize("/* multi\nline */ code", "js")
+    assert(tokens.some(t => t.type === "comment" && t.value.includes("/*")))
+  })
+
+  it("tokenizes Python keywords", () => {
+    const tokens = tokenize("def foo(): pass", "py")
+    assert(tokens.some(t => t.type === "keyword" && t.value === "def"))
+  })
+
+  it("tokenizes SQL keywords", () => {
+    const tokens = tokenize("SELECT * FROM users", "sql")
+    assert(tokens.some(t => t.type === "keyword" && t.value === "SELECT"))
+  })
+
+  it("produces valid HTML", () => {
+    const html = highlight("const x = 1", "js")
+    assert(html.includes('class="tk-keyword"'))
+    assert(html.includes("const"))
+    assert(!html.includes("<script"))  // no XSS
+  })
+})
+
+describe("highlight — normalizeLang", () => {
+  it("maps common aliases", () => {
+    assert.equal(normalizeLang("javascript"), "js")
+    assert.equal(normalizeLang("typescript"), "ts")
+    assert.equal(normalizeLang("python"), "py")
+    assert.equal(normalizeLang("bash"), "sh")
+    assert.equal(normalizeLang("json"), "json")
+    assert.equal(normalizeLang(""), "js")
+  })
+
+  it("defaults to js for unknown", () => {
+    assert.equal(normalizeLang("rust"), "js")
+  })
+})
+
+// ─── diff.js ────────────────────────────────────────────────
+
+import { lineDiff } from "../webview/diff.js"
+
+describe("diff — lineDiff", () => {
+  it("detects no changes", () => {
+    const d = lineDiff("a\nb\nc", "a\nb\nc")
+    assert(d.every(l => l.type === "same"))
+  })
+
+  it("detects single line change", () => {
+    const d = lineDiff("line1\nline2\nline3", "line1\nmodified\nline3")
+    assert(d.some(l => l.type === "del" && l.text === "line2"))
+    assert(d.some(l => l.type === "add" && l.text === "modified"))
+  })
+
+  it("detects addition at end", () => {
+    const d = lineDiff("a\nb", "a\nb\nc")
+    assert(d.some(l => l.type === "add" && l.text === "c"))
+  })
+
+  it("detects deletion at start", () => {
+    const d = lineDiff("a\nb\nc", "b\nc")
+    assert(d.some(l => l.type === "del" && l.text === "a"))
+  })
+
+  it("handles empty old", () => {
+    const d = lineDiff("", "new content")
+    assert(d.every(l => l.type === "add"))
+  })
+
+  it("handles empty new", () => {
+    const d = lineDiff("old content", "")
+    assert(d.every(l => l.type === "del"))
+  })
+
+  it("preserves prefix context lines", () => {
+    const d = lineDiff("context\na\nb", "context\nx\ny")
+    assert.equal(d[0].type, "same")
+    assert.equal(d[0].text, "context")
+  })
+})
 
 console.log("\n✓ All unit tests passed.\n")

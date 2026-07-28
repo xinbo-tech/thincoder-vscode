@@ -5,7 +5,7 @@
 
 import * as vscode from "vscode"
 import { runAgent } from "./src/agent.mjs"
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { closeAllMcp } from "./src/mcp.mjs"
@@ -15,6 +15,45 @@ import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey,
 import { generateTitle } from "./src/extension/generate-title.mjs"
 import { injectEditorContext } from "./src/extension/editor-context.mjs"
 import { specForModel } from "./src/specs.mjs"
+
+// ─── @-context file reference injection ───────────────────
+
+/** Scan text for @path references and replace with inline file content */
+function injectAtRefs(text, cwd) {
+  const re = /@([^\s,;:()\[\]{}"'`]+)/g
+  const refs = []
+  let m
+  while ((m = re.exec(text)) !== null) {
+    const raw = m[1]
+    // Skip things that aren't paths (emails, mentions like @user)
+    if (!/^[a-zA-Z0-9_./\\-]+$/.test(raw)) continue
+    if (raw.includes("@")) continue
+    // Resolve relative to cwd
+    const abs = join(cwd, raw)
+    if (!existsSync(abs)) continue
+    try {
+      const stat = statSync(abs)
+      if (!stat.isFile()) continue
+      let content = readFileSync(abs, "utf8")
+      if (content.length > 4000) content = content.slice(0, 4000) + "\n... (truncated)"
+      refs.push({ raw, abs, content })
+    } catch { /* skip unreadable */ }
+  }
+  if (refs.length === 0) return text
+
+  // Replace @refs in the text with inline content blocks
+  for (const ref of refs) {
+    const placeholder = `@${ref.raw}`
+    const injection = `[File: ${ref.raw}]\n\`\`\`\n${ref.content}\n\`\`\``
+    text = text.split(placeholder).join(injection)
+  }
+
+  // Append a summary of referenced files
+  const list = refs.map(r => `  - ${r.raw} (${r.content.length} chars)`).join("\n")
+  text += `\n\n[Referenced files:\n${list}\n]`
+
+  return text
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -287,6 +326,9 @@ class ChatPanel {
     // Inject active editor context
     text = injectEditorContext(text, cwd)
 
+    // Inject @file references (e.g., "@src/agent.mjs" or "@README.md")
+    text = injectAtRefs(text, cwd)
+
     const history = this._activeHistory()
     history.push({ type: "user", content: text, provider: providerName || "", model: modelOverride || p.model, timestamp: ts })
     const isFirstMessage = history.filter((m) => m.type === "user").length === 1
@@ -327,10 +369,10 @@ class ChatPanel {
           this._pushSessions()
           if (isFirstMessage) this._generateTitle()
         },
-        onPermissionRequired: c.get("autoApprove", false) ? undefined : (toolName, args) =>
+        onPermissionRequired: c.get("autoApprove", false) ? undefined : (toolName, args, diffInfo) =>
           new Promise((resolve) => {
             this._permissionQueue.push({ resolve, toolName })
-            this._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2) })
+            this._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
           }),
       }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}), images })
     } catch (e) {
