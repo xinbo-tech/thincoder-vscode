@@ -38,7 +38,7 @@ export { builtinTools } from "./tools.mjs"
  * @param {object} opts - { depth, role, maxTurns } for subagent context
  */
 export async function runAgent(provider, cwd, input, callbacks = {}, signal, autoApprove = true, opts = {}) {
-  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers } = opts
+  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills } = opts
 
   const agentTools = depth === 0
     ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool]
@@ -74,6 +74,11 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         `  - ${name}: ${cfg.command ? `stdio (${cfg.command} ${(cfg.args || []).join(" ")})` : `http (${cfg.url})`}`
       ).join("\n")
       history.push({ role: "user", content: `[System: configured MCP servers (use mcp tool to connect):\n${list}]` })
+    }
+    // Skills from .thincoder/skills/
+    if (skills && skills.length > 0) {
+      const list = skills.map((s) => `### ${s.name}\n${s.content}`).join("\n\n")
+      history.push({ role: "user", content: `[System: available skills from .thincoder/skills/ — use the skill tool to load one when relevant. Available skills:\n\n${list}]` })
     }
   }
 

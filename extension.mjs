@@ -16,6 +16,7 @@ import { generateTitle } from "./src/extension/generate-title.mjs"
 import { injectEditorContext } from "./src/extension/editor-context.mjs"
 import { specForModel } from "./src/specs.mjs"
 import { initLocale, t, loadLocaleStrings } from "./src/i18n.mjs"
+import { loadSkills } from "./src/extension/skills.mjs"
 
 // ─── @-context file reference injection ───────────────────
 
@@ -431,7 +432,7 @@ class ChatPanel {
             this._permissionQueue.push({ resolve, toolName })
             this._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
           }),
-      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}), images })
+      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}), images, skills: loadSkills(cwd) })
     } catch (e) {
       if (e.name === "AbortError") { this._panel.webview.postMessage({ type: "aborted" }) }
       else {

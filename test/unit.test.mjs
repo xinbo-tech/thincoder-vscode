@@ -522,4 +522,54 @@ describe("i18n — locale loading", () => {
   })
 })
 
+// ─── skills — loadSkills ─────────────────────────────────
+
+import { loadSkills } from "../src/extension/skills.mjs"
+
+describe("skills — loadSkills", () => {
+  let tmpDir
+
+  before(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "thincoder-test-skills-"))
+    mkdirSync(join(tmpDir, ".thincoder", "skills"), { recursive: true })
+  })
+
+  after(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it("returns empty when no skills directory", () => {
+    const empty = mkdtempSync(join(tmpdir(), "thincoder-test-noskills-"))
+    const skills = loadSkills(empty)
+    assert.equal(skills.length, 0)
+    rmSync(empty, { recursive: true, force: true })
+  })
+
+  it("loads markdown skill files", () => {
+    writeFileSync(join(tmpDir, ".thincoder", "skills", "code-review.md"), "# Review\nCheck code quality.")
+    writeFileSync(join(tmpDir, ".thincoder", "skills", "test-gen.md"), "# Tests\nWrite unit tests.")
+    const skills = loadSkills(tmpDir)
+    assert.equal(skills.length, 2)
+    assert.equal(skills[0].name, "code-review")
+    assert.ok(skills[0].content.includes("Check code quality"))
+    assert.equal(skills[1].name, "test-gen")
+  })
+
+  it("skips non-markdown files and dotfiles", () => {
+    writeFileSync(join(tmpDir, ".thincoder", "skills", ".hidden.md"), "hidden")
+    writeFileSync(join(tmpDir, ".thincoder", "skills", "notes.txt"), "text file")
+    const skills = loadSkills(tmpDir)
+    const names = skills.map((s) => s.name)
+    assert.ok(!names.includes("hidden"))
+    assert.ok(!names.includes("notes"))
+  })
+
+  it("skips empty skill files", () => {
+    writeFileSync(join(tmpDir, ".thincoder", "skills", "empty.md"), "")
+    const skills = loadSkills(tmpDir)
+    const names = skills.map((s) => s.name)
+    assert.ok(!names.includes("empty"))
+  })
+})
+
 console.log("\n✓ All unit tests passed.\n")

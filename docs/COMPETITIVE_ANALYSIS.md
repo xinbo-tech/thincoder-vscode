@@ -75,7 +75,7 @@
 | MCP 协议 | ✅ | ❌ | ✅ | ❌ | ✅ |
 | MCP 传输（stdio/http/ws） | ✅ 三种 | ❌ | ✅ stdio | ❌ | ✅ |
 | 自定义 system prompt | ✅ .md 文件 | ❌ | ✅ | ✅ .cursorrules | ✅ |
-| Skill 系统 | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Skill 系统 | ✅ .thincoder/skills/ | ❌ | ❌ | ❌ | ✅ |
 | 插件/扩展机制 | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 **结论：MCP 三种传输方式完整体现。** Skill/Plugin 是 Continue 独一档的壁垒，长期可考虑。
@@ -161,5 +161,5 @@ Agent 智能体         ★★★★★      ★★        ★★★★      ★
 | 行内补全 | agent-first 定位，补全赛道已有免费平替 |
 | CI/CD | 35 文件零依赖项目，pipeline 是仪式不是投资 |
 | TypeScript | JSDoc 够用，类型系统对此规模是包袱 |
-| Skill/Plugin 生态 | 版本壁垒，目前体量不需要 |
+| 插件/扩展 SDK | 第三方插件需要社区，目前体量不需要 |
 | 沙箱 | 架构级决策：透明+保守默认+信任用户 |
