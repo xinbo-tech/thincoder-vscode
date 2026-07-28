@@ -5,7 +5,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
-import { resolvePath, formatSize, checkDirtyEditors } from "./shared.mjs"
+import { resolvePath, formatSize, getOpenDoc, applyEditorEdit, applyEditorRangeEdit } from "./shared.mjs"
 
 export const insertAfterTool = {
   name: "insert_after",
@@ -28,7 +28,8 @@ export const insertAfterTool = {
   },
   async execute({ path, content, after_line, after_regex }, ctx) {
     const abs = resolvePath(path, ctx.cwd)
-    const text = await readFile(abs, "utf8")
+    const doc = getOpenDoc(abs)
+    const text = doc ? doc.getText() : await readFile(abs, "utf8")
     const lines = text.split("\n")
 
     let target
@@ -48,9 +49,26 @@ export const insertAfterTool = {
     }
 
     if (target < 0 || target >= lines.length) return `Error: line ${target + 1} out of range (file has ${lines.length} lines)`
+
+    if (doc) {
+      // Open in editor — insert via WorkspaceEdit at the line position
+      if (doc.isDirty) return `Error: File has unsaved changes in the editor: ${abs}. Save or discard before allowing automated edits.`
+      const insertLine = target + 1 // line number to insert AFTER
+      const lineCount = doc.lineCount
+      if (insertLine >= lineCount) {
+        // Append at end
+        const lastLine = doc.lineAt(lineCount - 1)
+        await applyEditorRangeEdit(doc, lastLine.lineNumber, lastLine.text.length, lastLine.lineNumber, lastLine.text.length, "\n" + content)
+      } else {
+        // Insert between lines — insert at start of the next line with a newline prefix
+        const nextLine = doc.lineAt(insertLine)
+        await applyEditorRangeEdit(doc, nextLine.lineNumber, 0, nextLine.lineNumber, 0, content + "\n")
+      }
+      return `Inserted after line ${target + 1} in ${path} (via editor)`
+    }
+
+    // Not open — write to disk
     lines.splice(target + 1, 0, content)
-    const dirtyErr = checkDirtyEditors(abs)
-    if (dirtyErr) return `Error: ${dirtyErr}`
     await writeFile(abs, lines.join("\n"), "utf8")
     return `Inserted after line ${target + 1} in ${path}`
   },
@@ -140,7 +158,7 @@ export const applyPatchTool = {
         applied++
       }
 
-      const dirtyErr = checkDirtyEditors(abs)
+      const dirtyErr = getOpenDoc(abs)?.isDirty ? `File has unsaved changes in the editor: ${abs}. Save or discard first.` : null
       if (dirtyErr) return `Error: ${dirtyErr}`
       await writeFile(abs, lines.join("\n"), "utf8")
       results.push(`Patched ${filePath}: ${applied} hunk(s) applied`)

@@ -1,10 +1,12 @@
 /**
  * file.mjs — File manipulation tools: read, write, edit
+ * Dual-channel: open files edit via WorkspaceEdit (undo-integrated),
+ * closed files edit directly on disk.
  */
 
 import { readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { resolvePath, checkDirtyEditors } from "./shared.mjs"
+import { resolvePath, getOpenDoc, applyEditorEdit, applyEditorRangeEdit } from "./shared.mjs"
 
 export const readTool = {
   name: "read",
@@ -26,7 +28,8 @@ export const readTool = {
   },
   async execute({ path, offset, limit }, ctx) {
     const abs = resolvePath(path, ctx.cwd)
-    let text = await readFile(abs, "utf8")
+    const doc = getOpenDoc(abs)
+    const text = doc ? doc.getText() : await readFile(abs, "utf8")
     const lines = text.split("\n")
     const start = Math.max(0, (offset || 1) - 1)
     const end = limit ? start + limit : lines.length
@@ -54,8 +57,16 @@ export const writeTool = {
     const abs = resolvePath(path, ctx.cwd)
     const { mkdir } = await import("node:fs/promises")
     await mkdir(dirname(abs), { recursive: true })
-    const dirtyErr = checkDirtyEditors(abs)
-    if (dirtyErr) return `Error: ${dirtyErr}`
+
+    const doc = getOpenDoc(abs)
+    if (doc) {
+      // Open in editor — apply via WorkspaceEdit (undo-integrated)
+      if (doc.isDirty) return `Error: File has unsaved changes in the editor: ${abs}. Save or discard before allowing automated edits.`
+      await applyEditorEdit(doc, content)
+      return `Wrote ${content.length} chars to ${path} (via editor)`
+    }
+
+    // Not open — write to disk directly
     await writeFile(abs, content, "utf8")
     return `Wrote ${content.length} chars to ${path}`
   },
@@ -82,15 +93,32 @@ export const editTool = {
   },
   async execute({ path, old_string, new_string, replace_all }, ctx) {
     const abs = resolvePath(path, ctx.cwd)
-    const text = await readFile(abs, "utf8")
+    const doc = getOpenDoc(abs)
+    const text = doc ? doc.getText() : await readFile(abs, "utf8")
     const count = text.split(old_string).length - 1
     if (count === 0) return `Error: old_string not found in ${path}`
     if (!replace_all && count > 1) {
       return `Error: old_string matches ${count} times in ${path} — set replace_all=true or add more context to make it unique`
     }
+
+    if (doc) {
+      // Open in editor — apply via WorkspaceEdit
+      if (doc.isDirty) return `Error: File has unsaved changes in the editor: ${abs}. Save or discard before allowing automated edits.`
+      if (replace_all) {
+        // For replace_all, apply the full text replacement
+        await applyEditorEdit(doc, text.replaceAll(old_string, new_string))
+      } else {
+        // Find the match position and apply range edit
+        const idx = text.indexOf(old_string)
+        const pos = doc.positionAt(idx)
+        const endPos = doc.positionAt(idx + old_string.length)
+        await applyEditorRangeEdit(doc, pos.line, pos.character, endPos.line, endPos.character, new_string)
+      }
+      return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path} (via editor)`
+    }
+
+    // Not open — write to disk
     const result = replace_all ? text.replaceAll(old_string, new_string) : text.replace(old_string, new_string)
-    const dirtyErr = checkDirtyEditors(abs)
-    if (dirtyErr) return `Error: ${dirtyErr}`
     await writeFile(abs, result, "utf8")
     return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path}`
   },

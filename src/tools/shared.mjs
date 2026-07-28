@@ -7,14 +7,27 @@ import * as vscode from "vscode"
 
 export const BASH_TIMEOUT_MS = 120000
 
-/** Check if a file is open in an editor with unsaved changes */
-export function checkDirtyEditors(absPath) {
+/** Get the open TextDocument for a path, or null if not open */
+export function getOpenDoc(absPath) {
   try {
-    for (const doc of vscode.workspace.textDocuments) {
-      if (doc.isDirty && doc.uri.fsPath === absPath) return `File has unsaved changes in the editor: ${absPath}. Save or discard before allowing automated edits.`
-    }
-  } catch { /* vscode not available (test env) */ }
-  return null
+    return vscode.workspace.textDocuments.find((d) => d.uri.fsPath === absPath) || null
+  } catch { return null }
+}
+
+/** Apply a full text replacement to an open document via WorkspaceEdit */
+export async function applyEditorEdit(doc, fullText) {
+  const edit = new vscode.WorkspaceEdit()
+  const range = new vscode.Range(0, 0, doc.lineCount, 0)
+  edit.replace(doc.uri, range, fullText)
+  await vscode.workspace.applyEdit(edit)
+}
+
+/** Apply a range replacement to an open document via WorkspaceEdit */
+export async function applyEditorRangeEdit(doc, startLine, startCol, endLine, endCol, newText) {
+  const edit = new vscode.WorkspaceEdit()
+  const range = new vscode.Range(startLine, startCol, endLine, endCol)
+  edit.replace(doc.uri, range, newText)
+  await vscode.workspace.applyEdit(edit)
 }
 
 /** Resolve a path relative to cwd or absolute */
