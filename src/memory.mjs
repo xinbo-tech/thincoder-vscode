@@ -136,6 +136,35 @@ export const memoryPutTool = {
   },
 }
 
+/**
+ * Search memory entries. Returns [{ id, type, title, content, tags, score }] sorted by relevance.
+ * Used by both the memory_search tool and automatic context injection.
+ */
+export function search(cwd, query, { limit = 5 } = {}) {
+  const dir = memoryDir(cwd)
+  if (!existsSync(dir)) return []
+
+  const entries = readAllEntries(dir)
+  if (entries.length === 0) return []
+
+  const keywords = tokenizeQuery(query)
+  if (keywords.length === 0) {
+    const raw = query.toLowerCase().split(/[\s,.;:()\[\]{}"'`!@#$%^&*+=|\\<>?/~]+/).filter(w => w.length > 1)
+    if (raw.length === 0) {
+      entries.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+      return entries.slice(0, limit)
+    }
+    keywords.push(...raw.slice(0, 6))
+  }
+
+  const scored = entries.map(e => ({
+    ...e,
+    score: scoreEntry(e, keywords),
+  }))
+  scored.sort((a, b) => b.score - a.score)
+  return scored.filter(s => s.score > 0).slice(0, limit)
+}
+
 export const memorySearchTool = {
   name: "memory_search",
   description:
@@ -153,35 +182,9 @@ export const memorySearchTool = {
     required: ["query"],
   },
   execute({ query, limit }, ctx) {
-    const dir = memoryDir(ctx.cwd)
-    if (!existsSync(dir)) return "No memories found. The memory directory is empty."
-
-    const entries = readAllEntries(dir)
-    if (entries.length === 0) return "No memories found."
-
-    const keywords = tokenizeQuery(query)
-    if (keywords.length === 0) {
-      // Fallback: use raw query words minus stopwords filter is too aggressive
-      const raw = query.toLowerCase().split(/[\s,.;:()\[\]{}"'`!@#$%^&*+=|\\<>?/~]+/).filter(w => w.length > 1)
-      if (raw.length === 0) {
-        // Just return the most recent entries
-        entries.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
-        const top = entries.slice(0, limit || 5)
-        return formatResults(top)
-      }
-      keywords.push(...raw.slice(0, 6))
-    }
-
-    const scored = entries.map(e => ({
-      entry: e,
-      score: scoreEntry(e, keywords),
-    }))
-    scored.sort((a, b) => b.score - a.score)
-    const top = scored.filter(s => s.score > 0).slice(0, limit || 5)
-
-    if (top.length === 0) return "No matching memories found."
-
-    return formatResults(top.map(s => s.entry))
+    const results = search(ctx.cwd, query, { limit })
+    if (results.length === 0) return "No matching memories found."
+    return formatResults(results)
   },
 }
 
