@@ -580,28 +580,66 @@ export const deleteTool = {
 export const checkpointTool = {
   name: "checkpoint",
   description:
-    "Git-based workspace snapshots. action=create|list|rewind.\n" +
+    "List, create, and restore workspace snapshots (checkpoints). Git repositories only.\n" +
     "Parameters:\n" +
-    "- action (required): create a snapshot / list snapshots / rewind to a snapshot",
+    "- action (required): \"list\" | \"create\" | \"rewind\" | \"cat\"\n" +
+    "- id: snapshot id (required for rewind and cat; optional for list — when given, shows the file tree inside that snapshot)\n" +
+    "- path: for rewind — restore only this single file; for cat — read this file's content from the snapshot",
   parameters: {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["create", "list"], description: "create or list" },
+      action: { type: "string", enum: ["list", "create", "rewind", "cat"], description: "list snapshots / create one now / restore a snapshot by id / read a file's content from a snapshot" },
+      id: { type: "string", description: "Snapshot id (required for rewind and cat; optional for list — shows file tree of that snapshot)" },
+      path: { type: "string", description: "Restore only this single file from the checkpoint (tracked or untracked). Other files are left untouched." },
     },
     required: ["action"],
   },
-  async execute({ action }, ctx) {
+  async execute({ action, id, path }, ctx) {
     try {
       if (action === "list") {
+        if (id) {
+          const files = execSync(`git stash show --name-only "stash@{${id}}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 5000 })
+          return files || "(empty snapshot)"
+        }
         const result = execSync("git stash list", { cwd: ctx.cwd, encoding: "utf8", timeout: 5000 })
         return result || "(no snapshots)"
       }
       if (action === "create") {
-        const msg = `thincoder-vscode-${Date.now()}`
-        execSync(`git stash push -m "${msg}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
+        const msg = `thincoder-${Date.now()}`
+        execSync(`git stash push --include-untracked -m "${msg}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
         return `Snapshot created: ${msg}`
       }
-      return `Error: unknown action "${action}". Use "create" or "list".`
+      if (action === "rewind") {
+        if (id === undefined) return "Error: rewind requires an id parameter (snapshot index from list)"
+        // Auto-snapshot current state first so rewind is reversible
+        const autoMsg = `thincoder-auto-${Date.now()}`
+        execSync(`git stash push --include-untracked -m "${autoMsg}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
+        if (path) {
+          // Restore a single file from the snapshot
+          const stashRef = `stash@{${id}}`
+          const files = execSync(`git stash show --name-only "${stashRef}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 5000 }).trim()
+          if (!files) return `Snapshot ${id} has no tracked file changes.`
+          const match = files.split("\n").find((f) => f === path || f.endsWith(`/${path}`))
+          if (!match) return `File "${path}" not found in snapshot ${id}. Available: ${files}`
+          execSync(`git checkout "${stashRef}" -- "${match}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
+          return `Restored "${match}" from snapshot ${id}. Auto-snapshot created: ${autoMsg}`
+        }
+        // Full restore: apply the target stash
+        execSync(`git stash apply "stash@{${id}}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
+        return `Restored snapshot ${id}. Auto-snapshot created before rewind: ${autoMsg}`
+      }
+      if (action === "cat") {
+        if (id === undefined) return "Error: cat requires an id parameter"
+        if (!path) return "Error: cat requires a path parameter"
+        // Read a file from the snapshot
+        const stashRef = `stash@{${id}}`
+        const files = execSync(`git stash show --name-only "${stashRef}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 5000 }).trim()
+        if (!files) return `Snapshot ${id} has no tracked file changes.`
+        const match = files.split("\n").find((f) => f === path || f.endsWith(`/${path}`))
+        if (!match) return `File "${path}" not found in snapshot ${id}.`
+        return execSync(`git show "${stashRef}:${match}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000, maxBuffer: 1024*1024 })
+      }
+      return `Error: unknown action "${action}". Use "list", "create", "rewind", or "cat".`
     } catch (e) {
       return `checkpoint error: ${e.stderr || e.message}`
     }

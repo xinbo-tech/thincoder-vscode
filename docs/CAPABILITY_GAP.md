@@ -37,7 +37,7 @@
 
 | # | 能力 | CLI 位置 | 说明 | 状态 |
 |---|------|---------|------|------|
-| 12 | Checkpoint rewind | `src/git/checkpoint.mjs` | 快照回滚。需要 git stash 操作，批量操作前保护未提交的代码。待移植。 | ⬜ |
+| 12 | Checkpoint rewind | `src/git/checkpoint.mjs` | git stash 快照 + `rewind`（自动创建恢复前快照，可逆）+ `cat`（查看快照内文件）+ 单文件恢复。 | ✅ |
 
 ---
 
