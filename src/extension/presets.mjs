@@ -15,6 +15,8 @@ export const PRESETS = {
   openai:   { baseURL: "https://api.openai.com/v1", model: "gpt-4o", label: "OpenAI" },
   claude:   { baseURL: "https://api.anthropic.com/v1", model: "claude-sonnet-4", label: "Claude (Anthropic)", format: "anthropic", maxTokens: 8192 },
   gemini:   { baseURL: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-flash", label: "Gemini (Google)", format: "google", maxTokens: 8192 },
+  grok:     { baseURL: "https://api.x.ai/v1", model: "grok-4", label: "Grok (xAI)", maxTokens: 65536 },
+  mistral:  { baseURL: "https://api.mistral.ai/v1", model: "mistral-large", label: "Mistral", maxTokens: 32768 },
 }
 
 const KEY_PREFIX = "thincoder.provider."

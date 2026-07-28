@@ -616,6 +616,7 @@ const PROVIDER_LABELS = {
   deepseek: "DeepSeek", kimi: "Kimi (Moonshot)", glm: "GLM (Zhipu)",
   qwen: "Qwen (Alibaba)", minimax: "MiniMax", openai: "OpenAI",
   claude: "Claude (Anthropic)", gemini: "Gemini (Google)",
+  grok: "Grok (xAI)", mistral: "Mistral",
 }
 
 let _providerStatus = {}

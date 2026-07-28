@@ -25,14 +25,14 @@
 
 | | ThinCoder | Copilot | Cline | Cursor | Continue |
 |---|---|---|---|---|---|
-| 内置供应商数 | **9** + custom | 1（GitHub） | 5+ | 5+ | 10+ |
+| 内置供应商数 | **11** + custom | 1（GitHub） | 5+ | 5+ | 10+ |
 | 自定义 provider | ✅ | ❌ | ✅ | ✅ | ✅ |
 | 思考模式（reasoning） | ✅ 分级 | ❌ | ✅ | ✅ | ✅ |
 | 多模态（图片） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | API key 系统密钥链存储 | ✅ SecretStorage | N/A | ✅ 明文 | ✅ | ✅ |
 | 非 OpenAI 协议原生支持 | ✅ Claude + Gemini | ❌ | ❌ | ❌ | ❌ |
 
-**★ ★ ★ ★ 从中国大陆到国际化完整覆盖。** 9 供应商（DeepSeek/Kimi/GLM/Qwen/MiniMax/OpenAI/Claude/Gemini + custom），业内唯一同时原生支持 OpenAI、Anthropic、Google 三种 API 协议的工具。
+**★ ★ ★ ★ ★ 11 供应商，从国内到海外完整覆盖。** 唯一同时原生支持 OpenAI、Anthropic、Google 三种 API 协议 + 代码特化模型（DeepSeek-Coder、Codestral）的工具。
 
 ---
 
