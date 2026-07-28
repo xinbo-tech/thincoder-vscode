@@ -318,6 +318,50 @@ function injectContext(history, cwd, userInput) {
       }
     }
   } catch { /* */ }
+
+  // Relevant document chunks (auto-inject design docs + conventions matching user query)
+  try {
+    if (userInput) {
+      const docChunks = findDocChunks(cwd, userInput, 4)
+      if (docChunks.length > 0) {
+        history.push({
+          role: "user",
+          content:
+            "[Relevant documentation:\n" +
+            docChunks.map((d) => `- ${d.path}: <untrusted_doc_chunk>${escapeXml(d.content.slice(0, 800))}</untrusted_doc_chunk>`).join("\n") +
+            "]",
+        })
+      }
+    }
+  } catch { /* */ }
+}
+
+function findDocChunks(cwd, query, limit) {
+  const keywords = query.split(/[\s,.;:()\[\]{}"'`!@#$%^&*+=|\\<>?/~]+/).filter(w => w.length > 1).slice(0, 6)
+  if (keywords.length === 0) return []
+  const pattern = new RegExp(keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i")
+
+  const results = []
+  const docFiles = ["AGENTS.md", "README.md", "CLAUDE.md", "CONTRIBUTING.md",
+    "docs/design/ARCHITECTURE.md", "docs/design/PHILOSOPHY.md", "docs/design/REQUIREMENTS.md",
+    "docs/CAPABILITY_GAP.md"]
+
+  for (const rel of docFiles) {
+    const abs = join(cwd, rel)
+    if (!existsSync(abs)) continue
+    try {
+      const text = readFileSync(abs, "utf8")
+      // Split by ## headings
+      const chunks = text.split(/\n(?=#{1,3}\s)/)
+      for (const chunk of chunks) {
+        if (results.length >= limit) return results
+        if (pattern.test(chunk)) {
+          results.push({ path: rel, content: chunk.trim().slice(0, 800) })
+        }
+      }
+    } catch { /* skip */ }
+  }
+  return results
 }
 
 function escapeXml(s) {
