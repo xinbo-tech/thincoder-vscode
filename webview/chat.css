@@ -1,27 +1,43 @@
 /* ─── Messages ──────────────────────────────── */
 
+.msg-label {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.message.user .msg-label { color: var(--vscode-textLink-foreground, var(--accent)); }
+.message.assistant .msg-label { color: var(--vscode-textLink-foreground, var(--accent)); }
+
 .message {
   margin-top: 14px;
   max-width: 90%;
 }
 
 .message.user {
-  margin-left: auto;
+  margin-left: 0;
+  max-width: 100%;
 }
 
 .message.user .bubble {
-  background: var(--msg-user-bg);
-  color: var(--btn-fg);
-  border-radius: 10px 10px 4px 10px;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+  word-break: break-word;
 }
 
 .message.assistant {
-  margin-right: auto;
+  max-width: 100%;
+  margin-right: 0;
 }
 
 .message.assistant .bubble {
-  background: var(--msg-assistant-bg);
-  border-radius: 10px 10px 10px 4px;
+  background: transparent;
+  border-radius: 0;
+  padding: 8px 0;
 }
 
 .bubble {
@@ -216,7 +232,7 @@
   user-select: none;
   color: var(--fg);
   opacity: 0.5;
-  font-size: 11px;
+  font-size: 12px;
   font-style: italic;
 }
 

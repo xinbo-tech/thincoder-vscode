@@ -62,10 +62,12 @@ function tokenizeQuery(query) {
     "she", "him", "her", "they", "them", "their", "what", "which",
     "who", "whom", "when", "where", "why", "how",
   ])
-  return query
-    .toLowerCase()
-    .split(/[\s,.;:()\[\]{}"'`!@#$%^&*+=|\\<>?/~]+/)
-    .filter(w => w.length > 1 && !stopwords.has(w))
+  return [...new Set(
+    query
+      .toLowerCase()
+      .split(/[\s,.;:()\[\]{}"'`!@#$%^&*+=|\\<>?/~]+/)
+      .filter(w => w.length > 1 && !stopwords.has(w))
+  )]
 }
 
 /**
@@ -87,6 +89,9 @@ function scoreEntry(entry, keywords) {
 }
 
 // ─── tools ────────────────────────────────────────────────────
+
+// exported for testing
+export { tokenizeQuery, scoreEntry }
 
 export const memoryPutTool = {
   name: "memory_put",

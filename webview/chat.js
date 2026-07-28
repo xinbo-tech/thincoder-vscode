@@ -48,49 +48,66 @@ ctx.inputEl.addEventListener("input", () => {
   ctx.inputEl.style.height = Math.min(ctx.inputEl.scrollHeight, 150) + "px"
 })
 
-// Image paste
+// Image paste — only intercept images, let text through to textarea
 document.addEventListener("paste", (e) => {
   const items = e.clipboardData?.items
   if (!items) return
+  let hasImage = false
   for (const item of items) {
     if (item.type.startsWith("image/")) {
-      e.preventDefault()
-      const file = item.getAsFile()
-      const reader = new FileReader()
-      reader.onload = () => {
-        ctx._pastedImages.push(reader.result)
-        // Show a small indicator
-        const hint = document.createElement("span")
-        hint.className = "paste-hint"
-        hint.textContent = ` 📎 image ${ctx._pastedImages.length}`
-        hint.style.cssText = "font-size:10px;opacity:0.5;margin-left:4px"
-        ctx.inputEl.parentElement.appendChild(hint)
-        setTimeout(() => hint.remove(), 2000)
-      }
-      reader.readAsDataURL(file)
+      if (!hasImage) { e.preventDefault(); hasImage = true }
+      readImageFile(item.getAsFile())
     }
   }
 })
 
+// File upload button
+const fileInput = document.getElementById("file-input")
+document.getElementById("attach-btn").addEventListener("click", () => fileInput.click())
+fileInput.addEventListener("change", () => {
+  for (const file of fileInput.files) {
+    if (file.type.startsWith("image/")) readImageFile(file)
+  }
+  fileInput.value = "" // reset so same file can be re-selected
+})
+
+function readImageFile(file) {
+  const reader = new FileReader()
+  reader.onload = () => {
+    ctx._pastedImages.push(reader.result)
+    renderPasteBar()
+  }
+  reader.readAsDataURL(file)
+}
+
+function renderPasteBar() {
+  const bar = document.getElementById("paste-bar")
+  const badge = document.getElementById("paste-badge")
+  if (ctx._pastedImages.length === 0) {
+    bar.style.display = "none"
+    return
+  }
+  badge.innerHTML = ctx._pastedImages.map((_, i) =>
+    `<span class="paste-chip">📎 image ${i + 1}<span class="paste-chip-del" data-idx="${i}">✕</span></span>`
+  ).join(" ")
+  bar.style.display = "flex"
+  // Wire delete buttons
+  badge.querySelectorAll(".paste-chip-del").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation()
+      const idx = parseInt(btn.dataset.idx)
+      ctx._pastedImages.splice(idx, 1)
+      renderPasteBar()
+    })
+  })
+}
+
 // ─── Session bar ───────────────────────────────
 
+// Auto-clean panel entries (done subagents after 3s, tool panels after 10s)
+setInterval(autoCleanPanels, 2000)
+
 // ─── Permission bar ──────────────────────────────
-
-const permBar = document.getElementById("permission-bar")
-const permText = document.getElementById("permission-text")
-
-document.getElementById("permission-approve").addEventListener("click", () => {
-  vscode.postMessage({ type: "permissionResponse", approved: true })
-  permBar.style.display = "none"
-})
-document.getElementById("permission-deny").addEventListener("click", () => {
-  vscode.postMessage({ type: "permissionResponse", approved: false })
-  permBar.style.display = "none"
-})
-document.getElementById("permission-approve-all").addEventListener("click", () => {
-  vscode.postMessage({ type: "permissionResponse", approved: "approveAll" })
-  permBar.style.display = "none"
-})
 
 
 
@@ -123,9 +140,7 @@ function buildSessionDropdown() {
     })
     item.querySelector(".session-delete").addEventListener("click", (e) => {
       e.stopPropagation()
-      if (confirm(`Delete session "${s.title}"?`)) {
-        vscode.postMessage({ type: "deleteSession", name: s.name })
-      }
+      vscode.postMessage({ type: "deleteSession", name: s.name })
     })
     ctx.sessionDropdown.appendChild(item)
   }
@@ -149,9 +164,199 @@ function fmtDate(ts) {
     " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
 }
 
+function fmtK(n) { return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n) }
+
+function renderTaskPanel() {
+  const panel = document.getElementById("task-panel")
+  if (!_taskProgress || !_taskProgress.items || _taskProgress.items.length === 0) {
+    panel.style.display = "none"
+    return
+  }
+  const allDone = _taskProgress.items.every((t) => t.status === "done")
+  if (allDone && panel.style.display !== "block") {
+    // Don't show — badge already says ✓N/N, no need for the panel
+    return
+  }
+  const icons = { pending: "○", in_progress: "◉", done: "✓" }
+  panel.innerHTML = _taskProgress.items.map((t) =>
+    `<div class="task-item">
+      <span class="task-mark">${icons[t.status] || " "}</span>
+      <span class="task-title">${escHtml(t.title)}</span>
+      <span class="task-status">${t.status === "in_progress" ? "in progress" : t.status}</span>
+    </div>`
+  ).join("")
+  panel.style.display = "block"
+}
+
+function renderSubagentPanel() {
+  const panel = document.getElementById("subagent-panel")
+  const subs = Object.values(_subagentMap)
+  if (subs.length === 0) { panel.style.display = "none"; return }
+  panel.innerHTML = subs.map((s) => {
+    const statusCls = s.status === "started" ? "started" : s.status === "done" ? "done" : "error"
+    const statusText = s.status === "started" ? "running" : s.status
+    return `<div class="sub-item">
+      <span class="sub-role">${escHtml(s.role)}</span>
+      <span class="sub-tool">${s.tool ? escHtml(s.tool) : ""}</span>
+      <span class="sub-status ${statusCls}">${statusText}</span>
+    </div>`
+  }).join("")
+  panel.style.display = "block"
+}
+
+function renderGoalPanel() {
+  const panel = document.getElementById("goal-panel")
+  if (!_goalInfo) { panel.style.display = "none"; return }
+  const g = _goalInfo
+  const statusCls = g.status === "active" ? "active" : g.status === "done" ? "done" : "cancelled"
+  panel.innerHTML = `<div class="goal-section">
+    <div class="goal-label">Objective</div>
+    <div class="goal-value">${escHtml(g.objective || "")}</div>
+  </div>
+  <div class="goal-section">
+    <div class="goal-label">Criteria</div>
+    <div class="goal-value">${escHtml(g.criteria || "—")}</div>
+  </div>
+  <span class="goal-status-badge ${statusCls}">${g.status}</span>`
+  panel.style.display = "block"
+}
+
+function renderToolPanels() {
+  const panel = document.getElementById("tool-panels")
+  const entries = Object.entries(_toolPanels)
+  if (entries.length === 0) { panel.style.display = "none"; return }
+  panel.innerHTML = entries.map(([name, data]) => {
+    const age = data.started ? Math.round((Date.now() - data.started) / 1000) + "s ago" : ""
+    return `<div class="tool-panel-item">
+      <div class="tool-panel-header">
+        <span class="tool-panel-name">${escHtml(name)}</span>
+        <span class="tool-panel-age">${age}</span>
+      </div>
+      <pre class="tool-panel-body">${escHtml(data.text.slice(-4000))}</pre>
+    </div>`
+  }).join("")
+  panel.style.display = "block"
+}
+
+function clearPanels() {
+  _subagentMap = {}
+  _goalInfo = null
+  _toolPanels = {}
+  _taskProgress = null
+  _taskStatus = null
+  document.getElementById("subagent-panel").style.display = "none"
+  document.getElementById("goal-panel").style.display = "none"
+  document.getElementById("tool-panels").style.display = "none"
+  document.getElementById("task-panel").style.display = "none"
+}
+
+function autoCleanPanels() {
+  // Remove done subagents after 3s
+  const now = Date.now()
+  for (const [id, s] of Object.entries(_subagentMap)) {
+    if (s.status === "done" && s.doneAt && now - s.doneAt > 3000) delete _subagentMap[id]
+    if (s.status === "error" && s.doneAt && now - s.doneAt > 5000) delete _subagentMap[id]
+  }
+  // Remove tool panels older than 10s
+  for (const [name, d] of Object.entries(_toolPanels)) {
+    if (d.started && now - d.started > 10000) delete _toolPanels[name]
+  }
+  renderSubagentPanel()
+  renderToolPanels()
+}
+
+function renderStatusBar(m) {
+  // m is optional — if not passed, uses cached state from _lastUsage
+  const u = m ? (m.usage || {}) : (_lastUsage || {})
+  const prompt = u.prompt_tokens ?? 0
+  const completion = u.completion_tokens ?? 0
+  const cacheHit = u.prompt_cache_hit_tokens ?? 0
+  const cacheMiss = u.prompt_cache_miss_tokens ?? 0
+  const cachePct = cacheHit + cacheMiss > 0 ? Math.round((cacheHit / (cacheHit + cacheMiss)) * 100) : null
+  let parts = []
+  if (_planActive) parts.push(`<span style="color:var(--accent)">PLAN</span>`)
+  if (_goalInfo?.status === "active") parts.push(`<span id="goal-badge" style="cursor:pointer">🎯</span>`)
+  parts.push(`↑${fmtK(prompt)} ↓${fmtK(completion)}`)
+  if (cachePct !== null) parts.push(`hit${cachePct}%`)
+  if (m && m.ctxPct != null) parts.push(`ctx ${m.ctxPct}%`)
+  else if (_lastCtxPct != null) parts.push(`ctx ${_lastCtxPct}%`)
+  const subCount = Object.keys(_subagentMap).length
+  if (subCount > 0) parts.push(`<span id="sub-badge" style="cursor:pointer">sub:${subCount}</span>`)
+  if (_taskStatus) parts.push(`<span id="task-badge" style="cursor:pointer">${_taskStatus}</span>`)
+  document.getElementById("status-line").innerHTML = parts.join(` <span class="status-sep">|</span> `)
+  // Wire click handlers for all three badges
+  const wire = (id, panelId) => {
+    const el = document.getElementById(id)
+    if (el) el.addEventListener("click", (e) => {
+      e.stopPropagation()
+      const p = document.getElementById(panelId)
+      p.style.display = p.style.display === "none" ? "block" : "none"
+    })
+  }
+  wire("task-badge", "task-panel")
+  wire("sub-badge", "subagent-panel")
+  wire("goal-badge", "goal-panel")
+}
+
 // ─── Toolbar buttons ───────────────────────────
 
 document.getElementById("settings-btn").addEventListener("click", openSettings)
+
+let _autoApprove = false
+let _taskStatus = null
+let _taskProgress = null
+let _lastUsage = null
+let _lastCtxPct = null
+let _planActive = false
+let _subagentMap = {}
+let _goalInfo = null
+let _toolPanels = {}
+const autoBtn = document.getElementById("auto-btn")
+autoBtn.addEventListener("click", () => {
+  if (!_autoApprove) {
+    // Show inline confirmation instead of blocked confirm()
+    showAutoConfirm()
+    return
+  }
+  // Turning OFF — no confirmation needed
+  _autoApprove = false
+  autoBtn.classList.remove("active", "warning")
+  autoBtn.textContent = "AUTO"
+  vscode.postMessage({ type: "setAutoApprove", value: false })
+})
+
+function showAutoConfirm() {
+  const existing = document.querySelector(".auto-confirm")
+  if (existing) existing.remove()
+
+  const backdrop = document.createElement("div")
+  backdrop.className = "auto-backdrop"
+  backdrop.addEventListener("click", () => {
+    backdrop.remove()
+    document.querySelector(".auto-confirm")?.remove()
+  })
+
+  const popover = document.createElement("div")
+  popover.className = "auto-confirm"
+  popover.innerHTML = `<div class="auto-confirm-text">AUTO mode executes ALL tool calls — including file writes and shell commands — without asking for approval.</div>
+    <div class="auto-confirm-actions">
+      <button class="auto-confirm-yes">⚠ Enable AUTO</button>
+      <button class="auto-confirm-no">Cancel</button>
+    </div>`
+
+  document.body.appendChild(backdrop)
+  document.body.appendChild(popover)
+
+  const close = () => { popover.remove(); backdrop.remove() }
+  popover.querySelector(".auto-confirm-yes").addEventListener("click", () => {
+    close()
+    _autoApprove = true
+    autoBtn.classList.add("active", "warning")
+    autoBtn.textContent = "⚠ AUTO"
+    vscode.postMessage({ type: "setAutoApprove", value: true })
+  })
+  popover.querySelector(".auto-confirm-no").addEventListener("click", close)
+}
 ctx.modelBtn.addEventListener("click", () => toggleDropdown(ctx.dropdown, () => buildModelDropdown()))
 ctx.reasoningBtn.addEventListener("click", () => toggleDropdown(ctx.reasoningDropdown, () => buildReasoningDropdown()))
 
@@ -278,7 +483,86 @@ function buildSettings() {
     <div class="key-field"><label>Base URL</label><input id="s-custom-url" placeholder="https://api.example.com/v1" value="${escHtml(custom?.baseURL || "")}"></div>
     <div class="key-field"><label>Model</label><input id="s-custom-model" placeholder="model-name" value="${escHtml(custom?.model || "")}"></div>`
 
+  // MCP section
+  html += `<div class="settings-sep"></div>
+    <h4 class="settings-section-title">MCP Servers</h4>
+    <div id="mcp-list"></div>
+    <button id="mcp-add-btn" class="key-btn" style="margin-top:6px">+ Add Server</button>
+    <div id="mcp-form" style="display:none;margin-top:8px">
+      <div class="key-field"><label>Name</label><input id="mcp-name" placeholder="my-server"></div>
+      <div class="key-field"><label>Type</label><select id="mcp-type"><option value="stdio">Command (stdio)</option><option value="http">HTTP</option><option value="ws">WebSocket</option></select></div>
+      <div id="mcp-stdio-fields">
+        <div class="key-field"><label>Command</label><input id="mcp-command" placeholder="npx"></div>
+        <div class="key-field"><label>Args (comma-separated)</label><input id="mcp-args" placeholder="-y,@modelcontextprotocol/server-filesystem,/path"></div>
+      </div>
+      <div id="mcp-http-fields" style="display:none">
+        <div class="key-field"><label>URL</label><input id="mcp-url" placeholder="https://example.com/mcp"></div>
+        <div class="key-field"><label>Headers (JSON)</label><input id="mcp-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
+      </div>
+      <div id="mcp-ws-fields" style="display:none">
+        <div class="key-field"><label>WebSocket URL</label><input id="mcp-ws-url" placeholder="wss://example.com/mcp"></div>
+        <div class="key-field"><label>Headers (JSON)</label><input id="mcp-ws-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
+      </div>
+      <button id="mcp-save-btn" class="key-btn">Save</button>
+      <button id="mcp-cancel-btn" class="key-btn">Cancel</button>
+    </div>`
+
   body.innerHTML = html
+
+  // Bind MCP type toggle
+  document.getElementById("mcp-type").addEventListener("change", (e) => {
+    document.getElementById("mcp-stdio-fields").style.display = e.target.value === "stdio" ? "" : "none"
+    document.getElementById("mcp-http-fields").style.display = e.target.value === "http" ? "" : "none"
+    document.getElementById("mcp-ws-fields").style.display = e.target.value === "ws" ? "" : "none"
+  })
+
+  // Bind MCP add
+  document.getElementById("mcp-add-btn").addEventListener("click", () => {
+    document.getElementById("mcp-form").style.display = "block"
+    document.getElementById("mcp-name").value = ""
+    document.getElementById("mcp-command").value = ""
+    document.getElementById("mcp-args").value = ""
+    document.getElementById("mcp-url").value = ""
+    document.getElementById("mcp-headers").value = ""
+    document.getElementById("mcp-ws-url").value = ""
+    document.getElementById("mcp-ws-headers").value = ""
+    document.getElementById("mcp-type").value = "stdio"
+    document.getElementById("mcp-stdio-fields").style.display = ""
+    document.getElementById("mcp-http-fields").style.display = "none"
+    document.getElementById("mcp-ws-fields").style.display = "none"
+  })
+
+  // Bind MCP save
+  document.getElementById("mcp-save-btn").addEventListener("click", () => {
+    const name = document.getElementById("mcp-name").value.trim()
+    if (!name) return
+    const type = document.getElementById("mcp-type").value
+    const config = {}
+    if (type === "stdio") {
+      config.command = document.getElementById("mcp-command").value.trim()
+      const argsStr = document.getElementById("mcp-args").value.trim()
+      config.args = argsStr ? argsStr.split(",").map((s) => s.trim()) : []
+    } else if (type === "ws") {
+      config.wsUrl = document.getElementById("mcp-ws-url").value.trim()
+      try { config.headers = JSON.parse(document.getElementById("mcp-ws-headers").value || "{}") } catch { config.headers = {} }
+    } else {
+      config.url = document.getElementById("mcp-url").value.trim()
+      try { config.headers = JSON.parse(document.getElementById("mcp-headers").value || "{}") } catch { config.headers = {} }
+    }
+    vscode.postMessage({ type: "saveMcpServer", name, config })
+    document.getElementById("mcp-form").style.display = "none"
+  })
+
+  // Bind MCP cancel
+  document.getElementById("mcp-cancel-btn").addEventListener("click", () => {
+    document.getElementById("mcp-form").style.display = "none"
+  })
+
+  // Render MCP server list
+  renderMcpList()
+
+  // Request MCP status
+  vscode.postMessage({ type: "getMcpStatus" })
 }
 
 // Expose to inline onclick handlers
@@ -321,6 +605,38 @@ document.getElementById("settings-body").addEventListener("change", () => {
   }
 })
 
+// ─── MCP settings ──────────────────────────────
+
+window._mcpServers = {}
+
+function renderMcpList() {
+  const list = document.getElementById("mcp-list")
+  if (!list) return
+  const servers = window._mcpServers
+  const names = Object.keys(servers)
+  if (names.length === 0) {
+    list.innerHTML = `<div style="font-size:12px;opacity:0.5;padding:4px 0">No MCP servers configured</div>`
+    return
+  }
+  list.innerHTML = names.map((n) => {
+    const s = servers[n]
+    const type = s.command ? "stdio" : (s.wsUrl ? "ws" : "http")
+    const detail = type === "stdio" ? `${s.command} ${(s.args||[]).join(" ")}` : (s.wsUrl || s.url)
+    return `<div class="key-row" style="font-size:12px">
+      <span class="key-label">${escHtml(n)}</span>
+      <span style="opacity:0.5;flex:1;margin:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(detail)}</span>
+      <span style="font-size:10px;opacity:0.4;margin-right:8px">${type}</span>
+      <button class="key-btn del-key mcp-del-btn" data-name="${escHtml(n)}">✕</button>
+    </div>`
+  }).join("")
+  list.querySelectorAll(".mcp-del-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const name = btn.dataset.name
+      vscode.postMessage({ type: "deleteMcpServer", name })
+    })
+  })
+}
+
 // ─── Message handling ──────────────────────────
 
 window.addEventListener("message", (e) => {
@@ -332,13 +648,22 @@ window.addEventListener("message", (e) => {
     case "reasoning":        onReasoning(m.text); break
     case "toolCall":         addTool(ctx, m.name, m.args); break
     case "toolResult":       finishTool(ctx, m.name, m.text); break
-    case "loading":          setLoading(ctx, m.loading); break
+    case "loading": {
+      if (m.loading) {
+        document.getElementById("status-line").innerHTML = _planActive
+          ? `<span style="color:var(--accent)">PLAN</span> <span class="status-sep">|</span> Thinking…`
+          : "Thinking…"
+      }
+      setLoading(ctx, m.loading)
+      break
+    }
     case "complete":         finish(); break
     case "aborted":          finish(true); break
     case "error":            showError(ctx, m.text); finish(); break
     case "clearMessages":
       ctx.messagesEl.replaceChildren()
       ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""
+      document.getElementById("status-line").innerHTML = ""
       showWelcome(ctx)
       break
     case "sessions":
@@ -378,9 +703,81 @@ window.addEventListener("message", (e) => {
       showBanner(ctx, m.keyOk ? "ThinCoder" : "⚠ Not configured — click ⚙ to set API keys", m.keyOk)
       if (document.getElementById("settings-panel").style.display !== "none") buildSettings()
       break
-    case "permissionRequest":
-      permText.textContent = `Allow \`${m.tool}\`? ${m.args ? m.args.slice(0, 100) + (m.args.length > 100 ? "…" : "") : ""}`
-      permBar.style.display = "flex"
+    case "autoApprove":
+      _autoApprove = m.value
+      autoBtn.classList.toggle("active", _autoApprove)
+      autoBtn.classList.toggle("warning", _autoApprove)
+      autoBtn.textContent = _autoApprove ? "⚠ AUTO" : "AUTO"
+      break
+    case "permissionRequest": {
+      const el = document.createElement("div")
+      el.className = "permission-prompt"
+      const argsPreview = m.args ? m.args.slice(0, 150) + (m.args.length > 150 ? "…" : "") : ""
+      el.innerHTML = `<div class="permission-prompt-text">ThinCoder wants to run <code>${escHtml(m.tool)}</code>${argsPreview ? `<br><span style="font-size:11px;opacity:0.7">${escHtml(argsPreview)}</span>` : ""}</div>
+        <div class="permission-prompt-actions">
+          <button class="perm-btn approve">✓ Approve</button>
+          <button class="perm-btn approve-all">✓✓ Approve All</button>
+          <button class="perm-btn deny">✕ Deny</button>
+        </div>`
+      el.querySelector(".approve").addEventListener("click", () => {
+        el.remove()
+        vscode.postMessage({ type: "permissionResponse", approved: true })
+      })
+      el.querySelector(".approve-all").addEventListener("click", () => {
+        el.remove()
+        vscode.postMessage({ type: "permissionResponse", approved: "approveAll" })
+      })
+      el.querySelector(".deny").addEventListener("click", () => {
+        el.remove()
+        vscode.postMessage({ type: "permissionResponse", approved: false })
+      })
+      document.getElementById("messages").appendChild(el)
+      el.scrollIntoView({ behavior: "smooth" })
+      break
+    }
+    case "mcpStatus":
+      window._mcpServers = m.servers || {}
+      renderMcpList()
+      break
+    case "usage": {
+      _lastUsage = m.usage || {}
+      if (m.ctxPct != null) _lastCtxPct = m.ctxPct
+      renderStatusBar(m)
+      break
+    }
+    case "taskProgress": {
+      const p = m.pending ?? 0, ip = m.inProgress ?? 0, d = m.done ?? 0
+      _taskProgress = m
+      if (m.total > 0) _taskStatus = `✓${d}/${m.total}${ip > 0 ? ` ·${ip}` : ""}${p > 0 ? ` …${p}` : ""}`
+      else _taskStatus = null
+      renderTaskPanel()
+      renderStatusBar()
+      break
+    }
+    case "planMode":
+      _planActive = m.active
+      renderStatusBar()
+      break
+    case "subagent":
+      if (m.status === "started") {
+        _subagentMap[m.id] = { role: m.role, status: "started", startedAt: m.startedAt || Date.now(), tool: null }
+      } else {
+        const s = _subagentMap[m.id]
+        if (s) { s.status = m.status; s.doneAt = Date.now(); if (m.error) s.error = m.error }
+      }
+      renderSubagentPanel()
+      renderStatusBar()
+      break
+    case "goal":
+      _goalInfo = m
+      renderGoalPanel()
+      renderStatusBar()
+      break
+    case "toolPanel":
+      _toolPanels[m.name] = { text: m.text, started: Date.now() }
+      renderToolPanels()
+      // Auto-clean after 10s
+      setTimeout(() => { if (_toolPanels[m.name]) { delete _toolPanels[m.name]; renderToolPanels() } }, 10000)
       break
   }
 })
@@ -396,9 +793,11 @@ function send() {
   ctx.inputEl.style.height = "auto"
   setLoading(ctx, true)
   ctx.hadToolResult = false
+  clearPanels()
   addUser(ctx, text)
   const images = ctx._pastedImages
   ctx._pastedImages = []
+  renderPasteBar()
   vscode.postMessage({ type: "userMessage", text, model: ctx.selectedModel, reasoning: ctx.selectedReasoning, provider: ctx.selectedProvider, images })
 }
 
@@ -423,6 +822,8 @@ function onReasoning(text) {
   }
   ctx.currentReasoningRaw += text
   ctx.currentReasoning.textContent = ctx.currentReasoningRaw
+  // Scroll reasoning content itself (it has max-height + overflow)
+  ctx.currentReasoning.scrollTop = ctx.currentReasoning.scrollHeight
   scrollDown(ctx)
 }
 

@@ -19,10 +19,12 @@ export const planTool = {
   async execute({ action }, ctx) {
     if (action === "enter") {
       ctx.agent._planMode = true
+      ctx.callbacks?.onPlanMode?.(true)
       return "Plan mode activated — read-only tools only. Exit plan mode before making changes."
     }
     if (action === "exit") {
       ctx.agent._planMode = false
+      ctx.callbacks?.onPlanMode?.(false)
       return "Plan mode deactivated — all tools available."
     }
     return `Error: unknown action "${action}". Use "enter" or "exit".`

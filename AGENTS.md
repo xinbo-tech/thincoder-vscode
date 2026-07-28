@@ -24,6 +24,7 @@ Design docs in `docs/design/`. Independent product — no dependency on thincode
 - **Model specs**: self-contained `src/config.mjs` with MODEL_SPECS table. No runtime dependency on any external product.
 - **Error surfacing**: `isNonRetryableError` in provider.mjs detects billing/param errors across all provider formats and fails immediately (no retry). `readSSE` detects non-SSE responses (API errors returned as JSON) and extracts error messages.
 - **Provider-specific thinking values**: not all providers accept `thinking.type: "enabled"`. MiniMax requires `"adaptive"`. The `thinkEnabledValue` spec field maps the generic `"enabled"` UI toggle to the correct provider value.
+- **Discussion → docs**: design decisions, architecture choices, and naming conventions discussed in chat don't exist until they're in a doc file. After any design discussion, write the conclusions to the relevant document immediately — not "later". Chat context compresses; docs persist.
 
 ## Key Modules
 

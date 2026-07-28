@@ -16,7 +16,14 @@ const TOKEN_ESTIMATE_CHARS = 3.5
 function estimateTokens(messages) {
   let chars = 0
   for (const m of messages) {
-    if (typeof m.content === "string") chars += m.content.length
+    if (typeof m.content === "string") {
+      chars += m.content.length
+    } else if (Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (part.type === "text") chars += part.text.length
+        else if (part.type === "image_url") chars += 2000 // ~85 tokens × 3.5 chars/token, round up for safety
+      }
+    }
     if (m.tool_calls) chars += JSON.stringify(m.tool_calls).length
   }
   return Math.ceil(chars / TOKEN_ESTIMATE_CHARS)
@@ -157,7 +164,7 @@ function collectSourceFiles(root) {
 
 function parseImports(content) {
   const deps = []
-  const re = /(?:import\s.*?\sfrom\s+["']([^"']+)["']|require\s*\(\s*["']([^"']+)["']\s*\)|import\s*\(\s*["']([^"']+)["']\s*\))/g
+  const re = /(?:import\s.*?\sfrom\s+["']([^"']+)["']|require\s*\(\s*["']([^"']+)["']\s*\)|import\s*\(\s*["']([^"']+)["']\s*\))/gs
   let m
   while ((m = re.exec(content))) {
     const p = m[1] || m[2] || m[3]
@@ -179,6 +186,9 @@ function parseExports(content) {
 }
 
 // ── Context injection (top-level agent startup) ───────────
+
+// exported for testing
+export { parseImports }
 
 /**
  * Inject git status, directory listing, project instructions, repo outline,

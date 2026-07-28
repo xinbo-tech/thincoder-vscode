@@ -2,6 +2,8 @@
  * subagent.mjs — subagentTool
  * Spawn a sub-agent for an independent subtask.
  */
+let _subIdCounter = 0
+
 export const subagentTool = {
   name: "subagent",
   description:
@@ -22,6 +24,9 @@ export const subagentTool = {
     const provider = ctx.agent._provider
     const cwd = ctx.cwd
     const maxTurns = role === "explore" ? 30 : 50
+    const subId = ++_subIdCounter
+
+    ctx.callbacks?.onSubagent?.({ id: subId, role, status: "started", startedAt: Date.now() })
 
     // Subagent runs without UI callbacks — results are captured
     let output = ""
@@ -33,8 +38,10 @@ export const subagentTool = {
         onComplete: () => {},
       }, ctx.signal, true, { depth: 1, role, maxTurns })
 
+      ctx.callbacks?.onSubagent?.({ id: subId, role, status: "done" })
       return `Subagent (${role}) completed:\n${result || output.slice(0, 4000)}`
     } catch (e) {
+      ctx.callbacks?.onSubagent?.({ id: subId, role, status: "error", error: e.message })
       return `Subagent (${role}) error: ${e.message}\nPartial output: ${output.slice(0, 2000)}`
     }
   },

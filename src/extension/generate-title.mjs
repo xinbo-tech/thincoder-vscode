@@ -12,7 +12,12 @@ export async function generateTitle(loadIndex, saveIndex, loadMessages, pushSess
   if (!entry || entry.title) return
   const msgs = loadMessages(activeIx)
   const firstUser = msgs.find((m) => m.type === "user")
-  if (!firstUser || firstUser.content.length < 10) return
+  if (!firstUser) return
+  // Extract text even from multimodal content (array of parts)
+  const userText = Array.isArray(firstUser.content)
+    ? firstUser.content.find(p => p.type === "text")?.text || ""
+    : firstUser.content
+  if (typeof userText !== "string" || userText.length < 10) return
 
   let provName
   for (const n of providerNames()) { if (await getKey(n)) { provName = n; break } }
@@ -25,7 +30,7 @@ export async function generateTitle(loadIndex, saveIndex, loadMessages, pushSess
       model: prov.model,
       messages: [
         { role: "system", content: "Generate a concise title (max 40 chars, no quotes) for this conversation. Reply ONLY with the title." },
-        { role: "user", content: firstUser.content.slice(0, 200) },
+        { role: "user", content: userText.slice(0, 200) },
       ],
       max_tokens: 30, stream: false,
     })

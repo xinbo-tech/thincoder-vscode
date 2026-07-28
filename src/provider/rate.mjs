@@ -28,6 +28,15 @@ function rateKey(provider) {
 
 export function estimateText(s) {
   if (!s) return 0
+  if (Array.isArray(s)) {
+    // multimodal content array — count text parts + estimate image tokens
+    let tokens = 0
+    for (const part of s) {
+      if (part.type === "text") tokens += Math.ceil(part.text.replace(/\s+/g, " ").length / 4)
+      else if (part.type === "image_url") tokens += 85 // ~85 tokens per image
+    }
+    return tokens
+  }
   return Math.ceil(s.replace(/\s+/g, " ").length / 4)
 }
 

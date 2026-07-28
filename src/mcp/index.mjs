@@ -16,6 +16,7 @@
 import { withTimeout, INIT_TIMEOUT_MS } from "./utils.mjs"
 import { stdioTransport } from "./stdio.mjs"
 import { httpTransport } from "./http.mjs"
+import { wsTransport } from "./ws.mjs"
 
 // ─── MCP handshake ───────────────────────────────────────────────
 
@@ -49,13 +50,15 @@ let _serverSeq = 0
  * @returns {Promise<{ id: string, serverName: string, tools: Array<{name:string, description:string, inputSchema:object}> }>}
  */
 export async function mcpConnect(config) {
-  if (!config || (!config.command && !config.url))
-    throw new Error("MCP server config needs either 'command' (stdio) or 'url' (http)")
+  if (!config || (!config.command && !config.url && !config.wsUrl))
+    throw new Error("MCP server config needs 'command' (stdio), 'url' (http), or 'wsUrl' (ws)")
 
   let transport
-  const serverName = config.name || (config.command ? config.command : config.url)
+  const serverName = config.name || (config.command ? config.command : (config.wsUrl || config.url))
 
-  if (config.url) {
+  if (config.wsUrl) {
+    transport = wsTransport(config.wsUrl, config.headers ?? {})
+  } else if (config.url) {
     transport = httpTransport(config.url, config.headers ?? {})
     try {
       await transport.openSSE()

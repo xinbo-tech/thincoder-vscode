@@ -11,9 +11,8 @@ import { fileURLToPath } from "node:url"
 import { closeAllMcp } from "./src/mcp.mjs"
 import { providerNames, getKey, buildProvider, initProviderKeyStore, loadProviderKeyCache } from "./src/extension/presets.mjs"
 import { loadMessages, saveMessages, deleteMessages, loadIndex, saveIndex, sessionsKey, loadModelPrefs, saveModelPrefs } from "./src/extension/session-io.mjs"
-import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus } from "./src/extension/settings.mjs"
+import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer } from "./src/extension/settings.mjs"
 import { generateTitle } from "./src/extension/generate-title.mjs"
-import { savePastedImages } from "./src/extension/image-handler.mjs"
 import { injectEditorContext } from "./src/extension/editor-context.mjs"
 import { specForModel } from "./src/specs.mjs"
 
@@ -63,7 +62,7 @@ class ChatPanel {
     this._extensionUri = context.extensionUri
     this._panel = null
     this._abortController = null
-    this._permissionResolve = null
+    this._permissionQueue = [] // [{resolve, toolName}] — supports concurrent permission requests
     // Session messages stored as files under storageUri; workspaceState only holds index
     this._msgDir = join(context.storageUri.fsPath, "sessions")
     this._panelFlagPath = join(context.storageUri.fsPath, ".panel-open")
@@ -91,6 +90,7 @@ class ChatPanel {
     if (!ix.sessions[ix.active]) {
       ix.active = Object.keys(ix.sessions)[0] || "Session 1"
       if (!ix.sessions[ix.active]) ix.sessions[ix.active] = { title: "", count: 0, updated: "" }
+      this._saveIndex(ix) // persist the correction
     }
     return this._loadMessages(ix.active)
   }
@@ -190,6 +190,10 @@ class ChatPanel {
         case "deleteProviderKey": this._deleteProviderKey(msg.name); break
         case "getProviderStatus": this._pushStatus(); break
         case "saveCustomProvider": this._saveCustomProvider(msg.config); break
+        case "saveMcpServer":    this._saveMcpServer(msg.name, msg.config); break
+        case "deleteMcpServer":  this._deleteMcpServer(msg.name); break
+        case "getMcpStatus":     this._pushMcpStatus(); break
+        case "setAutoApprove":   this._setAutoApprove(msg.value); break
         case "newSession":     this._newSession(); break
         case "switchSession":  this._switchSession(msg.name); break
         case "deleteSession":  this._deleteSession(msg.name); break
@@ -200,9 +204,14 @@ class ChatPanel {
           break
         case "selectReasoning": this._saveModelPrefs({ ...this._loadModelPrefs(), reasoning: msg.reasoning }); break
         case "permissionResponse":
-          if (this._permissionResolve) {
-            this._permissionResolve(msg.approved === true || msg.approved === "approveAll")
-            this._permissionResolve = null
+          if (this._permissionQueue.length > 0) {
+            const pending = this._permissionQueue.shift()
+            pending.resolve(msg.approved === true || msg.approved === "approveAll")
+            // If "approveAll", resolve all remaining
+            if (msg.approved === "approveAll") {
+              for (const p of this._permissionQueue) p.resolve(true)
+              this._permissionQueue = []
+            }
           }
           break
       }
@@ -232,10 +241,22 @@ class ChatPanel {
   async _saveProviderKey(name, key) { await saveProviderKey(name, key); this._pushStatus() }
   async _saveCustomProvider(config) { await saveCustomProvider(config); this._pushStatus() }
   async _deleteProviderKey(name) { await deleteProviderKey(name); this._pushStatus() }
-  _pushStatus() { pushStatus(this._panel) }
+  async _saveMcpServer(name, config) { await saveMcpServer(name, config); this._pushMcpStatus() }
+  async _deleteMcpServer(name) { await deleteMcpServer(name); this._pushMcpStatus() }
+  async _setAutoApprove(value) {
+    const c = vscode.workspace.getConfiguration("thincoder")
+    await c.update("autoApprove", value, vscode.ConfigurationTarget.Global)
+  }
+  _pushMcpStatus() { this._panel?.webview.postMessage({ type: "mcpStatus", servers: getMcpServers() }) }
+  _pushStatus() {
+    pushStatus(this._panel)
+    const c = vscode.workspace.getConfiguration("thincoder")
+    this._panel?.webview.postMessage({ type: "autoApprove", value: c.get("autoApprove", false) })
+  }
   async _status() {
     await loadProviderKeyCache() // ensure cache is fresh (extension may already be running)
     await fullStatus(this._panel, this._context.workspaceState, () => this._pushSessions())
+    this._pushMcpStatus()
     const prefs = this._loadModelPrefs()
     if (prefs.model && this._statusBar) this._statusBar.text = `$(hubot) ${prefs.model}`
   }
@@ -263,9 +284,6 @@ class ChatPanel {
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
     const ts = new Date().toISOString()
 
-    // Handle pasted images
-    text = savePastedImages(images, cwd, text)
-
     // Inject active editor context
     text = injectEditorContext(text, cwd)
 
@@ -283,8 +301,23 @@ class ChatPanel {
       await runAgent(p, cwd, text, {
         onToken: (t) => { out += t; this._panel?.webview.postMessage({ type: "token", text: t }) },
         onReasoning: (r) => { this._panel?.webview.postMessage({ type: "reasoning", text: r }) },
+        onTaskUpdate: (tasks) => {
+          const done = tasks.filter((t) => t.status === "done").length
+          const inProgress = tasks.filter((t) => t.status === "in_progress").length
+          const pending = tasks.filter((t) => t.status === "pending").length
+          this._panel?.webview.postMessage({ type: "taskProgress", done, inProgress, pending, total: tasks.length, items: tasks })
+        },
+        onPlanMode: (active) => this._panel?.webview.postMessage({ type: "planMode", active }),
+        onSubagent: (info) => this._panel?.webview.postMessage({ type: "subagent", ...info }),
+        onGoal: (info) => this._panel?.webview.postMessage({ type: "goal", ...info }),
+        onUsage: (u) => {
+          const ctxWin = specForModel(p.model)?.contextWindow ?? 128000
+          const ctxPct = u.prompt_tokens ? Math.round((u.prompt_tokens / ctxWin) * 100) : null
+          this._panel?.webview.postMessage({ type: "usage", usage: u, ctxPct })
+        },
         onToolCall: (n, a) => this._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2) }),
         onToolResult: (n, r) => this._panel?.webview.postMessage({ type: "toolResult", name: n, text: r.slice(0, 500) }),
+        onToolPanel: (name, text) => this._panel?.webview.postMessage({ type: "toolPanel", name, text }),
         onComplete: () => {
           if (out) {
             history.push({ type: "assistant", content: out, timestamp: new Date().toISOString() })
@@ -296,10 +329,10 @@ class ChatPanel {
         },
         onPermissionRequired: c.get("autoApprove", false) ? undefined : (toolName, args) =>
           new Promise((resolve) => {
-            this._permissionResolve = resolve
+            this._permissionQueue.push({ resolve, toolName })
             this._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2) })
           }),
-      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}) })
+      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}), images })
     } catch (e) {
       if (e.name === "AbortError") { this._panel.webview.postMessage({ type: "aborted" }) }
       else {

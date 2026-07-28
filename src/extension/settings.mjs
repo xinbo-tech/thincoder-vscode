@@ -54,6 +54,25 @@ export async function deleteProviderKey(name) {
   }
 }
 
+export function getMcpServers() {
+  const c = vscode.workspace.getConfiguration("thincoder")
+  return c.get("mcpServers", {}) || {}
+}
+
+export async function saveMcpServer(name, config) {
+  const c = vscode.workspace.getConfiguration("thincoder")
+  const servers = { ...(c.get("mcpServers") || {}) }
+  servers[name] = config
+  await c.update("mcpServers", servers, vscode.ConfigurationTarget.Global)
+}
+
+export async function deleteMcpServer(name) {
+  const c = vscode.workspace.getConfiguration("thincoder")
+  const servers = { ...(c.get("mcpServers") || {}) }
+  delete servers[name]
+  await c.update("mcpServers", servers, vscode.ConfigurationTarget.Global)
+}
+
 export function pushStatus(panel) {
   const s = providerStatus()
   const anyKey = Object.values(s.providers).some((p) => p.configured)

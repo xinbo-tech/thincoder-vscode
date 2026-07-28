@@ -44,14 +44,14 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool]
     : [taskTool, recentChangesTool] // subagents get fewer meta-tools
 
-  const tools = [...builtinTools, readImageTool, ...agentTools]
+  const tools = [...builtinTools, ...(specForModel(provider.model).multimodal ? [readImageTool] : []), ...agentTools]
   const toolSchemas = tools.map(toOpenAISchema)
   const toolByName = new Map(tools.map((t) => [t.name, t]))
 
   const agent = {
     _tasks: [], _touchedFiles: [], _planMode: false,
     _goal: null, _provider: provider,
-    _verifiedThisRun: false, _verifyPassed: undefined, _verifyRetries: 0,
+    _verifiedThisRun: false,
   }
   const platform = { win32: "Windows", darwin: "macOS", linux: "Linux" }[os.platform()] ?? os.platform()
 
@@ -91,6 +91,23 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
 
   history.push({ role: "user", content: input })
 
+  // Inject pasted images as multimodal content on the first user message
+  if (depth === 0 && Array.isArray(opts.images) && opts.images.length > 0) {
+    const spec = specForModel(provider.model)
+    if (!spec.multimodal) {
+      throw new Error("This model does not support pasted images. Switch to a vision-capable model (Kimi K3, Qwen, GPT-4o, or MiniMax M3).")
+    } else {
+      const lastMsg = history[history.length - 1]
+      const parts = [{ type: "text", text: input }]
+      for (const img of opts.images) {
+        if (typeof img === "string" && img.startsWith("data:image/")) {
+          parts.push({ type: "image_url", image_url: { url: img } })
+        }
+      }
+      if (parts.length > 1) lastMsg.content = parts
+    }
+  }
+
   // ─── Main loop ─────────────────────────────
   const maxTurns = overrideTurns || DEFAULT_MAX_TURNS
   const recentSigs = []
@@ -126,6 +143,8 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       onWait: callbacks.onWait,
       signal,
     })
+
+    if (response.usage && depth === 0) callbacks.onUsage?.(response.usage)
 
     // ─── No tool calls ──────────────────────
     if (response.toolCalls.length === 0) {
@@ -268,20 +287,16 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
             const mutators = ["write", "edit", "insert_after", "apply_patch", "delete"]
             if (mutators.includes(toolName) && args.path) {
               agent._touchedFiles.push(args.path)
-              agent._mutatedThisRun = true
             }
             if (toolName === "verify") {
               agent._verifiedThisRun = true
-              const passed = !content.includes("✗") && !content.includes("FAILED")
-              agent._verifyPassed = passed
-              if (!passed) agent._verifyRetries++
             }
           }
         }
 
-        // Stall detection
+        // Stall detection (stable serialization)
         try {
-          const sig = `${toolName}:${meta ? JSON.stringify(meta.args) : ""}`
+          const sig = `${toolName}:${meta?.args ? JSON.stringify(meta.args, Object.keys(meta.args).sort()) : ""}`
           recentSigs.push(sig)
           if (recentSigs.length > STALL_WINDOW) recentSigs.shift()
           if (recentSigs.length >= STALL_THRESHOLD) {

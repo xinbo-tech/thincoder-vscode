@@ -34,7 +34,7 @@ export function showBanner(ctx, text, keyOk) {
 export function addUser(ctx, text) {
   const el = document.createElement("div")
   el.className = "message user"
-  el.innerHTML = `<div class="bubble">${mdInline(esc(text))}</div>`
+  el.innerHTML = `<div class="msg-label">❯ You:</div><div class="bubble">${mdInline(esc(text))}</div>`
   ctx.messagesEl.appendChild(el)
   scrollDown(ctx)
 }
@@ -42,7 +42,7 @@ export function addUser(ctx, text) {
 export function addAssistantHistory(ctx, text) {
   const el = document.createElement("div")
   el.className = "message assistant"
-  el.innerHTML = `<div class="bubble content">${md(text)}</div>`
+  el.innerHTML = `<div class="msg-label">❯ ThinCoder:</div><div class="bubble content">${md(text)}</div>`
   ctx.messagesEl.appendChild(el)
   scrollDown(ctx)
 }
@@ -53,6 +53,7 @@ export function newBlock(ctx) {
   ctx.currentRaw = ""
   ctx.currentBlock = document.createElement("div")
   ctx.currentBlock.className = "message assistant"
+  ctx.currentBlock.innerHTML = `<div class="msg-label">❯ ThinCoder:</div>`
   ctx.messagesEl.appendChild(ctx.currentBlock)
 }
 

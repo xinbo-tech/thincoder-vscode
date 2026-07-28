@@ -28,6 +28,7 @@ export const taskTool = {
   },
   async execute({ items }, ctx) {
     ctx.agent._tasks = items
+    ctx.callbacks?.onTaskUpdate?.(items)
     const done = items.filter((t) => t.status === "done").length
     const total = items.length
     const inProgress = items.find((t) => t.status === "in_progress")

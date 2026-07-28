@@ -27,7 +27,7 @@ html, body {
 
 body {
   font-family: var(--vscode-editor-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
-  font-size: var(--vscode-editor-font-size, 13px);
+  font-size: var(--vscode-editor-font-size, 14px);
   color: var(--fg);
   background: var(--bg);
 }
@@ -66,13 +66,13 @@ body {
 }
 
 .provider-banner.ok {
-  background: rgba(78, 201, 176, 0.1);
-  color: #4ec9b0;
+  background: var(--vscode-textBlockQuote-background, rgba(78,201,176,0.1));
+  color: var(--vscode-charts-green, #4ec9b0);
 }
 
 .provider-banner.warn {
-  background: rgba(244, 199, 71, 0.1);
-  color: #f4c747;
+  background: var(--vscode-textBlockQuote-background, rgba(244,199,71,0.1));
+  color: var(--vscode-charts-yellow, #cca700);
 }
 
 .setup-btn {
@@ -91,39 +91,34 @@ body {
   background: rgba(255,255,255,0.1);
 }
 
-/* ─── Permission Bar ───────────────────────────── */
+/* ─── Inline Permission Prompt ──────────────────── */
 
-#permission-bar {
-  padding: 8px 12px;
-  background: rgba(244,199,71,0.1);
-  border-bottom: 1px solid rgba(244,199,71,0.3);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.permission-prompt {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--vscode-inputValidation-warningBorder, rgba(204,167,0,0.35));
+  border-radius: 8px;
+  background: var(--vscode-inputValidation-warningBackground, rgba(204,167,0,0.06));
   font-size: 12px;
-  animation: slideDown 0.15s ease;
+  line-height: 1.5;
 }
 
-#permission-text {
-  color: #f4c747;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.permission-prompt-text {
+  color: var(--vscode-inputValidation-warningForeground, #cca700);
+  margin-bottom: 8px;
+  word-break: break-word;
 }
 
-.permission-actions {
+.permission-prompt-actions {
   display: flex;
-  gap: 6px;
-  flex-shrink: 0;
+  gap: 8px;
 }
 
 .perm-btn {
-  padding: 3px 10px;
+  padding: 4px 14px;
   font-size: 11px;
-  border-radius: 12px;
+  font-weight: 600;
+  border-radius: 14px;
   cursor: pointer;
   font-family: inherit;
   border: 1px solid;
@@ -150,8 +145,3 @@ body {
   border-color: #4ec9b0;
 }
 .perm-btn.approve-all:hover { background: rgba(78,201,176,0.15); }
-
-@keyframes slideDown {
-  from { max-height: 0; opacity: 0; }
-  to { max-height: 50px; opacity: 1; }
-}

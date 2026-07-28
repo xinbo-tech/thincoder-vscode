@@ -79,6 +79,7 @@
     }
   },
   "scripts": {
-    "package": "npx @vscode/vsce package"
+    "package": "npx @vscode/vsce package",
+    "test": "node --test test/unit.test.mjs"
   }
 }

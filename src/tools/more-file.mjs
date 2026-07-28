@@ -52,7 +52,7 @@ export const insertAfterTool = {
     lines.splice(target + 1, 0, content)
     await writeFile(abs, lines.join("\n"), "utf8")
     const doc = await vscode.workspace.openTextDocument(abs)
-    await vscode.window.showTextDocument(doc, { preview: false })
+    await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One, preserveFocus: true })
     return `Inserted after line ${target + 1} in ${path}`
   },
 }
@@ -71,15 +71,33 @@ export const applyPatchTool = {
     required: ["patch"],
   },
   async execute({ patch }, ctx) {
-    // Simple unified diff parser
-    const sections = patch.split(/^diff --git /gm).filter(Boolean)
+    // Parse sections — support both git diff format AND standard unified diff.
+    // Git diff uses "diff --git a/path b/path" headers; standard unified uses "--- a/path\n+++ b/path".
+    let sections
+    if (/^diff --git /m.test(patch)) {
+      sections = patch.split(/^diff --git /gm).filter(Boolean)
+    } else {
+      // Standard unified diff — split on "--- a/" headers (first char on line is "---")
+      sections = patch.split(/^(?=--- (?:a\/|\/dev\/null))/m).filter(Boolean)
+    }
     if (sections.length === 0) return "Error: no diff sections found"
     const results = []
 
     for (const section of sections) {
-      const headerMatch = section.match(/^a\/(.+?) b\/(.+?)$/m)
-      if (!headerMatch) continue
-      const filePath = headerMatch[2]
+      // Try git diff header first: "a/path b/path" on first line
+      let filePath
+      let headerMatch = section.match(/^a\/(.+?) b\/(.+?)$/m)
+      if (headerMatch) {
+        filePath = headerMatch[2]
+      } else {
+        // Standard unified diff: "--- a/path" line followed by "+++ b/path"
+        const stdMatch = section.match(/^--- (?:a\/|\/dev\/null\s*\n\+\+\+ b\/)(.+?)$/m)
+        if (stdMatch) filePath = stdMatch[1]
+      }
+      if (!filePath) continue
+      // /dev/null means new file — skip header-only sections
+      if (filePath === "/dev/null") continue
+
       const abs = resolvePath(filePath, ctx.cwd)
 
       // Extract hunks
@@ -126,7 +144,7 @@ export const applyPatchTool = {
       await writeFile(abs, lines.join("\n"), "utf8")
       try {
         const doc = await vscode.workspace.openTextDocument(abs)
-        await vscode.window.showTextDocument(doc, { preview: false })
+        await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One, preserveFocus: true })
       } catch { /* ok if file doesn't open */ }
       results.push(`Patched ${filePath}: ${applied} hunk(s) applied`)
     }
@@ -211,9 +229,10 @@ export const deleteTool = {
   async execute({ path, force }, ctx) {
     const abs = resolvePath(path, ctx.cwd)
     const { unlink } = await import("node:fs/promises")
-    // Check if git-tracked
+    // Check if git-tracked — normalize to forward slashes for git (Windows compat)
+    const gitPath = abs.replace(/\\/g, "/")
     try {
-      execSync(`git ls-files --error-unmatch "${abs}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 5000, stdio: "pipe" })
+      execSync(`git ls-files --error-unmatch "${gitPath}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 5000, stdio: "pipe" })
       if (!force) return `Error: ${path} is git-tracked. Set force=true to delete anyway.`
     } catch { /* not git-tracked or not a git repo */ }
     await unlink(abs)

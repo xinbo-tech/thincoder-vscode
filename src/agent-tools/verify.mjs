@@ -48,7 +48,6 @@ export const verifyTool = {
     }
 
     ctx.agent._verifiedThisRun = true
-    ctx.agent._verifyPassed = !results.some((r) => r.startsWith("✗")) && !results.some((r) => r.includes("FAILED"))
     return results.join("\n")
   },
 }

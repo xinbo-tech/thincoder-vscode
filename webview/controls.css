@@ -1,3 +1,19 @@
+/* ─── Status Line ─────────────────────────────── */
+
+#status-line {
+  display: flex;
+  gap: 12px;
+  padding: 2px 14px 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+  font-family: var(--vscode-editor-font-family, monospace);
+  min-height: 16px;
+}
+
+#status-line:empty { display: none; }
+
+.status-sep { opacity: 0.35; }
+
 /* ─── Input Area ─────────────────────────────── */
 
 #toolbar {
@@ -21,6 +37,37 @@
   border-color: var(--accent);
 }
 
+#paste-bar {
+  display: flex;
+  align-items: center;
+  padding: 2px 14px 4px;
+  font-size: 11px;
+  opacity: 0.7;
+  gap: 6px;
+}
+
+.paste-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 10px;
+  background: rgba(128,128,128,0.12);
+  font-size: 12px;
+}
+
+.paste-chip-del {
+  cursor: pointer;
+  opacity: 0.4;
+  font-size: 10px;
+  padding: 0 2px;
+}
+
+.paste-chip-del:hover {
+  opacity: 1;
+  color: var(--error-fg);
+}
+
 #input {
   flex: 1;
   background: transparent;
@@ -42,45 +89,79 @@
 }
 
 #send-btn, #abort-btn {
-  width: 30px;
-  height: 30px;
+  height: 32px;
   border: none;
-  border-radius: 50%;
+  border-radius: 16px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 12px;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s, transform 0.1s;
+  transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
 }
 
 #send-btn {
   background: var(--accent);
   color: #fff;
+  padding: 0 16px;
+  box-shadow: 0 0 0 0 rgba(0,122,204,0.4);
 }
+
+#send-btn::after { content: "Send"; }
 
 #send-btn:hover {
   background: var(--btn-hover);
-  transform: scale(1.05);
+  box-shadow: 0 0 12px 2px rgba(0,122,204,0.35);
+}
+
+#send-btn:active {
+  transform: scale(0.95);
 }
 
 #send-btn:disabled {
-  background: rgba(128,128,128,0.3);
-  color: rgba(255,255,255,0.4);
+  background: rgba(128,128,128,0.25);
+  color: rgba(255,255,255,0.35);
   cursor: not-allowed;
+  box-shadow: none;
   transform: none;
 }
 
 #abort-btn {
-  background: transparent;
+  background: rgba(244,71,71,0.15);
   color: var(--error-fg);
-  font-size: 18px;
-  line-height: 1;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 16px;
+  border-radius: 16px;
 }
 
 #abort-btn:hover {
-  background: rgba(244,71,71,0.15);
+  background: rgba(244,71,71,0.28);
+}
+
+#attach-btn {
+  height: 32px;
+  border: none;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0.4;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+#attach-btn:hover {
+  opacity: 0.8;
+  background: rgba(128,128,128,0.1);
 }
 
 /* ─── Controls Row ───────────────────────────── */
@@ -95,7 +176,7 @@
 
 .ctrl-btn {
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: 12px;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: transparent;
@@ -121,6 +202,18 @@
   border-color: var(--accent);
   color: var(--accent);
   background: rgba(0,122,204,0.08);
+}
+
+.ctrl-btn.warning {
+  border-color: #f44;
+  color: #f44;
+  background: rgba(244,71,71,0.1);
+  animation: auto-pulse 2s ease-in-out infinite;
+}
+
+@keyframes auto-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(244,71,71,0.3); }
+  50% { box-shadow: 0 0 8px 2px rgba(244,71,71,0.15); }
 }
 
 #model-btn {
@@ -172,4 +265,259 @@
 .dropdown-item .check {
   color: var(--accent);
   font-size: 11px;
+}
+
+/* ─── Panels area ────────────────────────────── */
+
+#panels {
+  border-top: 1px solid var(--border);
+}
+
+#panels:empty { display: none; }
+
+#subagent-panel, #goal-panel, #tool-panels, #task-panel {
+  padding: 4px 14px 6px;
+  font-size: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ─── Task items ────────────────────────────── */
+
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  opacity: 0.7;
+}
+
+.task-item:first-child { padding-top: 6px; }
+.task-item:last-child { padding-bottom: 4px; }
+
+.task-mark {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
+.task-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-status {
+  color: var(--fg);
+  opacity: 0.55;
+  font-size: 10px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ─── Subagent items ────────────────────────── */
+
+.sub-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  opacity: 0.7;
+}
+
+.sub-role {
+  color: var(--accent);
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 40px;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.sub-tool {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.5;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.sub-status {
+  font-size: 10px;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.sub-status.started { color: var(--accent); }
+.sub-status.done { opacity: 0.4; }
+.sub-status.error { color: var(--error-fg); }
+
+/* ─── Goal items ─────────────────────────────── */
+
+.goal-section {
+  padding: 2px 0;
+}
+
+.goal-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.5;
+  margin-bottom: 2px;
+}
+
+.goal-value {
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.goal-status-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.goal-status-badge.active {
+  background: rgba(0,122,204,0.15);
+  color: var(--accent);
+}
+
+.goal-status-badge.done {
+  background: rgba(64,192,87,0.15);
+  color: #40c057;
+}
+
+.goal-status-badge.cancelled {
+  background: rgba(128,128,128,0.15);
+  color: var(--fg);
+  opacity: 0.5;
+}
+
+/* ─── Tool output panels ─────────────────────── */
+
+.tool-panel-item {
+  border-bottom: 1px solid rgba(128,128,128,0.1);
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+}
+
+.tool-panel-item:last-child { border-bottom: none; margin-bottom: 0; }
+
+.tool-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.tool-panel-name {
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+}
+
+.tool-panel-age {
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+.tool-panel-body {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  opacity: 0.7;
+  line-height: 1.45;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* ─── AUTO confirm popover ───────────────────── */
+
+.auto-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 999;
+  animation: backdrop-in 0.15s ease-out;
+}
+
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.auto-confirm {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg, #1e1e1e);
+  border: 1px solid #f44;
+  border-radius: 8px;
+  padding: 12px 14px;
+  max-width: 320px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 12px rgba(244,71,71,0.15);
+  animation: confirm-in 0.15s ease-out;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes confirm-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.auto-confirm-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg);
+  margin-bottom: 10px;
+}
+
+.auto-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.auto-confirm-yes, .auto-confirm-no {
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.auto-confirm-yes {
+  background: rgba(244,71,71,0.85);
+  color: #fff;
+}
+
+.auto-confirm-yes:hover {
+  background: #f44;
+}
+
+.auto-confirm-no {
+  background: rgba(128,128,128,0.15);
+  color: var(--fg);
+}
+
+.auto-confirm-no:hover {
+  background: rgba(128,128,128,0.25);
 }

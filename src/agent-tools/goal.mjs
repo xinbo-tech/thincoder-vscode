@@ -23,18 +23,22 @@ export const goalTool = {
   async execute({ action, objective, criteria }, ctx) {
     if (action === "set") {
       if (!objective) return "Error: objective is required for action=set"
-      ctx.agent._goal = { objective, criteria: criteria || "manual verification", status: "active", turnsUsed: 0 }
-      return `Goal set: ${objective}\nCriteria: ${criteria || "manual verification"}`
+      const c = criteria || "manual verification"
+      ctx.agent._goal = { objective, criteria: c, status: "active", turnsUsed: 0 }
+      ctx.callbacks?.onGoal?.({ status: "active", objective, criteria: c })
+      return `Goal set: ${objective}\nCriteria: ${c}`
     }
     if (action === "complete") {
       if (!ctx.agent._goal) return "Error: no active goal"
       ctx.agent._goal.status = "completed"
+      ctx.callbacks?.onGoal?.({ status: "done", objective: ctx.agent._goal.objective, criteria: ctx.agent._goal.criteria })
       return `Goal completed: ${ctx.agent._goal.objective}`
     }
     if (action === "cancel") {
       if (!ctx.agent._goal) return "Error: no active goal"
-      const obj = ctx.agent._goal.objective
+      const obj = ctx.agent._goal.objective, crit = ctx.agent._goal.criteria
       ctx.agent._goal = null
+      ctx.callbacks?.onGoal?.({ status: "cancelled", objective: obj, criteria: crit })
       return `Goal cancelled: ${obj}`
     }
     return `Error: unknown action "${action}". Use "set", "complete", or "cancel".`

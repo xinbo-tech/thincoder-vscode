@@ -58,7 +58,7 @@ export const writeTool = {
     await writeFile(abs, content, "utf8")
     // Open in editor
     const doc = await vscode.workspace.openTextDocument(abs)
-    await vscode.window.showTextDocument(doc, { preview: false })
+    await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One, preserveFocus: true })
     return `Wrote ${content.length} chars to ${path}`
   },
 }
@@ -93,7 +93,7 @@ export const editTool = {
     const result = replace_all ? text.replaceAll(old_string, new_string) : text.replace(old_string, new_string)
     await writeFile(abs, result, "utf8")
     const doc = await vscode.workspace.openTextDocument(abs)
-    await vscode.window.showTextDocument(doc, { preview: false })
+    await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One, preserveFocus: true })
     return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path}`
   },
 }
