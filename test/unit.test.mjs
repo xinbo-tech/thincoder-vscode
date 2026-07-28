@@ -480,4 +480,46 @@ describe("diff — lineDiff", () => {
   })
 })
 
+// ─── i18n — locale validation ──────────────────────────────
+
+import { initLocale, t } from "../src/i18n.mjs"
+
+describe("i18n — locale loading", () => {
+  // Verify English locale loads correctly (no-op since en is fallback)
+  it("loads en locale", () => {
+    initLocale("en")
+    assert.equal(t("welcome.heading"), "ThinCoder")
+    assert.equal(t("msg.copy"), "Copy")
+    assert.equal(t("settings.title"), "Settings")
+  })
+
+  it("falls back to en for unknown locale", () => {
+    initLocale("xx-unknown")
+    assert.equal(t("welcome.heading"), "ThinCoder")
+  })
+
+  it("supports variable interpolation", () => {
+    initLocale("en")
+    const result = t("error.failedProvider", { name: "Test" })
+    assert.ok(result.includes("Test"))
+    assert.ok(result.includes("Failed"))
+  })
+
+  it("returns key for untranslated string", () => {
+    initLocale("en")
+    assert.equal(t("nonexistent.key"), "nonexistent.key")
+  })
+
+  // Verify zh locale has same keys as en
+  it("zh locale has all en keys", () => {
+    const enPath = join(import.meta.dirname, "..", "locales", "en.json")
+    const zhPath = join(import.meta.dirname, "..", "locales", "zh.json")
+    const en = JSON.parse(readFileSync(enPath, "utf8"))
+    const zh = JSON.parse(readFileSync(zhPath, "utf8"))
+    for (const key of Object.keys(en)) {
+      assert.ok(key in zh, `zh.json missing key: ${key}`)
+    }
+  })
+})
+
 console.log("\n✓ All unit tests passed.\n")

@@ -15,6 +15,7 @@ import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey,
 import { generateTitle } from "./src/extension/generate-title.mjs"
 import { injectEditorContext } from "./src/extension/editor-context.mjs"
 import { specForModel } from "./src/specs.mjs"
+import { initLocale, t, loadLocaleStrings } from "./src/i18n.mjs"
 
 // ─── @-context file reference injection ───────────────────
 
@@ -62,17 +63,20 @@ export async function activate(context) {
   initProviderKeyStore(context.secrets)
   await loadProviderKeyCache()
 
+  // Init i18n — follows VS Code display language
+  initLocale(vscode.env.language)
+
   const chat = new ChatPanel(context)
   // Status bar
   const sb = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
-  sb.text = "$(hubot) ThinCoder"; sb.tooltip = "ThinCoder — Click to open"; sb.command = "thincoder.openChat"; sb.show()
+  sb.text = "$(hubot) ThinCoder"; sb.tooltip = "ThinCoder"; sb.command = "thincoder.openChat"; sb.show()
   context.subscriptions.push(sb)
   chat._statusBar = sb
 
   context.subscriptions.push(vscode.commands.registerCommand("thincoder.openChat", () => chat.show()))
   context.subscriptions.push(vscode.commands.registerCommand("thincoder.setup", () => { chat.show() }))
   context.subscriptions.push(vscode.commands.registerCommand("thincoder.sendMessage", async () => {
-    const input = await vscode.window.showInputBox({ prompt: "What to do?", placeHolder: "e.g. Add a README" })
+    const input = await vscode.window.showInputBox({ prompt: t("command.prompt"), placeHolder: t("command.placeholder") })
     if (input) { chat.show(); chat.sendMessage(input) }
   }))
   context.subscriptions.push(vscode.commands.registerCommand("thincoder.askSelection", async () => {
@@ -220,6 +224,9 @@ class ChatPanel {
     try { mkdirSync(this._msgDir, { recursive: true }); writeFileSync(this._panelFlagPath, "1", "utf8") } catch {}
     this._panel.webview.html = this._html()
 
+    // Send locale strings — must arrive before any UI rendering
+    this._panel.webview.postMessage({ type: "i18n", strings: loadLocaleStrings(vscode.env.language) })
+
     // Register message handler BEFORE anything that might throw
     this._panel.webview.onDidReceiveMessage((msg) => {
       switch (msg.type) {
@@ -357,9 +364,9 @@ class ChatPanel {
     if (!providerName) {
       for (const n of providerNames()) { if (await getKey(n)) { providerName = n; break } }
     }
-    if (!providerName) { this._panel.webview.postMessage({ type: "error", text: "No provider configured — click ⚙ to set API keys" }); return }
+    if (!providerName) { this._panel.webview.postMessage({ type: "error", text: t("error.provider") }); return }
     let p = await buildProvider(providerName)
-    if (!p) { this._panel.webview.postMessage({ type: "error", text: `Failed to build provider "${providerName}" — check your API key` }); return }
+    if (!p) { this._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }) }); return }
     if (modelOverride) p = { ...p, model: modelOverride }
     if (reasoning === "enabled") {
       const spec = specForModel(p.model)

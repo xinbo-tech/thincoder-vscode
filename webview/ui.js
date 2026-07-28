@@ -4,15 +4,16 @@
  */
 
 import { md, mdInline, esc } from "./md.js"
+import { t } from "./i18n.js"
 
 // ─── Welcome / Banner ──────────────────────────
 
 export function showWelcome(ctx) {
   const el = document.createElement("div")
   el.className = "welcome"
-  el.innerHTML = `<h2>ThinCoder</h2>
-    <p>Ask me to read, write, search, or explain code in this workspace.</p>
-    <p style="margin-top:8px;opacity:0.7">Type <code>@</code> for file references · <code>Enter</code> to send · <code>Shift+Enter</code> for newline</p>`
+  el.innerHTML = `<h2>${t("welcome.heading")}</h2>
+    <p>${t("welcome.text")}</p>
+    <p style="margin-top:8px;opacity:0.7">${t("welcome.shortcutsHtml")}</p>`
   ctx.messagesEl.appendChild(el)
 }
 
@@ -37,7 +38,7 @@ export function addUser(ctx, text, timestamp) {
   const el = document.createElement("div")
   el.className = "message user"
   const ts = timestamp ? fmtTime(new Date(timestamp)) : fmtTime(new Date())
-  el.innerHTML = `<div class="msg-label">❯ You: <span class="msg-time">${ts}</span></div><div class="bubble">${mdInline(esc(text))}</div>`
+  el.innerHTML = `<div class="msg-label">❯ ${t("msg.user")}: <span class="msg-time">${ts}</span></div><div class="bubble">${mdInline(esc(text))}</div>`
   ctx.messagesEl.appendChild(el)
   scrollDown(ctx)
 }
@@ -46,7 +47,7 @@ export function addAssistantHistory(ctx, text, timestamp) {
   const el = document.createElement("div")
   el.className = "message assistant"
   const ts = timestamp ? fmtTime(new Date(timestamp)) : ""
-  el.innerHTML = `<div class="msg-label">❯ ThinCoder: ${ts ? `<span class="msg-time">${ts}</span>` : ""}<button class="msg-copy-btn" title="Copy message">Copy</button></div><div class="bubble content">${md(text)}</div>`
+  el.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}: ${ts ? `<span class="msg-time">${ts}</span>` : ""}<button class="msg-copy-btn" title="${t("msg.copyTitle")}">${t("msg.copy")}</button></div><div class="bubble content">${md(text)}</div>`
   ctx.messagesEl.appendChild(el)
   scrollDown(ctx)
 }
@@ -63,7 +64,7 @@ export function newBlock(ctx) {
   ctx.currentRaw = ""
   ctx.currentBlock = document.createElement("div")
   ctx.currentBlock.className = "message assistant"
-  ctx.currentBlock.innerHTML = `<div class="msg-label">❯ ThinCoder:</div>`
+  ctx.currentBlock.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}:</div>`
   ctx.messagesEl.appendChild(ctx.currentBlock)
 }
 
@@ -80,11 +81,11 @@ export function addTool(ctx, name, args) {
     `<span class="tool-call-icon"></span>` +
     `<span class="tool-call-name">${esc(name)}</span>` +
     `<span class="tool-call-args">${esc(args.slice(0, 80))}</span>` +
-    `<span class="tool-call-status">running…</span>`
+    `<span class="tool-call-status">${t("tool.running")}</span>`
 
   const b = document.createElement("div")
   b.className = "tool-call-body"
-  b.textContent = "Running…"
+  b.textContent = t("tool.initial")
 
   h.addEventListener("click", () => {
     h.querySelector(".tool-call-icon").classList.toggle("open")
@@ -102,7 +103,7 @@ export function finishTool(ctx, name, text) {
   const t = ctx.currentTools.find((x) => x.name === name)
   if (!t) return
   t.b.textContent = text
-  t.h.querySelector(".tool-call-status").textContent = "done"
+  t.h.querySelector(".tool-call-status").textContent = t("tool.done")
   t.h.querySelector(".tool-call-status").style.color = "#4ec9b0"
   ctx.hadToolResult = true
 }
@@ -122,7 +123,7 @@ export function showError(ctx, text) {
   const err = document.createElement("div")
   err.className = "error-banner"
   err.innerHTML = `<div class="error-text">${escHtml(text)}</div>
-    <button class="error-retry-btn">Retry</button>`
+    <button class="error-retry-btn">${t("error.retry")}</button>`
   err.querySelector(".error-retry-btn").addEventListener("click", () => {
     ctx.vscode.postMessage({ type: "retry" })
   })

@@ -7,6 +7,7 @@ import {
   showWelcome, showBanner, addUser, addAssistantHistory, newBlock,
   addTool, finishTool, setLoading, showError, scrollDown,
 } from "./ui.js"
+import { setStrings, t } from "./i18n.js"
 
 const vscode = acquireVsCodeApi()
 window._vscode = vscode
@@ -231,7 +232,7 @@ function buildSessionDropdown() {
     if (s.active) item.classList.add("active")
     item.innerHTML = `<span class="session-item-title">${escHtml(s.title)}</span>
       <span class="session-item-meta">${s.count}msgs${s.updated ? " · " + fmtDate(s.updated) : ""}</span>
-      <button class="session-delete" title="Delete">✕</button>`
+      <button class="session-delete" title="${t("session.delete")}">✕</button>`
     item.addEventListener("click", (e) => {
       if (e.target.closest(".session-delete")) return
       vscode.postMessage({ type: "switchSession", name: s.name })
@@ -246,7 +247,7 @@ function buildSessionDropdown() {
   if (ctx._sessions.length === 0) {
     const empty = document.createElement("div")
     empty.className = "session-item"
-    empty.textContent = "No sessions"
+    empty.textContent = t("session.empty")
     empty.style.opacity = "0.5"
     ctx.sessionDropdown.appendChild(empty)
   }
@@ -254,7 +255,7 @@ function buildSessionDropdown() {
 
 function updateSessionTitle() {
   const active = ctx._sessions.find((s) => s.active)
-  ctx.sessionTitle.textContent = active ? active.title : "Session"
+  ctx.sessionTitle.textContent = active ? active.title : t("session.title")
 }
 
 function fmtDate(ts) {
@@ -281,7 +282,7 @@ function renderTaskPanel() {
     `<div class="task-item">
       <span class="task-mark">${icons[t.status] || " "}</span>
       <span class="task-title">${escHtml(t.title)}</span>
-      <span class="task-status">${t.status === "in_progress" ? "in progress" : t.status}</span>
+      <span class="task-status">${t.status === "in_progress" ? t("task.in_progress") : t.status}</span>
     </div>`
   ).join("")
   panel.style.display = "block"
@@ -293,7 +294,7 @@ function renderSubagentPanel() {
   if (subs.length === 0) { panel.style.display = "none"; return }
   panel.innerHTML = subs.map((s) => {
     const statusCls = s.status === "started" ? "started" : s.status === "done" ? "done" : "error"
-    const statusText = s.status === "started" ? "running" : s.status
+    const statusText = s.status === "started" ? t("sub.running") : s.status
     return `<div class="sub-item">
       <span class="sub-role">${escHtml(s.role)}</span>
       <span class="sub-tool">${s.tool ? escHtml(s.tool) : ""}</span>
@@ -309,11 +310,11 @@ function renderGoalPanel() {
   const g = _goalInfo
   const statusCls = g.status === "active" ? "active" : g.status === "done" ? "done" : "cancelled"
   panel.innerHTML = `<div class="goal-section">
-    <div class="goal-label">Objective</div>
+    <div class="goal-label">${t("goal.objective")}</div>
     <div class="goal-value">${escHtml(g.objective || "")}</div>
   </div>
   <div class="goal-section">
-    <div class="goal-label">Criteria</div>
+    <div class="goal-label">${t("goal.criteria")}</div>
     <div class="goal-value">${escHtml(g.criteria || "—")}</div>
   </div>
   <span class="goal-status-badge ${statusCls}">${g.status}</span>`
@@ -381,7 +382,7 @@ function renderStatusBar(m) {
   const cacheMiss = u.prompt_cache_miss_tokens ?? 0
   const cachePct = cacheHit + cacheMiss > 0 ? Math.round((cacheHit / (cacheHit + cacheMiss)) * 100) : null
   let parts = []
-  if (_planActive) parts.push(`<span style="color:var(--accent)">PLAN</span>`)
+  if (_planActive) parts.push(`<span style="color:var(--accent)">${t("status.plan")}</span>`)
   if (_goalInfo?.status === "active") parts.push(`<span id="goal-badge" style="cursor:pointer">🎯</span>`)
   parts.push(`↑${fmtK(prompt)} ↓${fmtK(completion)}`)
   if (cachePct !== null) parts.push(`hit${cachePct}%`)
@@ -445,10 +446,10 @@ function showAutoConfirm() {
 
   const popover = document.createElement("div")
   popover.className = "auto-confirm"
-  popover.innerHTML = `<div class="auto-confirm-text">AUTO mode executes ALL tool calls — including file writes and shell commands — without asking for approval.</div>
+  popover.innerHTML = `<div class="auto-confirm-text">${t("auto.confirmText")}</div>
     <div class="auto-confirm-actions">
-      <button class="auto-confirm-yes">⚠ Enable AUTO</button>
-      <button class="auto-confirm-no">Cancel</button>
+      <button class="auto-confirm-yes">${t("auto.enable")}</button>
+      <button class="auto-confirm-no">${t("auto.cancel")}</button>
     </div>`
 
   document.body.appendChild(backdrop)
@@ -474,7 +475,7 @@ function escHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").repl
 function buildModelDropdown() {
   ctx.dropdown.innerHTML = ""
   if (ctx._models.length === 0) {
-    ctx.dropdown.appendChild(sectionEl("Loading models…"))
+    ctx.dropdown.appendChild(sectionEl(t("model.loading")))
     return
   }
   let lastGroup = ""
@@ -493,19 +494,19 @@ function buildReasoningDropdown() {
   const model = ctx._models.find((m) => m.id === ctx.selectedModel)
   const levels = model?.reasoning || []
   if (levels.length === 0) {
-    ctx.reasoningDropdown.appendChild(sectionEl("No reasoning"))
+    ctx.reasoningDropdown.appendChild(sectionEl(t("model.noReasoning")))
     const item = document.createElement("div")
     item.className = "dropdown-item"
-    item.innerHTML = "<span>Off (not supported)</span>"
+    item.innerHTML = "<span>" + t("model.noReasoningDesc") + "</span>"
     item.style.opacity = "0.5"
     ctx.reasoningDropdown.appendChild(item)
     return
   }
-  ctx.reasoningDropdown.appendChild(sectionEl("Reasoning"))
+  ctx.reasoningDropdown.appendChild(sectionEl(t("model.reasoning")))
   for (const level of levels) {
     const item = document.createElement("div")
     item.className = "dropdown-item"
-    const label = REASONING_LABELS[level] || level
+    const label = reasoningLabel(level)
     item.innerHTML = `<span>${label}</span>${level === ctx.selectedReasoning ? '<span class="check">✓</span>' : ""}`
     item.addEventListener("click", () => {
       ctx.selectedReasoning = level
@@ -532,7 +533,7 @@ function selectModel(m) {
   const levels = m.reasoning || []
   if (levels.length > 0 && !levels.includes(ctx.selectedReasoning)) ctx.selectedReasoning = levels[0]
   const visible = levels.length > 0 ? ctx.selectedReasoning : "off"
-  ctx.reasoningBtn.textContent = visible === "none" ? "off" : (REASONING_LABELS[visible] || visible)
+  ctx.reasoningBtn.textContent = visible === "none" ? "off" : (reasoningLabel(visible))
   ctx.reasoningBtn.classList.toggle("active", levels.length > 0 && visible !== "off")
 }
 
@@ -578,40 +579,40 @@ function buildSettings() {
       <span class="key-label">${label}</span>
       <span class="key-status ${s.configured ? "ok" : ""}" id="status-${name}">${s.configured ? s.masked : "—"}</span>
       ${s.configured
-        ? `<button class="key-btn" onclick="window._editKey('${name}')">Change</button>
+        ? `<button class="key-btn" onclick="window._editKey('${name}')">${t("settings.changeKey")}</button>
            <button class="key-btn del-key" onclick="window._delKey('${name}')">✕</button>`
-        : `<button class="key-btn" onclick="window._editKey('${name}')">Add Key</button>`}
+        : `<button class="key-btn" onclick="window._editKey('${name}')">${t("settings.addKey")}</button>`}
     </div>`
   }
 
   html += `<div class="settings-sep"></div>
-    <h4 class="settings-section-title">Custom Provider</h4>
-    <div class="key-field"><label>API Key</label><input id="s-custom-key" type="password" placeholder="sk-..."></div>
-    <div class="key-field"><label>Base URL</label><input id="s-custom-url" placeholder="https://api.example.com/v1" value="${escHtml(custom?.baseURL || "")}"></div>
-    <div class="key-field"><label>Model</label><input id="s-custom-model" placeholder="model-name" value="${escHtml(custom?.model || "")}"></div>`
+    <h4 class="settings-section-title">${t("settings.customSection")}</h4>
+    <div class="key-field"><label>${t("settings.apiKey")}</label><input id="s-custom-key" type="password" placeholder="sk-..."></div>
+    <div class="key-field"><label>${t("settings.baseUrl")}</label><input id="s-custom-url" placeholder="https://api.example.com/v1" value="${escHtml(custom?.baseURL || "")}"></div>
+    <div class="key-field"><label>${t("settings.model")}</label><input id="s-custom-model" placeholder="model-name" value="${escHtml(custom?.model || "")}"></div>`
 
   // MCP section
   html += `<div class="settings-sep"></div>
-    <h4 class="settings-section-title">MCP Servers</h4>
+    <h4 class="settings-section-title">${t("settings.mcpSection")}</h4>
     <div id="mcp-list"></div>
-    <button id="mcp-add-btn" class="key-btn" style="margin-top:6px">+ Add Server</button>
+    <button id="mcp-add-btn" class="key-btn" style="margin-top:6px">${t("settings.mcpAdd")}</button>
     <div id="mcp-form" style="display:none;margin-top:8px">
-      <div class="key-field"><label>Name</label><input id="mcp-name" placeholder="my-server"></div>
-      <div class="key-field"><label>Type</label><select id="mcp-type"><option value="stdio">Command (stdio)</option><option value="http">HTTP</option><option value="ws">WebSocket</option></select></div>
+      <div class="key-field"><label>${t("settings.mcp.name")}</label><input id="mcp-name" placeholder="my-server"></div>
+      <div class="key-field"><label>${t("settings.mcp.type")}</label><select id="mcp-type"><option value="stdio">Command (stdio)</option><option value="http">HTTP</option><option value="ws">WebSocket</option></select></div>
       <div id="mcp-stdio-fields">
-        <div class="key-field"><label>Command</label><input id="mcp-command" placeholder="npx"></div>
-        <div class="key-field"><label>Args (comma-separated)</label><input id="mcp-args" placeholder="-y,@modelcontextprotocol/server-filesystem,/path"></div>
+        <div class="key-field"><label>${t("settings.mcp.command")}</label><input id="mcp-command" placeholder="npx"></div>
+        <div class="key-field"><label>${t("settings.mcp.args")}</label><input id="mcp-args" placeholder="-y,@modelcontextprotocol/server-filesystem,/path"></div>
       </div>
       <div id="mcp-http-fields" style="display:none">
-        <div class="key-field"><label>URL</label><input id="mcp-url" placeholder="https://example.com/mcp"></div>
-        <div class="key-field"><label>Headers (JSON)</label><input id="mcp-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
+        <div class="key-field"><label>${t("settings.mcp.url")}</label><input id="mcp-url" placeholder="https://example.com/mcp"></div>
+        <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
       </div>
       <div id="mcp-ws-fields" style="display:none">
-        <div class="key-field"><label>WebSocket URL</label><input id="mcp-ws-url" placeholder="wss://example.com/mcp"></div>
-        <div class="key-field"><label>Headers (JSON)</label><input id="mcp-ws-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
+        <div class="key-field"><label>${t("settings.mcp.wsUrl")}</label><input id="mcp-ws-url" placeholder="wss://example.com/mcp"></div>
+        <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-ws-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
       </div>
-      <button id="mcp-save-btn" class="key-btn">Save</button>
-      <button id="mcp-cancel-btn" class="key-btn">Cancel</button>
+      <button id="mcp-save-btn" class="key-btn">${t("settings.save")}</button>
+      <button id="mcp-cancel-btn" class="key-btn">${t("settings.cancel")}</button>
     </div>`
 
   body.innerHTML = html
@@ -678,8 +679,8 @@ window._editKey = function(name) {
   row.innerHTML = `<span class="key-label">${PROVIDER_LABELS[name]}</span>
     <input id="input-${name}" type="password" placeholder="sk-..." style="flex:1;margin:0 8px;"
       onkeydown="if(event.key==='Enter')window._saveKey('${name}')">
-    <button class="key-btn" onclick="window._saveKey('${name}')">Save</button>
-    <button class="key-btn" onclick="window._cancelEdit('${name}')">Cancel</button>`
+    <button class="key-btn" onclick="window._saveKey('${name}')">${t("settings.save")}</button>
+    <button class="key-btn" onclick="window._cancelEdit('${name}')">${t("settings.cancel")}</button>`
   setTimeout(() => document.getElementById("input-" + name)?.focus(), 50)
 }
 
@@ -722,7 +723,7 @@ function renderMcpList() {
   const servers = window._mcpServers
   const names = Object.keys(servers)
   if (names.length === 0) {
-    list.innerHTML = `<div style="font-size:12px;opacity:0.5;padding:4px 0">No MCP servers configured</div>`
+    list.innerHTML = `<div style="font-size:12px;opacity:0.5;padding:4px 0">${t("settings.mcp.noServers")}</div>`
     return
   }
   list.innerHTML = names.map((n) => {
@@ -749,6 +750,7 @@ function renderMcpList() {
 window.addEventListener("message", (e) => {
   const m = e.data
   switch (m.type) {
+    case "i18n":           setStrings(m.strings); applyI18nToDOM(); break
     case "userMessage":      addUser(ctx, m.text, m.timestamp); break
     case "assistantMessage": addAssistantHistory(ctx, m.text, m.timestamp);
       attachCopyButtons(ctx.messagesEl.lastElementChild);
@@ -761,8 +763,8 @@ window.addEventListener("message", (e) => {
     case "loading": {
       if (m.loading) {
         document.getElementById("status-line").innerHTML = _planActive
-          ? `<span style="color:var(--accent)">PLAN</span> <span class="status-sep">|</span> Thinking<span class="loading-dots"></span>`
-          : `Thinking<span class="loading-dots"></span>`
+          ? `<span style="color:var(--accent)">${t("status.plan")}</span> <span class="status-sep">|</span> ${t("status.thinking")}<span class="loading-dots"></span>`
+          : `${t("status.thinking")}<span class="loading-dots"></span>`
       }
       setLoading(ctx, m.loading)
       break
@@ -792,7 +794,7 @@ window.addEventListener("message", (e) => {
           ctx.selectedReasoning = prefs.reasoning || "off"
           const levels = match.reasoning || []
           if (levels.length > 0 && !levels.includes(ctx.selectedReasoning)) ctx.selectedReasoning = levels[0]
-          ctx.reasoningBtn.textContent = ctx.selectedReasoning === "none" ? "off" : (REASONING_LABELS[ctx.selectedReasoning] || ctx.selectedReasoning)
+          ctx.reasoningBtn.textContent = ctx.selectedReasoning === "none" ? "off" : (reasoningLabel(ctx.selectedReasoning))
           ctx.reasoningBtn.classList.toggle("active", levels.length > 0 && ctx.selectedReasoning !== "off")
           vscode.postMessage({ type: "selectModel", model: match.id, provider: match.provider })
           vscode.postMessage({ type: "selectReasoning", reasoning: ctx.selectedReasoning })
@@ -801,7 +803,7 @@ window.addEventListener("message", (e) => {
           ctx.selectedModel = m0.id; ctx.selectedProvider = m0.provider || ""; ctx.modelBtn.textContent = m0.id
           const levels = m0.reasoning || []
           ctx.selectedReasoning = levels.length > 0 ? levels[0] : "off"
-          ctx.reasoningBtn.textContent = ctx.selectedReasoning === "none" ? "off" : (REASONING_LABELS[ctx.selectedReasoning] || ctx.selectedReasoning)
+          ctx.reasoningBtn.textContent = ctx.selectedReasoning === "none" ? "off" : (reasoningLabel(ctx.selectedReasoning))
           ctx.reasoningBtn.classList.toggle("active", levels.length > 0 && ctx.selectedReasoning !== "off")
           vscode.postMessage({ type: "selectModel", model: m0.id, provider: m0.provider || "" })
           vscode.postMessage({ type: "selectReasoning", reasoning: ctx.selectedReasoning })
@@ -810,7 +812,7 @@ window.addEventListener("message", (e) => {
       break
     case "providerStatus":
       _providerStatus = m.status || {}
-      showBanner(ctx, m.keyOk ? "ThinCoder" : "⚠ Not configured — click ⚙ to set API keys", m.keyOk)
+      showBanner(ctx, m.keyOk ? t("banner.configured") : t("banner.notConfigured"), m.keyOk)
       if (document.getElementById("settings-panel").style.display !== "none") buildSettings()
       break
     case "autoApprove":
@@ -828,10 +830,14 @@ window.addEventListener("message", (e) => {
         const lines = lineDiff(m.diff.old, m.diff.new)
         diffHtml = '<div class="diff-preview"><div class="diff-header">' + escHtml(m.diff.path) + '</div>' + renderDiff(lines) + '</div>'
       }
-      let html = '<div class="permission-prompt-text">ThinCoder wants to run <code>' + escHtml(m.tool) + '</code>'
+      let html = '<div class="permission-prompt-text">' + t("perm.wantsTo") + ' <code>' + escHtml(m.tool) + '</code>'
       if (argsPreview) html += '<br><span style="font-size:11px;opacity:0.7">' + escHtml(argsPreview) + '</span>'
       html += '</div>' + diffHtml
       html += '<div class="permission-prompt-actions">'
+      html += '<button class="approve">' + t("perm.approve") + '</button>'
+      html += '<button class="approve-all">' + t("perm.approveAll") + '</button>'
+      html += '<button class="deny">' + t("perm.deny") + '</button>'
+      html += '</div>'
       el.innerHTML = html
       el.querySelector(".approve").addEventListener("click", () => {
         el.remove()
@@ -929,7 +935,7 @@ function onReasoning(text) {
     details.className = "reasoning-block"
     details.open = true
     const summary = document.createElement("summary")
-    summary.textContent = "Thinking..."
+    summary.textContent = t("status.thinking") + "..."
     details.appendChild(summary)
     const div = document.createElement("div")
     div.className = "reasoning-content"
@@ -960,7 +966,7 @@ function onToken(text) {
 }
 
 function finish(aborted) {
-  if (aborted && ctx.currentBubble) { ctx.currentRaw += "\n\n*[Stopped]*"; ctx.currentBubble.innerHTML = md(ctx.currentRaw) }
+  if (aborted && ctx.currentBubble) { ctx.currentRaw += "\n\n*[" + t("status.stopped") + "]*"; ctx.currentBubble.innerHTML = md(ctx.currentRaw) }
   if (ctx.currentBubble) attachCopyButtons(ctx.currentBubble)
   ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
   setLoading(ctx, false)
@@ -973,13 +979,13 @@ function attachCopyButtons(container) {
     if (block.querySelector(".code-copy-btn")) continue // already has one
     const btn = document.createElement("button")
     btn.className = "code-copy-btn"
-    btn.textContent = "Copy"
+    btn.textContent = t("msg.copy")
     btn.addEventListener("click", async () => {
       const code = block.querySelector("code")?.textContent || ""
       try { await navigator.clipboard.writeText(code) } catch { /* */ }
-      btn.textContent = "Copied!"
+      btn.textContent = t("msg.copied")
       btn.classList.add("copied")
-      setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied") }, 2000)
+      setTimeout(() => { btn.textContent = t("msg.copy"); btn.classList.remove("copied") }, 2000)
     })
     block.appendChild(btn)
   }
@@ -993,7 +999,51 @@ function wireMsgCopyButton(el) {
     const bubble = el.querySelector(".bubble")
     const text = bubble?.textContent || ""
     try { await navigator.clipboard.writeText(text) } catch { /* */ }
-    btn.textContent = "Copied!"
-    setTimeout(() => { btn.textContent = "Copy" }, 2000)
+    btn.textContent = t("msg.copied")
+    setTimeout(() => { btn.textContent = t("msg.copy") }, 2000)
   })
+}
+
+// ─── i18n DOM updates ──────────────────────────
+
+/** Apply locale strings to static HTML elements after i18n message arrives */
+function applyI18nToDOM() {
+  // session bar
+  const title = document.getElementById("session-title")
+  if (title && title.textContent === "Session 1") title.textContent = t("session.title") + " 1"
+  const newBtn = document.getElementById("new-session-btn")
+  if (newBtn) newBtn.title = t("session.new")
+
+  // input
+  const input = document.getElementById("input")
+  if (input) input.placeholder = t("input.placeholder")
+
+  // toolbar buttons
+  const sendBtn = document.getElementById("send-btn")
+  if (sendBtn) sendBtn.title = t("toolbar.send")
+  const abortBtn = document.getElementById("abort-btn")
+  if (abortBtn) abortBtn.title = t("toolbar.stop")
+  const attachBtn = document.getElementById("attach-btn")
+  if (attachBtn) { attachBtn.title = t("toolbar.attach"); attachBtn.textContent = t("toolbar.attachShort") }
+  const modelBtn = document.getElementById("model-btn")
+  if (modelBtn) modelBtn.title = t("toolbar.model")
+  const reasoningBtn = document.getElementById("reasoning-btn")
+  if (reasoningBtn) reasoningBtn.title = t("toolbar.reasoning")
+  const autoBtn = document.getElementById("auto-btn")
+  if (autoBtn) autoBtn.title = t("toolbar.autoApprove")
+  const settingsBtn = document.getElementById("settings-btn")
+  if (settingsBtn) settingsBtn.title = t("toolbar.settings")
+
+  // settings panel
+  const settingsTitle = document.querySelector("#settings-panel h3")
+  if (settingsTitle) settingsTitle.textContent = t("settings.title")
+
+  // welcome page
+  const welcome = document.querySelector(".welcome h2")
+  if (welcome) welcome.textContent = t("welcome.heading")
+}
+
+/** Get reasoning label from i18n */
+function reasoningLabel(level) {
+  return t("reasoning." + (level || "none"))
 }
