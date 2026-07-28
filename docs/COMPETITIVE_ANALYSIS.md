@@ -47,7 +47,7 @@
 | 代码块语法高亮 | ✅ 零依赖 | ✅ | ❌ | ✅ | ✅ |
 | @-context 文件引用 | ✅ @path 注入 + 自动补全 | ❌ | ❌ | ✅ | ✅ |
 
-**变化：diff 预览 ✅（permission 拦截时展示红绿行级 diff）。代码块语法高亮 ✅（JS/TS/JSON/CSS/HTML/Python/Shell/SQL）。@-context ✅（@path 解析+注入+下拉自动补全+目录展开）。** 行内补全仍是唯一缺失项。
+**变化：diff 预览 ✅（permission 拦截时展示红绿行级 diff）。代码块语法高亮 ✅（JS/TS/JSON/CSS/HTML/Python/Shell/SQL）。@-context ✅（@path 解析+注入+下拉自动补全+目录展开）。** 行内补全明确不做——定位差异：ThinCoder 走 agent-first 路线，不跟 Copilot/Cursor 拼补全。补全赛道已有 Copilot/GitHub 免费平替。
 
 ---
 
@@ -149,16 +149,16 @@ Agent 智能体         ★★★★★      ★★        ★★★★      ★
 用户界面             ★★★★       ★★★★★     ★★★       ★★★★★     ★★★★
 ```
 
-**更新后一句话：Agent 能力 + 安全性业界领先，代码编辑体验大幅改善（diff 预览 + 代码高亮 + @-context），UI 从"能用"进入"好用"，工程品质补齐 ESLint。距离 Copilot 的 polished 体验只差行内补全和 i18n。**
+**更新后一句话：Agent 能力 + 安全性业界领先，代码编辑通过 diff 预览 + 代码高亮 + @-context 达到可接受水平（行内补全不做，定位为 agent-first 而非 completion-first）。UI 进入"好用"区间，工程品质补齐 ESLint。**
 
 ---
 
 ## 剩余差距 & 方向
 
-| 优先级 | 项目 | 差距 |
+| 优先级 | 项目 | 说明 |
 |--------|------|------|
-| 1 | **行内补全** | 唯一的结构性功能缺失，Copilot/Cursor 核心壁垒 |
-| 2 | **CI/CD** | `.github/workflows/test.yml` — 每次 push 跑 test+lint |
-| 3 | **TypeScript** | 提升工程品质下限，目前 JSDoc 勉强够用 |
-| 4 | **i18n** | 英语够用，但国际化是"产品化"的标志 |
-| 5 | **Skill/Plugin** | Continue 的插件生态目前独一档 |
+| ~~1~~ | ~~行内补全~~ | **不做** — agent-first 定位，补全赛道已有免费平替 |
+| 1 | **CI/CD** | `.github/workflows/test.yml` — push 跑 test+lint |
+| 2 | **TypeScript** | JSDoc 勉强够用，工程扩大时成为瓶颈 |
+| 3 | **i18n** | 英语够用，产品化阶段需要 |
+| 4 | **Skill/Plugin** | Continue 独一档的生态，长期可考虑 |
