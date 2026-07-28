@@ -6,6 +6,7 @@ import { join, extname, relative } from "node:path"
 import { execSync } from "node:child_process"
 import * as os from "node:os"
 import { search as memorySearch } from "./memory.mjs"
+import { loadRules } from "./extension/rules.mjs"
 
 const COMPACT_THRESHOLD = 80000  // estimated tokens
 const TOKEN_ESTIMATE_CHARS = 3.5
@@ -241,6 +242,31 @@ export function injectContext(history, cwd, userInput) {
           role: "user",
           content: `[Available project skills: ${files.join(", ")}. Use the skill tool to load one.]`,
         })
+      }
+    }
+  } catch { /* */ }
+
+  // Project rules (.thincoder/rules/ + .cursor/rules/)
+  try {
+    const rules = loadRules(cwd)
+    if (rules.length > 0) {
+      const globalRules = rules.filter(r => !r.globs)
+      const scopedRules = rules.filter(r => r.globs)
+      let text = ""
+      if (globalRules.length > 0) {
+        text += "Global project rules — follow these in every response:\n\n"
+        text += globalRules.map(r => `### ${r.name}${r.description ? ` — ${r.description}` : ""} (${r.source})\n${r.content}`).join("\n\n")
+        text += "\n\n"
+      }
+      if (scopedRules.length > 0) {
+        text += "File-scoped project rules — apply when working on matching file patterns:\n\n"
+        text += scopedRules.map(r =>
+          `### ${r.name}${r.description ? ` — ${r.description}` : ""} (${r.source})\n` +
+          `Applies to: ${r.globs.join(", ")}\n${r.content}`
+        ).join("\n\n")
+      }
+      if (text) {
+        history.push({ role: "user", content: `[System reminder: project rules from .thincoder/rules/ and .cursor/rules/ — these are authoritative instructions:\n\n${text}]` })
       }
     }
   } catch { /* */ }

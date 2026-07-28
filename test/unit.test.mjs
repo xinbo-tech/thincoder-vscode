@@ -572,4 +572,83 @@ describe("skills — loadSkills", () => {
   })
 })
 
+// ─── rules — loadRules ──────────────────────────────────
+
+import { loadRules, matchesGlob } from "../src/extension/rules.mjs"
+
+describe("rules — loadRules", () => {
+  let tmpDir
+
+  before(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "thincoder-test-rules-"))
+    mkdirSync(join(tmpDir, ".thincoder", "rules"), { recursive: true })
+    mkdirSync(join(tmpDir, ".cursor", "rules"), { recursive: true })
+  })
+
+  after(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it("returns empty when no rules directories", () => {
+    const empty = mkdtempSync(join(tmpdir(), "thincoder-test-norules-"))
+    assert.equal(loadRules(empty).length, 0)
+    rmSync(empty, { recursive: true, force: true })
+  })
+
+  it("loads rules from both .thincoder/rules/ and .cursor/rules/", () => {
+    writeFileSync(join(tmpDir, ".thincoder", "rules", "conventions.md"), "---\ndescription: test\n---\nRule content.")
+    writeFileSync(join(tmpDir, ".cursor", "rules", "css.md"), "---\nglobs: '*.css'\n---\nCSS rule.")
+    const rules = loadRules(tmpDir)
+    assert.equal(rules.length, 2)
+    const thincoderRule = rules.find(r => r.source === ".thincoder/rules")
+    assert.equal(thincoderRule.name, "conventions")
+    assert.equal(thincoderRule.description, "test")
+    assert.equal(thincoderRule.content, "Rule content.")
+    assert.equal(thincoderRule.globs, null)
+    const cursorRule = rules.find(r => r.source === ".cursor/rules")
+    assert.equal(cursorRule.name, "css")
+    assert.deepEqual(cursorRule.globs, ["*.css"])
+  })
+
+  it("parses globs from frontmatter", () => {
+    writeFileSync(join(tmpDir, ".thincoder", "rules", "react.md"),
+      "---\nglobs: 'src/**/*.tsx; src/**/*.jsx'\n---\nReact rules.")
+    const rules = loadRules(tmpDir)
+    const react = rules.find(r => r.name === "react")
+    assert.deepEqual(react.globs, ["src/**/*.tsx", "src/**/*.jsx"])
+  })
+
+  it("rule without frontmatter has no globs", () => {
+    writeFileSync(join(tmpDir, ".thincoder", "rules", "plain.md"), "Just plain text, no frontmatter.")
+    const rules = loadRules(tmpDir)
+    const plain = rules.find(r => r.name === "plain")
+    assert.equal(plain.globs, null)
+    assert.equal(plain.content, "Just plain text, no frontmatter.")
+  })
+})
+
+describe("rules — matchesGlob", () => {
+  it("matches simple * pattern", () => {
+    assert.ok(matchesGlob("app.tsx", ["*.tsx"]))
+    assert.ok(!matchesGlob("app.ts", ["*.tsx"]))
+    assert.ok(matchesGlob("src/app.tsx", ["src/*.tsx"]))
+  })
+
+  it("matches ** recursive pattern", () => {
+    assert.ok(matchesGlob("src/components/Button.tsx", ["src/**/*.tsx"]))
+    assert.ok(!matchesGlob("src/components/Button.ts", ["src/**/*.tsx"]))
+  })
+
+  it("matches directory pattern", () => {
+    assert.ok(matchesGlob("src/components/foo/bar.tsx", ["src/components/**/*"]))
+    assert.ok(!matchesGlob("src/utils/bar.tsx", ["src/components/**/*"]))
+  })
+
+  it("matches multiple patterns", () => {
+    assert.ok(matchesGlob("style.css", ["*.css", "*.scss"]))
+    assert.ok(matchesGlob("style.scss", ["*.css", "*.scss"]))
+    assert.ok(!matchesGlob("style.less", ["*.css", "*.scss"]))
+  })
+})
+
 console.log("\n✓ All unit tests passed.\n")
