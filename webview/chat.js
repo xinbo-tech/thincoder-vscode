@@ -49,6 +49,104 @@ ctx.inputEl.addEventListener("input", () => {
   ctx.inputEl.style.height = Math.min(ctx.inputEl.scrollHeight, 150) + "px"
 })
 
+// ─── @‑autocomplete ────────────────────────────
+
+const atDropdown = document.getElementById("at-dropdown")
+let _atTimer = null, _atActive = false, _atBase = ""
+
+ctx.inputEl.addEventListener("input", () => {
+  if (!_atActive) return
+  handleAtInput()
+})
+
+ctx.inputEl.addEventListener("keydown", (e) => {
+  if (!_atActive) return
+  if (e.key === "Escape") { closeAtDropdown(); e.preventDefault(); return }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault()
+    const items = atDropdown.querySelectorAll(".dropdown-item")
+    if (items.length === 0) return
+    const cur = atDropdown.querySelector(".dropdown-item.active")
+    const idx = cur ? Array.from(items).indexOf(cur) : -1
+    if (e.key === "ArrowDown") {
+      const next = idx + 1 < items.length ? idx + 1 : 0
+      items.forEach(i => i.classList.remove("active"))
+      items[next].classList.add("active")
+      items[next].scrollIntoView({ block: "nearest" })
+    } else {
+      const prev = idx - 1 >= 0 ? idx - 1 : items.length - 1
+      items.forEach(i => i.classList.remove("active"))
+      items[prev].classList.add("active")
+      items[prev].scrollIntoView({ block: "nearest" })
+    }
+    return
+  }
+  if (e.key === "Enter" || e.key === "Tab") {
+    const active = atDropdown.querySelector(".dropdown-item.active")
+    if (active) {
+      e.preventDefault()
+      insertAtRef(active.dataset.path)
+      closeAtDropdown()
+    }
+    return
+  }
+})
+
+function handleAtInput() {
+  const pos = ctx.inputEl.selectionStart
+  const text = ctx.inputEl.value.slice(0, pos)
+  const atIdx = text.lastIndexOf("@")
+  if (atIdx < 0) { closeAtDropdown(); return }
+  // Check if there's a space between @ and cursor
+  const afterAt = text.slice(atIdx + 1)
+  if (/\s/.test(afterAt)) { closeAtDropdown(); return }
+  _atBase = text.slice(0, atIdx)
+  const query = text.slice(atIdx)
+  clearTimeout(_atTimer)
+  _atTimer = setTimeout(() => {
+    vscode.postMessage({ type: "atComplete", query, cwd: "" })
+  }, 150)
+}
+
+function showAtDropdown(matches) {
+  if (matches.length === 0) { closeAtDropdown(); return }
+  atDropdown.innerHTML = matches.map((m, i) =>
+    `<div class="dropdown-item${i === 0 ? " active" : ""}" data-path="${escHtml(m.path)}">
+      <span class="at-file-name">${escHtml(m.name)}</span>
+      <span class="at-file-path">${escHtml(m.path)}</span>
+    </div>`
+  ).join("")
+  atDropdown.style.display = "block"
+  _atActive = true
+}
+
+function closeAtDropdown() {
+  atDropdown.style.display = "none"
+  _atActive = false
+  atDropdown.innerHTML = ""
+  clearTimeout(_atTimer)
+}
+
+function insertAtRef(path) {
+  const pos = ctx.inputEl.selectionStart
+  const text = ctx.inputEl.value
+  const before = _atBase + "@" + path
+  const after = text.slice(pos)
+  ctx.inputEl.value = before + " " + after
+  ctx.inputEl.selectionStart = ctx.inputEl.selectionEnd = before.length + 1
+  ctx.inputEl.focus()
+}
+
+// Detect @ typing to activate autocomplete
+ctx.inputEl.addEventListener("input", (e) => {
+  const pos = ctx.inputEl.selectionStart
+  const prevChar = ctx.inputEl.value[pos - 2]
+  if (prevChar === "@") {
+    _atActive = true
+    handleAtInput()
+  }
+})
+
 // Image paste — only intercept images, let text through to textarea
 document.addEventListener("paste", (e) => {
   const items = e.clipboardData?.items
@@ -643,8 +741,11 @@ function renderMcpList() {
 window.addEventListener("message", (e) => {
   const m = e.data
   switch (m.type) {
-    case "userMessage":      addUser(ctx, m.text); break
-    case "assistantMessage": addAssistantHistory(ctx, m.text); attachCopyButtons(ctx.messagesEl.lastElementChild); break
+    case "userMessage":      addUser(ctx, m.text, m.timestamp); break
+    case "assistantMessage": addAssistantHistory(ctx, m.text, m.timestamp);
+      attachCopyButtons(ctx.messagesEl.lastElementChild);
+      wireMsgCopyButton(ctx.messagesEl.lastElementChild);
+      break
     case "token":            onToken(m.text); break
     case "reasoning":        onReasoning(m.text); break
     case "toolCall":         addTool(ctx, m.name, m.args); break
@@ -740,6 +841,9 @@ window.addEventListener("message", (e) => {
       el.scrollIntoView({ behavior: "smooth" })
       break
     }
+    case "atResults":
+      showAtDropdown(m.matches || [])
+      break
     case "mcpStatus":
       window._mcpServers = m.servers || {}
       renderMcpList()
@@ -870,4 +974,17 @@ function attachCopyButtons(container) {
     })
     block.appendChild(btn)
   }
+}
+
+/** Wire the copy-message button in an assistant message element */
+function wireMsgCopyButton(el) {
+  const btn = el?.querySelector(".msg-copy-btn")
+  if (!btn) return
+  btn.addEventListener("click", async () => {
+    const bubble = el.querySelector(".bubble")
+    const text = bubble?.textContent || ""
+    try { await navigator.clipboard.writeText(text) } catch { /* */ }
+    btn.textContent = "Copied!"
+    setTimeout(() => { btn.textContent = "Copy" }, 2000)
+  })
 }

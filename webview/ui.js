@@ -31,20 +31,28 @@ export function showBanner(ctx, text, keyOk) {
 
 // ─── Messages ──────────────────────────────────
 
-export function addUser(ctx, text) {
+export function addUser(ctx, text, timestamp) {
   const el = document.createElement("div")
   el.className = "message user"
-  el.innerHTML = `<div class="msg-label">❯ You:</div><div class="bubble">${mdInline(esc(text))}</div>`
+  const ts = timestamp ? fmtTime(new Date(timestamp)) : fmtTime(new Date())
+  el.innerHTML = `<div class="msg-label">❯ You: <span class="msg-time">${ts}</span></div><div class="bubble">${mdInline(esc(text))}</div>`
   ctx.messagesEl.appendChild(el)
   scrollDown(ctx)
 }
 
-export function addAssistantHistory(ctx, text) {
+export function addAssistantHistory(ctx, text, timestamp) {
   const el = document.createElement("div")
   el.className = "message assistant"
-  el.innerHTML = `<div class="msg-label">❯ ThinCoder:</div><div class="bubble content">${md(text)}</div>`
+  const ts = timestamp ? fmtTime(new Date(timestamp)) : ""
+  el.innerHTML = `<div class="msg-label">❯ ThinCoder: ${ts ? `<span class="msg-time">${ts}</span>` : ""}<button class="msg-copy-btn" title="Copy message">Copy</button></div><div class="bubble content">${md(text)}</div>`
   ctx.messagesEl.appendChild(el)
   scrollDown(ctx)
+}
+
+function fmtTime(d) {
+  const h = String(d.getHours()).padStart(2,"0")
+  const m = String(d.getMinutes()).padStart(2,"0")
+  return `${h}:${m}`
 }
 
 export function newBlock(ctx) {

@@ -10,6 +10,30 @@
 .message.user .msg-label { color: var(--vscode-textLink-foreground, var(--accent)); }
 .message.assistant .msg-label { color: var(--vscode-textLink-foreground, var(--accent)); }
 
+.msg-time {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.45;
+  margin-left: 8px;
+}
+
+.msg-copy-btn {
+  float: right;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 400;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  font-family: inherit;
+}
+.message.assistant:hover .msg-copy-btn { opacity: 0.45; }
+.msg-copy-btn:hover { opacity: 1 !important; background: var(--hover-bg); }
+
 .message {
   margin-top: 14px;
   max-width: 90%;
@@ -64,7 +88,7 @@
 .content code {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 0.9em;
-  background: rgba(128,128,128,0.2);
+  background: var(--hover-bg-strong);
   padding: 1px 5px;
   border-radius: 3px;
   word-break: break-word;
@@ -75,7 +99,7 @@
   padding: 0;
   border-radius: 6px;
   overflow: hidden;
-  background: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.3));
+  background: var(--vscode-textCodeBlock-background, var(--overlay));
   border: 1px solid var(--border);
   position: relative;
 }
@@ -130,7 +154,7 @@
 }
 
 .content th {
-  background: rgba(128,128,128,0.15);
+  background: var(--hover-bg-strong);
   font-weight: 600;
 }
 
@@ -161,7 +185,7 @@
 }
 
 .tool-call-header:hover {
-  background: rgba(255,255,255,0.04);
+  background: var(--hover-bg);
 }
 
 .tool-call-icon {
@@ -251,7 +275,7 @@
 /* ─── Error ──────────────────────────────────── */
 
 .error-banner {
-  background: rgba(244,71,71,0.12);
+  background: var(--diff-del-bg);
   color: var(--error-fg);
   padding: 6px 10px;
   border-radius: 6px;

@@ -48,7 +48,7 @@
   display: flex; align-items: center; justify-content: center;
 }
 
-.close-btn:hover { background: rgba(128,128,128,0.15); }
+.close-btn:hover { background: var(--hover-bg-strong); }
 
 .settings-body {
   flex: 1; overflow-y: auto; padding: 16px;
@@ -124,8 +124,8 @@
   font-family: inherit;
 }
 .key-btn:hover { border-color: var(--accent); }
-.del-key { color: #e06c75; border-color: transparent; padding: 2px 6px; }
-.del-key:hover { background: rgba(224,108,117,0.1); }
+.del-key { color: var(--red); border-color: transparent; padding: 2px 6px; }
+.del-key:hover { background: var(--diff-del-bg); }
 
 .settings-sep {
   height: 1px;
@@ -157,7 +157,7 @@
 }
 
 .toggle-btn:hover {
-  background: rgba(128,128,128,0.1);
+  background: var(--hover-bg);
 }
 
 .save-btn {
@@ -166,7 +166,7 @@
   border: none;
   border-radius: 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--btn-fg);
   font-size: 13px;
   font-family: inherit;
   font-weight: 600;

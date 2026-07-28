@@ -252,6 +252,9 @@ class ChatPanel {
               this._permissionQueue = []
             }
           }
+        case "atComplete":
+          this._atComplete(msg.query, msg.cwd)
+          break
           break
       }
     })
@@ -260,8 +263,8 @@ class ChatPanel {
     try {
       const history = this._activeHistory()
       for (const m of history) {
-        if (m.type === "user") this._panel.webview.postMessage({ type: "userMessage", text: m.content })
-        else if (m.type === "assistant") this._panel.webview.postMessage({ type: "assistantMessage", text: m.content })
+        if (m.type === "user") this._panel.webview.postMessage({ type: "userMessage", text: m.content, timestamp: m.timestamp })
+        else if (m.type === "assistant") this._panel.webview.postMessage({ type: "assistantMessage", text: m.content, timestamp: m.timestamp })
       }
     } catch (e) {
       console.warn("ThinCoder: failed to restore session history", e.message)
@@ -285,6 +288,26 @@ class ChatPanel {
   async _setAutoApprove(value) {
     const c = vscode.workspace.getConfiguration("thincoder")
     await c.update("autoApprove", value, vscode.ConfigurationTarget.Global)
+  }
+  async _atComplete(query, cwd) {
+    if (!this._panel || !query) return
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri
+    if (!root) return
+    // Normalize query: remove leading @ if present, prepend **/
+    let pattern = query.startsWith("@") ? query.slice(1) : query
+    if (!pattern.includes("*")) pattern = `**/${pattern}*`
+    else if (!pattern.startsWith("**")) pattern = `**/${pattern}`
+    try {
+      const files = await vscode.workspace.findFiles(pattern, "**/node_modules/**,**/.git/**", 20)
+      const base = cwd || root.fsPath
+      const rel = (uri) => uri.fsPath.startsWith(base) ? uri.fsPath.slice(base.length + 1) : uri.fsPath
+      const matches = files.slice(0, 12).map((uri) => ({
+        path: rel(uri).replace(/\\/g, "/"),
+        name: uri.fsPath.split(/[/\\]/).pop(),
+        isDir: false,
+      }))
+      this._panel.webview.postMessage({ type: "atResults", matches })
+    } catch { /* best-effort */ }
   }
   _pushMcpStatus() { this._panel?.webview.postMessage({ type: "mcpStatus", servers: getMcpServers() }) }
   _pushStatus() {

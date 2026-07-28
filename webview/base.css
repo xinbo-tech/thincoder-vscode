@@ -18,6 +18,51 @@
   --error-fg: var(--vscode-errorForeground, #f44747);
   --msg-user-bg: var(--vscode-button-background, #007acc);
   --msg-assistant-bg: var(--vscode-textBlockQuote-background, #2a2a2a);
+  /* overlay / surface — adapt to theme */
+  --hover-bg: rgba(255,255,255,0.08);
+  --hover-bg-strong: rgba(255,255,255,0.16);
+  --overlay: rgba(0,0,0,0.3);
+  --shadow: 0 4px 12px rgba(0,0,0,0.4);
+  /* syntax highlighting (dark defaults) */
+  --syn-kw: #569cd6;
+  --syn-str: #ce9178;
+  --syn-cmt: #6a9955;
+  --syn-num: #b5cea8;
+  --syn-type: #4ec9b0;
+  --syn-prop: #9cdcfe;
+  --syn-atrule: #d7ba7d;
+  /* diff colors */
+  --diff-add-bg: rgba(34,187,51,0.14);
+  --diff-add-fg: #a5d6a7;
+  --diff-del-bg: rgba(244,71,71,0.14);
+  --diff-del-fg: #ef9a9a;
+  /* semantic */
+  --green: #4ec9b0;
+  --yellow: #cca700;
+  --red: #e06c75;
+  --white: #ffffff;
+}
+
+body.vscode-light {
+  --hover-bg: rgba(0,0,0,0.06);
+  --hover-bg-strong: rgba(0,0,0,0.12);
+  --overlay: rgba(0,0,0,0.08);
+  --shadow: 0 4px 12px rgba(0,0,0,0.12);
+  --syn-kw: #0000ff;
+  --syn-str: #a31515;
+  --syn-cmt: #008000;
+  --syn-num: #098658;
+  --syn-type: #267f99;
+  --syn-prop: #795e26;
+  --syn-atrule: #af00db;
+  --diff-add-bg: rgba(16,137,62,0.12);
+  --diff-add-fg: #0d6b30;
+  --diff-del-bg: rgba(201,37,37,0.12);
+  --diff-del-fg: #b91a1a;
+  --green: #1a8a4a;
+  --yellow: #8a6d00;
+  --red: #d1242f;
+  --white: #1e1e1e;
 }
 
 html, body {
@@ -88,7 +133,7 @@ body {
 }
 
 .setup-btn:hover {
-  background: rgba(255,255,255,0.1);
+  background: var(--hover-bg);
 }
 
 /* ─── Inline Permission Prompt ──────────────────── */
@@ -127,37 +172,37 @@ body {
 
 .perm-btn.deny {
   background: transparent;
-  color: #e06c75;
-  border-color: #e06c75;
+  color: var(--red);
+  border-color: var(--red);
 }
-.perm-btn.deny:hover { background: rgba(224,108,117,0.15); }
+.perm-btn.deny:hover { background: color-mix(in srgb, var(--red) 15%, transparent); }
 
 .perm-btn.approve {
-  background: #4ec9b0;
-  color: #1e1e1e;
-  border-color: #4ec9b0;
+  background: var(--green);
+  color: var(--bg);
+  border-color: var(--green);
 }
-.perm-btn.approve:hover { background: #5fd9c0; }
+.perm-btn.approve:hover { filter: brightness(1.1); }
 
 .perm-btn.approve-all {
   background: transparent;
-  color: #4ec9b0;
-  border-color: #4ec9b0;
+  color: var(--green);
+  border-color: var(--green);
 }
-.perm-btn.approve-all:hover { background: rgba(78,201,176,0.15); }
+.perm-btn.approve-all:hover { background: color-mix(in srgb, var(--green) 15%, transparent); }
 
 
 /* ─── Syntax highlighting tokens ─────────────────── */
 
-.tk-keyword  { color: #569cd6; }
-.tk-string   { color: #ce9178; }
-.tk-comment  { color: #6a9955; font-style: italic; }
-.tk-number   { color: #b5cea8; }
-.tk-type     { color: #4ec9b0; }
-.tk-property { color: #9cdcfe; }
-.tk-atrule   { color: #d7ba7d; }
-.tk-class    { color: #4ec9b0; }
-.tk-id       { color: #d7ba7d; }
+.tk-keyword  { color: var(--syn-kw); }
+.tk-string   { color: var(--syn-str); }
+.tk-comment  { color: var(--syn-cmt); font-style: italic; }
+.tk-number   { color: var(--syn-num); }
+.tk-type     { color: var(--syn-type); }
+.tk-property { color: var(--syn-prop); }
+.tk-atrule   { color: var(--syn-atrule); }
+.tk-class    { color: var(--syn-type); }
+.tk-id       { color: var(--syn-atrule); }
 
 /* ─── Code block copy button ─────────────────────── */
 
@@ -170,16 +215,16 @@ body {
   right: 6px;
   padding: 3px 8px;
   font-size: 11px;
-  border: 1px solid rgba(128,128,128,0.3);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background: rgba(0,0,0,0.3);
+  background: var(--overlay);
   color: var(--fg);
   opacity: 0.4;
   cursor: pointer;
   transition: opacity 0.15s, background 0.15s;
 }
-.code-copy-btn:hover { opacity: 1; background: rgba(128,128,128,0.2); }
-.code-copy-btn.copied { opacity: 1; color: #4ec9b0; border-color: #4ec9b0; }
+.code-copy-btn:hover { opacity: 1; background: var(--hover-bg-strong); }
+.code-copy-btn.copied { opacity: 1; color: var(--green); border-color: var(--green); }
 
 /* ─── Diff preview in permission prompts ──────────── */
 
@@ -197,7 +242,7 @@ body {
 .diff-header {
   padding: 4px 10px;
   font-size: 11px;
-  background: rgba(128,128,128,0.08);
+  background: var(--hover-bg);
   color: var(--fg);
   opacity: 0.6;
   border-bottom: 1px solid var(--border);
@@ -208,8 +253,8 @@ body {
   overflow-x: auto;
 }
 .diff-same  { color: var(--fg); opacity: 0.7; }
-.diff-add  { background: rgba(34,187,51,0.12); color: #a5d6a7; }
-.diff-del  { background: rgba(244,71,71,0.12); color: #ef9a9a; }
+.diff-add  { background: var(--diff-add-bg); color: var(--diff-add-fg); }
+.diff-del  { background: var(--diff-del-bg); color: var(--diff-del-fg); }
 .diff-prefix {
   display: inline-block;
   width: 16px;

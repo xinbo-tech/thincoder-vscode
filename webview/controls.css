@@ -52,7 +52,7 @@
   gap: 4px;
   padding: 1px 8px 1px 6px;
   border-radius: 10px;
-  background: rgba(128,128,128,0.12);
+  background: var(--hover-bg-strong);
   font-size: 12px;
 }
 
@@ -104,7 +104,7 @@
 
 #send-btn {
   background: var(--accent);
-  color: #fff;
+  color: var(--btn-fg);
   padding: 0 16px;
   box-shadow: 0 0 0 0 rgba(0,122,204,0.4);
 }
@@ -121,15 +121,16 @@
 }
 
 #send-btn:disabled {
-  background: rgba(128,128,128,0.25);
-  color: rgba(255,255,255,0.35);
+  background: var(--hover-bg-strong);
+  color: var(--fg);
+  opacity: 0.35;
   cursor: not-allowed;
   box-shadow: none;
   transform: none;
 }
 
 #abort-btn {
-  background: rgba(244,71,71,0.15);
+  background: var(--diff-del-bg);
   color: var(--error-fg);
   font-size: 12px;
   font-weight: 600;
@@ -138,7 +139,7 @@
 }
 
 #abort-btn:hover {
-  background: rgba(244,71,71,0.28);
+  background: color-mix(in srgb, var(--error-fg) 28%, transparent);
 }
 
 #attach-btn {
@@ -161,7 +162,7 @@
 
 #attach-btn:hover {
   opacity: 0.8;
-  background: rgba(128,128,128,0.1);
+  background: var(--hover-bg);
 }
 
 /* ─── Controls Row ───────────────────────────── */
@@ -194,20 +195,20 @@
 .ctrl-btn:hover {
   opacity: 0.9;
   border-color: var(--accent);
-  background: rgba(128,128,128,0.05);
+  background: var(--hover-bg);
 }
 
 .ctrl-btn.active {
   opacity: 1;
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(0,122,204,0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .ctrl-btn.warning {
-  border-color: #f44;
-  color: #f44;
-  background: rgba(244,71,71,0.1);
+  border-color: var(--red);
+  color: var(--red);
+  background: var(--diff-del-bg);
   animation: auto-pulse 2s ease-in-out infinite;
 }
 
@@ -245,7 +246,7 @@
   overflow: hidden;
   min-width: 220px;
   z-index: 10;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  box-shadow: var(--shadow);
 }
 
 .dropdown-item {
@@ -280,6 +281,47 @@
   font-size: 12px;
   max-height: 200px;
   overflow-y: auto;
+
+/* ─── @‑autocomplete ──────────────────────────── */
+
+#at-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 14px;
+  right: 14px;
+  margin-bottom: 2px;
+  background: var(--vscode-dropdown-background, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  z-index: 20;
+  max-height: 200px;
+  overflow-y: auto;
+}
+#at-dropdown .dropdown-item {
+  padding: 5px 12px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+#at-dropdown .dropdown-item:hover,
+#at-dropdown .dropdown-item.active {
+  background: var(--vscode-list-hoverBackground, var(--hover-bg));
+}
+.at-file-name {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.at-file-path {
+  opacity: 0.5;
+  font-size: 11px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
   border-bottom: 1px solid var(--border);
 }
 
@@ -390,17 +432,17 @@
 }
 
 .goal-status-badge.active {
-  background: rgba(0,122,204,0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
 }
 
 .goal-status-badge.done {
-  background: rgba(64,192,87,0.15);
-  color: #40c057;
+  background: var(--diff-add-bg);
+  color: var(--green);
 }
 
 .goal-status-badge.cancelled {
-  background: rgba(128,128,128,0.15);
+  background: var(--hover-bg-strong);
   color: var(--fg);
   opacity: 0.5;
 }
@@ -408,7 +450,7 @@
 /* ─── Tool output panels ─────────────────────── */
 
 .tool-panel-item {
-  border-bottom: 1px solid rgba(128,128,128,0.1);
+  border-bottom: 1px solid var(--border);
   padding-bottom: 4px;
   margin-bottom: 4px;
 }
@@ -451,7 +493,7 @@
 .auto-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: var(--overlay);
   z-index: 999;
   animation: backdrop-in 0.15s ease-out;
 }
@@ -464,12 +506,12 @@
 .auto-confirm {
   position: fixed;
   z-index: 1000;
-  background: var(--bg, #1e1e1e);
-  border: 1px solid #f44;
+  background: var(--bg);
+  border: 1px solid var(--red);
   border-radius: 8px;
   padding: 12px 14px;
   max-width: 320px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 12px rgba(244,71,71,0.15);
+  box-shadow: var(--shadow);
   animation: confirm-in 0.15s ease-out;
   top: 50%;
   left: 50%;
@@ -505,19 +547,21 @@
 }
 
 .auto-confirm-yes {
-  background: rgba(244,71,71,0.85);
-  color: #fff;
+  background: var(--red);
+  opacity: 0.85;
+  color: var(--btn-fg);
 }
 
 .auto-confirm-yes:hover {
-  background: #f44;
+  background: var(--error-fg);
+  opacity: 1;
 }
 
 .auto-confirm-no {
-  background: rgba(128,128,128,0.15);
+  background: var(--hover-bg-strong);
   color: var(--fg);
 }
 
 .auto-confirm-no:hover {
-  background: rgba(128,128,128,0.25);
+  background: var(--hover-bg);
 }
