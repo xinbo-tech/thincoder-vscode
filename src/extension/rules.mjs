@@ -14,7 +14,7 @@
  */
 
 import { readdirSync, readFileSync, existsSync } from "node:fs"
-import { join, basename } from "node:path"
+import { join } from "node:path"
 
 /**
  * Load all rules from both .thincoder/rules/ and .cursor/rules/.
@@ -28,13 +28,13 @@ export function loadRules(cwd) {
     let entries
     try { entries = readdirSync(dir, { withFileTypes: true }) } catch { continue }
     for (const e of entries) {
-      if (!e.isFile() || e.name.startsWith(".") || !e.name.endsWith(".md")) continue
+      if (!e.isFile() || e.name.startsWith(".") || (!e.name.endsWith(".md") && !e.name.endsWith(".mdc"))) continue
       try {
         const raw = readFileSync(join(dir, e.name), "utf8").trim()
         if (raw.length === 0) continue
         const { content, meta } = parseFrontmatter(raw)
         results.push({
-          name: basename(e.name, ".md"),
+          name: e.name.replace(/\.(md|mdc)$/, ""),
           content,
           globs: meta.globs ? String(meta.globs).split(/[;\n]/).map(s => s.trim()).filter(Boolean) : null,
           description: meta.description ? String(meta.description) : null,

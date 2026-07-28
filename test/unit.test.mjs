@@ -625,6 +625,15 @@ describe("rules — loadRules", () => {
     assert.equal(plain.globs, null)
     assert.equal(plain.content, "Just plain text, no frontmatter.")
   })
+
+  it("loads .mdc files (Cursor format)", () => {
+    writeFileSync(join(tmpDir, ".cursor", "rules", "python.mdc"), "---\nglobs: '*.py'\n---\nPython rules.")
+    const rules = loadRules(tmpDir)
+    const py = rules.find(r => r.name === "python")
+    assert.ok(py)
+    assert.deepEqual(py.globs, ["*.py"])
+    assert.equal(py.content, "Python rules.")
+  })
 })
 
 describe("rules — matchesGlob", () => {
