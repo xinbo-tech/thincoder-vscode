@@ -1,0 +1,157 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --fg: var(--vscode-editor-foreground, #d4d4d4);
+  --bg: var(--vscode-editor-background, #1e1e1e);
+  --border: var(--vscode-panel-border, #3c3c3c);
+  --input-bg: var(--vscode-input-background, #3c3c3c);
+  --input-fg: var(--vscode-input-foreground, #cccccc);
+  --btn-bg: var(--vscode-button-background, #007acc);
+  --btn-fg: var(--vscode-button-foreground, #ffffff);
+  --btn-hover: var(--vscode-button-hoverBackground, #1a8ad4);
+  --accent: var(--vscode-focusBorder, #007acc);
+  --tool-bg: var(--vscode-textBlockQuote-background, #2a2a2a);
+  --error-fg: var(--vscode-errorForeground, #f44747);
+  --msg-user-bg: var(--vscode-button-background, #007acc);
+  --msg-assistant-bg: var(--vscode-textBlockQuote-background, #2a2a2a);
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--vscode-editor-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  font-size: var(--vscode-editor-font-size, 13px);
+  color: var(--fg);
+  background: var(--bg);
+}
+
+/* ─── Layout ──────────────────────────────────── */
+
+#chat-container {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  position: relative;
+}
+
+#messages {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 12px 12px;
+}
+
+#toolbar {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* ─── Provider Banner ─────────────────────────── */
+
+.provider-banner {
+  padding: 5px 12px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.provider-banner.ok {
+  background: rgba(78, 201, 176, 0.1);
+  color: #4ec9b0;
+}
+
+.provider-banner.warn {
+  background: rgba(244, 199, 71, 0.1);
+  color: #f4c747;
+}
+
+.setup-btn {
+  padding: 1px 8px;
+  font-size: 11px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.setup-btn:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+/* ─── Permission Bar ───────────────────────────── */
+
+#permission-bar {
+  padding: 8px 12px;
+  background: rgba(244,199,71,0.1);
+  border-bottom: 1px solid rgba(244,199,71,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  animation: slideDown 0.15s ease;
+}
+
+#permission-text {
+  color: #f4c747;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.perm-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid;
+  transition: background 0.15s;
+}
+
+.perm-btn.deny {
+  background: transparent;
+  color: #e06c75;
+  border-color: #e06c75;
+}
+.perm-btn.deny:hover { background: rgba(224,108,117,0.15); }
+
+.perm-btn.approve {
+  background: #4ec9b0;
+  color: #1e1e1e;
+  border-color: #4ec9b0;
+}
+.perm-btn.approve:hover { background: #5fd9c0; }
+
+.perm-btn.approve-all {
+  background: transparent;
+  color: #4ec9b0;
+  border-color: #4ec9b0;
+}
+.perm-btn.approve-all:hover { background: rgba(78,201,176,0.15); }
+
+@keyframes slideDown {
+  from { max-height: 0; opacity: 0; }
+  to { max-height: 50px; opacity: 1; }
+}

@@ -26,10 +26,12 @@ const ctx = {
   sessionTitle: document.getElementById("session-title"),
   sessionDropdown: document.getElementById("session-dropdown"),
   currentBubble: null, currentBlock: null, currentTools: [], currentRaw: "",
+  currentReasoning: null, currentReasoningRaw: "",
   isRunning: false, hadToolResult: false,
   _models: [],
   selectedModel: "", selectedProvider: "", selectedReasoning: "max",
   _sessions: [], activeSession: "",
+  _pastedImages: [],
 }
 
 // ─── Init ──────────────────────────────────────
@@ -46,7 +48,51 @@ ctx.inputEl.addEventListener("input", () => {
   ctx.inputEl.style.height = Math.min(ctx.inputEl.scrollHeight, 150) + "px"
 })
 
+// Image paste
+document.addEventListener("paste", (e) => {
+  const items = e.clipboardData?.items
+  if (!items) return
+  for (const item of items) {
+    if (item.type.startsWith("image/")) {
+      e.preventDefault()
+      const file = item.getAsFile()
+      const reader = new FileReader()
+      reader.onload = () => {
+        ctx._pastedImages.push(reader.result)
+        // Show a small indicator
+        const hint = document.createElement("span")
+        hint.className = "paste-hint"
+        hint.textContent = ` 📎 image ${ctx._pastedImages.length}`
+        hint.style.cssText = "font-size:10px;opacity:0.5;margin-left:4px"
+        ctx.inputEl.parentElement.appendChild(hint)
+        setTimeout(() => hint.remove(), 2000)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+})
+
 // ─── Session bar ───────────────────────────────
+
+// ─── Permission bar ──────────────────────────────
+
+const permBar = document.getElementById("permission-bar")
+const permText = document.getElementById("permission-text")
+
+document.getElementById("permission-approve").addEventListener("click", () => {
+  vscode.postMessage({ type: "permissionResponse", approved: true })
+  permBar.style.display = "none"
+})
+document.getElementById("permission-deny").addEventListener("click", () => {
+  vscode.postMessage({ type: "permissionResponse", approved: false })
+  permBar.style.display = "none"
+})
+document.getElementById("permission-approve-all").addEventListener("click", () => {
+  vscode.postMessage({ type: "permissionResponse", approved: "approveAll" })
+  permBar.style.display = "none"
+})
+
+
 
 document.getElementById("new-session-btn").addEventListener("click", () => vscode.postMessage({ type: "newSession" }))
 
@@ -180,6 +226,10 @@ function selectModel(m) {
 
 function toggleDropdown(el, build) {
   const open = el.style.display !== "none"
+  // Close all dropdowns first
+  ctx.dropdown.style.display = "none"
+  ctx.reasoningDropdown.style.display = "none"
+  ctx.sessionDropdown.style.display = "none"
   el.style.display = open ? "none" : "block"
   if (!open) build()
 }
@@ -279,6 +329,7 @@ window.addEventListener("message", (e) => {
     case "userMessage":      addUser(ctx, m.text); break
     case "assistantMessage": addAssistantHistory(ctx, m.text); break
     case "token":            onToken(m.text); break
+    case "reasoning":        onReasoning(m.text); break
     case "toolCall":         addTool(ctx, m.name, m.args); break
     case "toolResult":       finishTool(ctx, m.name, m.text); break
     case "loading":          setLoading(ctx, m.loading); break
@@ -287,7 +338,7 @@ window.addEventListener("message", (e) => {
     case "error":            showError(ctx, m.text); finish(); break
     case "clearMessages":
       ctx.messagesEl.replaceChildren()
-      ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""
+      ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""
       showWelcome(ctx)
       break
     case "sessions":
@@ -327,6 +378,10 @@ window.addEventListener("message", (e) => {
       showBanner(ctx, m.keyOk ? "ThinCoder" : "⚠ Not configured — click ⚙ to set API keys", m.keyOk)
       if (document.getElementById("settings-panel").style.display !== "none") buildSettings()
       break
+    case "permissionRequest":
+      permText.textContent = `Allow \`${m.tool}\`? ${m.args ? m.args.slice(0, 100) + (m.args.length > 100 ? "…" : "") : ""}`
+      permBar.style.display = "flex"
+      break
   }
 })
 
@@ -342,10 +397,34 @@ function send() {
   setLoading(ctx, true)
   ctx.hadToolResult = false
   addUser(ctx, text)
-  vscode.postMessage({ type: "userMessage", text, model: ctx.selectedModel, reasoning: ctx.selectedReasoning, provider: ctx.selectedProvider })
+  const images = ctx._pastedImages
+  ctx._pastedImages = []
+  vscode.postMessage({ type: "userMessage", text, model: ctx.selectedModel, reasoning: ctx.selectedReasoning, provider: ctx.selectedProvider, images })
 }
 
 // ─── Token handling ────────────────────────────
+
+function onReasoning(text) {
+  if (ctx.hadToolResult) { ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false }
+  if (!ctx.currentBlock) newBlock(ctx)
+  if (!ctx.currentReasoning) {
+    const details = document.createElement("details")
+    details.className = "reasoning-block"
+    details.open = true
+    const summary = document.createElement("summary")
+    summary.textContent = "Thinking..."
+    details.appendChild(summary)
+    const div = document.createElement("div")
+    div.className = "reasoning-content"
+    details.appendChild(div)
+    ctx.currentBlock.appendChild(details)
+    ctx.currentReasoning = div
+    ctx.currentReasoningRaw = ""
+  }
+  ctx.currentReasoningRaw += text
+  ctx.currentReasoning.textContent = ctx.currentReasoningRaw
+  scrollDown(ctx)
+}
 
 function onToken(text) {
   if (ctx.hadToolResult) { ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentRaw = ""; ctx.hadToolResult = false }
@@ -363,6 +442,6 @@ function onToken(text) {
 
 function finish(aborted) {
   if (aborted && ctx.currentBubble) { ctx.currentRaw += "\n\n*[Stopped]*"; ctx.currentBubble.innerHTML = md(ctx.currentRaw) }
-  ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.hadToolResult = false
+  ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
   setLoading(ctx, false)
 }

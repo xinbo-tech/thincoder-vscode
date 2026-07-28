@@ -9,17 +9,20 @@ Like the CLI, it's pure `.mjs`, zero npm dependencies, and connects directly to 
 ## Features
 
 - **Full agent loop** — multi-turn reasoning, tool execution, context compaction
-- **20+ built-in tools** — read, write, edit, bash, glob, grep, git (diff/status/log), websearch, fetch, checkpoint, question, syntax_check, and more
-- **Subagents** — explore (codebase search) / plan (architecture design) / coder (implementation), dispatched concurrently
+- **20+ built-in tools** — read, write, edit, bash, glob, grep, git (diff/status/log), websearch, fetch, checkpoint, question, syntax_check, and more. Tools grouped for parallel execution (consecutive readonly tools run concurrently).
+- **Subagents** — explore (codebase search) / plan (architecture design) / coder (implementation), dispatched with role-specific prompts
 - **Plan Mode** — read-only exploration → design proposal → user approval → implement
 - **Task tracking** — `task` tool breaks down multi-step work with pending/in_progress/done status
-- **Verify guard** — file changes without verify get pushed back; syntax check + tests must pass before claiming completion
+- **Verify guard** — file changes without verify get pushed back; syntax check must pass before claiming completion
 - **Context compaction** — automatically summarizes old messages when conversation grows too long
 - **Repo outline** — scans project import/export dependencies so the agent understands your codebase structure
-- **Multi-session** — save and switch between conversation sessions; LLM auto-generates session titles
+- **Multi-session** — save and switch between conversation sessions with session bar; LLM auto-generates titles
+- **Image input** — paste or drag images into chat, or use `read_image` tool; supported on vision models (Kimi K3, Qwen3.7, MiniMax M3)
+- **Reasoning display** — collapsible "Thinking..." block shows the model's reasoning process in real-time
 - **6 providers** — DeepSeek, Kimi, GLM, Qwen, MiniMax, OpenAI + custom OpenAI-compatible endpoint
 - **Model selection** — choose from all available models per provider, with reasoning effort control
 - **Permission control** — `autoApprove` (off by default) lets you decide whether tools run automatically or require confirmation
+- **Right-click** — select code in editor, right-click → "Ask ThinCoder"
 
 ## Requirements
 
@@ -40,6 +43,7 @@ Like the CLI, it's pure `.mjs`, zero npm dependencies, and connects directly to 
 | `ThinCoder: Open Chat` | `Ctrl+Alt+T` | Open the chat panel |
 | `ThinCoder: Send Message` | — | Quick input box → send message to chat |
 | `ThinCoder: Setup Provider & API Key` | — | Add or change API keys |
+| `Ask ThinCoder` | Right-click in editor | Send selected code to chat |
 
 ## Configuration
 
@@ -111,20 +115,31 @@ thincoder-vscode/
 ├── AGENTS.md             # Developer guide
 ├── README.md             # This file
 ├── src/
-│   ├── agent.mjs         # Agent main loop
-│   ├── agent-tools.mjs   # Meta-tools (task, subagent, plan, goal, verify)
-│   ├── tools.mjs         # File/system/git tools (20+)
-│   ├── provider.mjs      # LLM provider with retry
-│   ├── context.mjs       # Context compaction + repo outline
-│   ├── config.mjs        # Model capability specs (self-contained)
+│   ├── agent-tools/       # Meta-tools — task, subagent, plan, goal, verify, skill
+│   ├── agent-tools.mjs    # Re-export shim
+│   ├── tools/             # File/system/git/web/bash tools (20+)
+│   ├── tools.mjs          # Re-export shim
+│   ├── provider/          # Provider rate gate
+│   ├── provider.mjs       # LLM provider with retry + re-exports rate
+│   ├── mcp/               # MCP transport (stdio, http)
+│   ├── mcp.mjs            # Re-export shim
+│   ├── extension/         # Extracted modules — presets, session-io, settings
+│   ├── context.mjs        # Context compaction + repo outline + injection
+│   ├── config.mjs         # Model capability specs (self-contained)
+│   ├── memory.mjs         # Long-term memory (FTS5)
+│   ├── repomap.mjs        # Repository dependency graph
 │   ├── specs.mjs          # Re-export from config.mjs
-│   └── prompts/          # System prompts
+│   └── prompts/           # System prompts
 ├── webview/
 │   ├── chat.js           # Frontend orchestration
 │   ├── ui.js             # DOM helpers
 │   ├── md.js             # Markdown renderer
 │   ├── index.html        # Webview shell
-│   └── style.css         # Styles
+│   ├── base.css          # Reset, variables, layout
+│   ├── chat.css          # Messages, markdown, tool calls
+│   ├── controls.css      # Input area, controls, dropdown
+│   ├── session.css       # Session bar
+│   └── settings.css      # Settings panel
 └── docs/
     └── design/           # Design docs
 ```
@@ -134,12 +149,13 @@ thincoder-vscode/
 | Feature | CLI (`thincoder`) | VS Code Extension |
 |---------|-------------------|-------------------|
 | Interface | Terminal TUI (ANSI) | VS Code side panel |
-| Memory system | 3-layer FTS5 + vector | Not yet (planned) |
+| Memory system | 3-layer FTS5 + vector | FTS5 only (no vector search) |
 | Checkpoint | Git snapshot restore | Git diff/status/log only |
-| MCP support | ✅ | Not yet (planned) |
+| MCP support | ✅ | ✅ |
 | Session persistence | 5 archive slots | Filesystem (storageUri) — no size limit |
 | Skill system | ✅ | ✅ |
 | Plan mode | ✅ | ✅ |
 | Subagents | ✅ | ✅ |
 | Verify guard | ✅ | ✅ |
-| Image input | `read_image` tool | Not yet (planned) |
+| Image input | `read_image` tool | ✅ |
+| MCP support | ✅ | ✅ |

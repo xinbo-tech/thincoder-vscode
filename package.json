@@ -32,8 +32,21 @@
       {
         "command": "thincoder.setup",
         "title": "ThinCoder: Setup Provider & API Key"
+      },
+      {
+        "command": "thincoder.askSelection",
+        "title": "Ask ThinCoder"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "thincoder.askSelection",
+          "when": "editorHasSelection",
+          "group": "navigation"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "thincoder.openChat",
@@ -55,6 +68,12 @@
           "default": false,
           "order": 2,
           "markdownDescription": "# Auto-Approve Tools\nWhen enabled, the agent automatically executes file-modifying tools without asking for confirmation. **Off by default — you must explicitly opt in to automatic execution.**"
+        },
+        "thincoder.mcpServers": {
+          "type": "object",
+          "default": {},
+          "order": 3,
+          "markdownDescription": "# MCP Servers\nModel Context Protocol servers. Each key is a server name, value is a config object:\n\n- `type`: \"stdio\" or \"http\" (auto-detected from command/url if omitted)\n- `command` + `args`: for stdio transport\n- `url` + `headers`: for HTTP transport\n\nExample:\n```json\n{\n  \"thincoder.mcpServers\": {\n    \"filesystem\": { \"command\": \"npx\", \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/path\"] },\n    \"my-api\": { \"url\": \"https://example.com/mcp\", \"headers\": { \"Authorization\": \"Bearer xxx\" } }\n  }\n}\n```"
         }
       }
     }

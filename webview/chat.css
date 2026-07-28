@@ -1,0 +1,268 @@
+/* ─── Messages ──────────────────────────────── */
+
+.message {
+  margin-top: 14px;
+  max-width: 90%;
+}
+
+.message.user {
+  margin-left: auto;
+}
+
+.message.user .bubble {
+  background: var(--msg-user-bg);
+  color: var(--btn-fg);
+  border-radius: 10px 10px 4px 10px;
+}
+
+.message.assistant {
+  margin-right: auto;
+}
+
+.message.assistant .bubble {
+  background: var(--msg-assistant-bg);
+  border-radius: 10px 10px 10px 4px;
+}
+
+.bubble {
+  padding: 8px 12px;
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.message.assistant .bubble:empty {
+  display: none;
+}
+
+/* ─── Markdown content ──────────────────────── */
+
+.content h1 { font-size: 1.3em; margin: 12px 0 6px; font-weight: 700; }
+.content h2 { font-size: 1.15em; margin: 10px 0 4px; font-weight: 700; }
+.content h3 { font-size: 1.05em; margin: 8px 0 4px; font-weight: 600; }
+.content h4 { font-size: 1em; margin: 6px 0 2px; font-weight: 600; }
+
+.content p { margin: 0 0 6px; }
+.content p:last-child { margin-bottom: 0; }
+
+.content code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+  background: rgba(128,128,128,0.2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  word-break: break-word;
+}
+
+.content .code-block {
+  margin: 8px 0;
+  padding: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.3));
+  border: 1px solid var(--border);
+  position: relative;
+}
+
+.content .code-lang {
+  display: block;
+  padding: 3px 10px;
+  font-size: 10px;
+  color: var(--fg);
+  opacity: 0.5;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.content .code-block code {
+  display: block;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  line-height: 1.5;
+  background: transparent;
+  border-radius: 0;
+}
+
+.content ul { margin: 4px 0 6px; padding-left: 20px; }
+.content li { margin: 2px 0; line-height: 1.5; }
+
+.content a { color: var(--accent); text-decoration: none; }
+.content a:hover { text-decoration: underline; }
+
+.content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+
+.content strong { font-weight: 700; }
+.content em { font-style: italic; }
+
+.content table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.9em;
+  width: 100%;
+}
+
+.content th, .content td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.content th {
+  background: rgba(128,128,128,0.15);
+  font-weight: 600;
+}
+
+.content img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+/* ─── Tool Calls ────────────────────────────── */
+
+.tool-call {
+  margin: 8px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 12px;
+  background: var(--tool-bg);
+  max-width: 100%;
+}
+
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tool-call-header:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.tool-call-icon {
+  font-size: 0;
+  width: 0;
+  height: 0;
+  border-left: 5px solid var(--accent);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.15s;
+}
+
+.tool-call-icon.open {
+  transform: rotate(90deg);
+}
+
+.tool-call-name {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.tool-call-args {
+  color: var(--fg);
+  opacity: 0.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.tool-call-status {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.tool-call-body {
+  display: none;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  opacity: 0.75;
+  line-height: 1.45;
+}
+
+.tool-call-body.open {
+  display: block;
+}
+
+/* ─── Reasoning (thinking) block ─────────────── */
+
+.reasoning-block {
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 12px;
+  background: var(--tool-bg);
+}
+
+.reasoning-block summary {
+  padding: 4px 10px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--fg);
+  opacity: 0.5;
+  font-size: 11px;
+  font-style: italic;
+}
+
+.reasoning-content {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0.65;
+  font-style: italic;
+  line-height: 1.45;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ─── Error ──────────────────────────────────── */
+
+.error-banner {
+  background: rgba(244,71,71,0.12);
+  color: var(--error-fg);
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* ─── Welcome ────────────────────────────────── */
+
+.welcome {
+  text-align: center;
+  padding: 60px 20px 30px;
+  color: var(--fg);
+  opacity: 0.45;
+}
+
+.welcome h2 {
+  font-size: 15px;
+  margin-bottom: 8px;
+  opacity: 0.75;
+  font-weight: 600;
+}
+
+.welcome p {
+  font-size: 12px;
+  line-height: 1.7;
+  max-width: 280px;
+  margin: 0 auto;
+}

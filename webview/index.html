@@ -3,7 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="__CSS_URI__">
+  <meta http-equiv="Content-Security-Policy" content="__CSP__">
+  <link rel="stylesheet" href="__CSS_BASE_URI__">
+  <link rel="stylesheet" href="__CSS_CHAT_URI__">
+  <link rel="stylesheet" href="__CSS_CONTROLS_URI__">
+  <link rel="stylesheet" href="__CSS_SESSION_URI__">
+  <link rel="stylesheet" href="__CSS_SETTINGS_URI__">
 </head>
 <body>
   <div id="chat-container">
@@ -14,6 +19,14 @@
         <div id="session-dropdown" style="display:none"></div>
       </div>
       <button id="new-session-btn" title="New Session">+</button>
+    </div>
+    <div id="permission-bar" style="display:none">
+      <span id="permission-text"></span>
+      <div class="permission-actions">
+        <button id="permission-deny" class="perm-btn deny">✕ Deny</button>
+        <button id="permission-approve" class="perm-btn approve">✓ Approve</button>
+        <button id="permission-approve-all" class="perm-btn approve-all">✓✓ All</button>
+      </div>
     </div>
     <div id="messages"></div>
     <div id="toolbar">

@@ -19,15 +19,15 @@
 │                                                             │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
 │  │  extension.mjs│    │ src/agent.mjs│    │src/provider  │  │
-│  │  ChatPanel    │───▶│ runAgent()   │───▶│ chat()       │  │
-│  │               │    │              │    │ (fetch+SSE)  │  │
+│  │  ChatPanel    │───▶│ runAgent()   │───▶│+src/mcp      │  │
+│  │  +extension/  │    │ +context.mjs │    │ chat()       │  │
 │  └──────┬────────┘    └──────┬───────┘    └──────┬───────┘  │
 │         │                    │                    │          │
 │   postMessage          tool calls           HTTP → LLM API  │
 │         │                    │                               │
 │  ┌──────┴────────────────────┴──────────────────────────┐   │
 │  │                   Webview (iframe)                    │   │
-│  │  chat.js ─── ui.js ─── md.js ─── style.css           │   │
+│  │  chat.js ─── ui.js ─── md.js ─── base|chat|controls|session|settings.css │   │
 │  │  index.html                                          │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
@@ -61,7 +61,7 @@ class ChatPanel {
   }
   ```
 
-**Provider 配置**：存储在 `thincoder.providers` 中，格式 `{ name: key | {key, baseURL, model} }`。内置 6 个 preset（DeepSeek/Kimi/GLM/Qwen/MiniMax/OpenAI），加上 `custom` 支持任意 OpenAI 兼容端点。
+**Provider 配置**：存储在 `thincoder.providers` 中，格式 `{ name: key | {key, baseURL, model} }`。内置 6 个 preset（DeepSeek/Kimi/GLM/Qwen/MiniMax/OpenAI），加上 `custom` 支持任意 OpenAI 兼容端点。Provider 逻辑已提取到 `src/extension/presets.mjs`，设置管理到 `src/extension/settings.mjs`，会话 I/O 到 `src/extension/session-io.mjs`。
 
 **LLM 标题生成**：
 - 触发：会话第一条用户消息后，agent 完成回复
@@ -97,9 +97,9 @@ user input
 - explore：maxTurns=30，只读工具
 - plan/coder：maxTurns=50，完整工具
 
-### 3. src/tools.mjs — 工具系统
+### 3. 工具系统（`src/tools.mjs` → `src/tools/`）
 
-**设计原则**：每个工具 `{ name, description, parameters, execute(ctx) }`，统一的工具接口规范。
+**设计原则**：每个工具 `{ name, description, parameters, execute(ctx) }`，统一的工具接口规范。`tools.mjs` 是 re-export 入口，实现拆分到 `src/tools/` 子目录（`file.mjs`, `system.mjs`, `git.mjs`, `web.mjs`, `patch.mjs`, `index.mjs`）。
 
 **VS Code 适配增强**：
 - `write` / `edit`：写入后自动在编辑器中打开文件（`workspace.openTextDocument` → `window.showTextDocument`）
@@ -123,7 +123,7 @@ user input
 | 补丁 | `apply_patch` |
 | 元工具 | `task`, `recent_changes`, `subagent`, `plan`, `goal`, `skill`, `verify` |
 
-### 4. src/provider.mjs — LLM 调用层
+### 4. LLM 调用层（`src/provider.mjs` + `src/provider/rate.mjs`）
 
 **职责**：OpenAI 兼容的流式 chat completion，自动重试与退避。
 
@@ -161,7 +161,7 @@ user input
 ### 6. Webview 前端
 
 **文件结构**：
-- `index.html`：Webview shell，引用 `style.css` 和 `chat.js`
+- `index.html`：Webview shell，引用 5 个 CSS 文件（base, chat, controls, session, settings）和 `chat.js`
 - `chat.js`：主逻辑 — 状态管理、事件处理、消息渲染控制、模型选择器、历史面板、设置面板
 - `ui.js`：DOM 构造 — 欢迎页、消息气泡、工具调用卡片、loading 指示器
 - `md.js`：Markdown → HTML 转换（代码块高亮、inline code、链接）
@@ -180,13 +180,14 @@ user input
 
 ## 扩展点
 
-| 功能 | 状态 | 计划 |
+| 功能 | 状态 | 备注 |
 |------|------|------|
-| Memory 三层体系 | 未实现 | 自建（不依赖 CLI），计划 v2 |
-| MCP 支持 | 未实现 | 自建 MCP 客户端 |
-| Checkpoint (git snapshot) | 未实现 | 扩展在 VS Code 环境中的 checkpoint 语义 |
-| Image input | 未实现 | 通过剪贴板或文件选择器 |
-| Skill 系统 | 部分 | skill 工具已注册，但 `.thincoder/skills/` 目录读取逻辑待完善 |
+| Memory 三层体系 | ✅ 基础 | JSON 文件存储（put/search/list/remove），Type/tag/title/content 结构化。暂不依赖 better-sqlite3 |
+| MCP 支持 | ✅ | stdio + HTTP transport，`mcpTool` 统一入口（connect/list/call/disconnect）。配置项 `thincoder.mcpServers` 注入上下文 |
+| Checkpoint (git snapshot) | ✅ | git stash 快照 + list/create/rewind/cat，支持单文件恢复 |
+| Image input | ❌ | `readImageTool` 已注册，但 webview 无粘贴/选择图片 UI |
+| Skill 系统 | ✅ | 读取 `.thincoder/skills/` 目录下的 .md 文件，列表注入上下文 |
+| 权限审批 UI | ❌ | `autoApprove=false` 时仅注入 system reminder，无工具级确认拦截 |
 
 ## 与 thincoder CLI 的差异
 
@@ -198,7 +199,7 @@ user input
 | 会话存储 | 文件系统 (5 槽位轮转) | workspaceState (per-workspace) |
 | 工具目录约束 | 工作目录 (`process.cwd()`) | 第一个 workspace 文件夹 |
 | 文件打开 | TUI 内显示 | VS Code 编辑器标签页 |
-| 权限审批 | TUI 内交互式 | permission mode（默认需确认，可开 AUTO） |
-| 配置存储 | `~/.thincoder/config.json` | VS Code settings.json |
-| 记忆系统 | 3-layer FTS5 + vector | 未实现 |
-| MCP | ✅ | 未实现 |
+| 权限审批 | TUI 内交互式 | autoApprove 默认 false，提示 agent 确认但无工具级拦截 |
+| 配置存储 | `~/.thincoder/config.json` | VS Code settings.json + SecretStorage（密钥） |
+| 记忆系统 | 3-layer FTS5 + vector | JSON 文件存储（单层） |
+| MCP | ✅ | ✅ stdio + HTTP（`thincoder.mcpServers` 配置） |

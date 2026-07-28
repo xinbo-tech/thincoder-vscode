@@ -1,134 +1,27 @@
 /**
- * provider.mjs — LLM provider with TPM gate, partial/prefix continuation, retry+backoff
- * OpenAI-compatible, fetch + SSE streaming. Zero dependencies.
+ * provider.mjs — LLM call core (synced from thincoder CLI src/provider/core.mjs)
+ * chat / listModels / requestWithRetry / readSSE
  */
 
 import { specForModel } from "./specs.mjs"
-
-// ── Constants ──────────────────────────────────────────────
+import {
+  RETRYABLE_STATUS, MAX_RETRIES, MAX_CONTINUATIONS,
+  RATE_LIMIT_BACKOFF_MS, _rateHooks,
+  estimateRequestTokens, rateGate, recordRate,
+} from "./provider/rate.mjs"
 
 const FETCH_TIMEOUT_MS = 120000
-const MAX_RETRIES = 3
-const MAX_CONTINUATIONS = 3
-const RATE_LIMIT_BACKOFF_MS = [15_000, 30_000, 60_000]
-const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504])
 
-// ── Rate-limiting infrastructure ──────────────────────────
-
-/**
- * Test hooks: sleep/clock/window length are replaceable.
- * Production code should never call setTimeout/sleep directly — always go through these.
- */
-export const _rateHooks = {
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  now: () => Date.now(),
-  windowMs: 60_000,
-}
-
-const rateWindows = new Map() // key → { tokens: [{ts, n}], requests: [ts] }
-
-function rateKey(provider) {
-  // Normalize: /beta and /v1 share the same account's rate-limit window
-  const base = provider.baseURL.replace(/\/beta$/, "/v1")
-  return `${base}|${provider.apiKey ?? ""}`
-}
-
-/**
- * Rough estimate of text token count.
- * ASCII ~4 chars/token; non-ASCII (CJK/emoji) ~1 char/token.
- */
-export function estimateText(s) {
-  let nonAscii = 0
-  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) > 0x7f) nonAscii++
-  return Math.ceil((s.length - nonAscii) / 4) + nonAscii
-}
-
-/** Estimated prompt tokens for this request */
-export function estimateRequestTokens(body) {
-  let tokens = 0
-  for (const m of body.messages ?? []) {
-    if (typeof m.content === "string") tokens += estimateText(m.content)
-    if (typeof m.reasoning_content === "string") tokens += estimateText(m.reasoning_content)
-    for (const tc of m.tool_calls ?? []) {
-      tokens += estimateText(tc.function?.name ?? "") + estimateText(tc.function?.arguments ?? "")
-    }
-  }
-  if (body.tools) tokens += estimateText(JSON.stringify(body.tools))
-  return tokens
-}
-
-/** Gate: sleep until window frees space when over budget */
-export async function rateGate(provider, estimated, onWait, signal) {
-  const tpm = provider.tpm != null && estimated <= provider.tpm ? provider.tpm : null
-  const rpm = provider.rpm ?? null
-  if (tpm == null && rpm == null) return
-  const w = rateWindows.get(rateKey(provider)) ?? { tokens: [], requests: [] }
-  rateWindows.set(rateKey(provider), w)
-  for (;;) {
-    const now = _rateHooks.now()
-    const cutoff = now - _rateHooks.windowMs
-    w.tokens = w.tokens.filter((e) => e.ts > cutoff)
-    w.requests = w.requests.filter((ts) => ts > cutoff)
-    const usedTokens = w.tokens.reduce((s, e) => s + e.n, 0)
-    const overTokens = tpm != null ? usedTokens + estimated - tpm : 0
-    const overRequests = rpm != null ? w.requests.length + 1 - rpm : 0
-    if (overTokens <= 0 && overRequests <= 0) break
-    let waitMs = _rateHooks.windowMs
-    if (overTokens > 0) {
-      let freed = 0
-      for (const e of w.tokens) {
-        freed += e.n
-        if (freed >= overTokens) {
-          waitMs = Math.min(waitMs, e.ts + _rateHooks.windowMs - now)
-          break
-        }
-      }
-    }
-    if (overRequests > 0) {
-      waitMs = Math.min(waitMs, w.requests[overRequests - 1] + _rateHooks.windowMs - now)
-    }
-    waitMs = Math.max(waitMs, 50)
-    onWait?.({ phase: "gate", seconds: Math.ceil(waitMs / 1000) })
-    await _rateHooks.sleep(waitMs)
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
-  }
-}
-
-/** Accounting: record measured usage after response returns */
-export function recordRate(provider, estimated, usage) {
-  if (provider.tpm == null && provider.rpm == null) return
-  const key = rateKey(provider)
-  const w = rateWindows.get(key) ?? { tokens: [], requests: [] }
-  const now = _rateHooks.now()
-  const cutoff = now - _rateHooks.windowMs
-  w.tokens = w.tokens.filter((e) => e.ts > cutoff)
-  w.requests = w.requests.filter((ts) => ts > cutoff)
-  w.requests.push(now)
-  w.tokens.push({ ts: now, n: usage ? (usage.prompt_tokens ?? estimated) + (usage.completion_tokens ?? 0) : estimated })
-  if (w.tokens.length === 0 && w.requests.length === 0) rateWindows.delete(key)
-  else rateWindows.set(key, w)
-}
-
-// ── Core: chat with continuation ──────────────────────────
-
-/**
- * Send a streaming chat completion request with:
- *  - TPM/RPM rate gating before sending
- *  - Automatic continuation on truncation (finish_reason=length)
- *  - DeepSeek prefix completion via /beta endpoint
- *  - Exponential backoff on 429/5xx with Retry-After support
- *  - Quota error detection (non-retryable)
- */
+/** Send a streaming chat completion request with automatic continuation on truncation */
 export async function chat(provider, { messages, tools, onToken, onReasoning, onWait, signal }) {
   const spec = specForModel(provider.model)
   const body = {
     model: provider.model,
     messages,
     stream: true,
-    stream_options: { include_usage: true },
+    ...(spec.noUsageStream ? {} : { stream_options: { include_usage: true } }),
   }
   if (provider.maxTokens) body.max_tokens = provider.maxTokens
-  // Temperature: clamp to model's tempRange, only send if explicitly set
   if (provider.temperature != null) {
     let t = provider.temperature
     if (spec.tempRange) {
@@ -137,7 +30,6 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
     }
     body.temperature = t
   }
-  // Thinking / reasoning — send whichever the provider config specifies
   if (provider.thinking) body.thinking = provider.thinking
   if (provider.reasoningEffort) {
     if (spec.reasoningEffortEnum && !spec.reasoningEffortEnum.includes(provider.reasoningEffort)) {
@@ -149,6 +41,7 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
     body.reasoning_effort = provider.reasoningEffort
   }
   if (tools?.length) body.tools = tools
+  if (provider.responseFormat) body.response_format = provider.responseFormat
 
   const estimated = estimateRequestTokens(body)
   await rateGate(provider, estimated, onWait, signal)
@@ -182,12 +75,10 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
     result.reasoning += continued.reasoning ?? ""
     for (const tc of continued.toolCalls ?? []) {
       const idx = tc.index ?? result.toolCalls.length
-      while (result.toolCalls.length <= idx) {
-        result.toolCalls.push({ id: "", type: "function", function: { name: "", arguments: "" } })
-      }
-      if (tc.id) result.toolCalls[idx].id = tc.id
-      result.toolCalls[idx].function.name += tc.function?.name ?? ""
-      result.toolCalls[idx].function.arguments += tc.function?.arguments ?? ""
+      const s = (result.toolCalls[idx] ??= { id: "", name: "", arguments: "" })
+      if (tc.id) s.id = tc.id
+      s.name += tc.name ?? ""
+      s.arguments += tc.arguments ?? ""
     }
     result.finishReason = continued.finishReason
     if (continued.usage) {
@@ -204,7 +95,19 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
   return result
 }
 
-// ── HTTP request with retry ───────────────────────────────
+/** List available model IDs from the provider's /models endpoint */
+export async function listModels(provider, { signal } = {}) {
+  const response = await fetch(`${provider.baseURL}/models`, {
+    headers: { Authorization: `Bearer ${provider.apiKey}` },
+    signal,
+  })
+  if (!response.ok) {
+    const text = await response.text().catch(() => "")
+    throw new Error(`GET /models failed ${response.status}: ${text}`)
+  }
+  const data = await response.json()
+  return (data.data ?? []).map((m) => m.id).filter(Boolean).sort()
+}
 
 async function requestWithRetry(provider, body, signal, onWait) {
   let lastError
@@ -216,7 +119,7 @@ async function requestWithRetry(provider, body, signal, onWait) {
 
     let response
     try {
-      response = await fetch(`${provider.baseURL.replace(/\/+$/, "")}${provider.chatPath ?? "/chat/completions"}`, {
+      response = await fetch(`${provider.baseURL}${provider.chatPath ?? "/chat/completions"}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -235,7 +138,7 @@ async function requestWithRetry(provider, body, signal, onWait) {
 
     const text = await response.text().catch(() => "")
     const message = `LLM API error ${response.status}: ${text}`
-    if (isQuotaError(text)) throw new Error(message)
+    if (isNonRetryableError(response.status, text)) throw new Error(message)
     if (response.status === 429) {
       const retryAfter = Number(response.headers.get("retry-after"))
       const waitMs =
@@ -259,21 +162,39 @@ async function requestWithRetry(provider, body, signal, onWait) {
   throw lastError
 }
 
-function isQuotaError(text) {
-  try {
-    const type = JSON.parse(text)?.error?.type
-    return typeof type === "string" && type.includes("quota")
-  } catch {
-    return false
+/**
+ * Detect errors that should NOT be retried — quota, billing, auth, invalid params.
+ * Different providers use wildly different error formats. Check body text for known patterns.
+ */
+function isNonRetryableError(status, text) {
+  // Auth errors: never retry
+  if (status === 401 || status === 403) return true
+  // 400-level non-429: usually invalid params
+  if (status >= 400 && status < 500 && status !== 429) return true
+  // For 429, check if it's actually a billing/quota error (not rate limit)
+  if (status === 429) {
+    const lower = text.toLowerCase()
+    // Chinese providers often return 429 for billing issues
+    if (lower.includes("余额不足") || lower.includes("余额") || lower.includes("充值")) return true
+    if (lower.includes("insufficient") && (lower.includes("balance") || lower.includes("quota") || lower.includes("credit"))) return true
+    if (lower.includes("quota") && (lower.includes("exceeded") || lower.includes("insufficient"))) return true
+    // Standard OpenAI billing error (error.type === "insufficient_quota" or similar)
+    try {
+      const j = JSON.parse(text)
+      const errType = j?.error?.type || ""
+      if (typeof errType === "string" && (errType.includes("quota") || errType.includes("billing") || errType.includes("insufficient") || errType.includes("balance"))) return true
+      const errCode = j?.error?.code || ""
+      if (typeof errCode === "string" && (errCode === "1113" || errCode === "1114")) return true // GLM billing codes
+    } catch {}
   }
+  return false
 }
-
-// ── SSE reader ────────────────────────────────────────────
 
 async function readSSE(response, { onToken, onReasoning }) {
   const result = { content: "", reasoning: "", toolCalls: [], usage: null, finishReason: null }
   const decoder = new TextDecoder()
   let buffer = ""
+  let hasChoices = false
 
   const processLines = (lines) => {
     for (const line of lines) {
@@ -287,6 +208,7 @@ async function readSSE(response, { onToken, onReasoning }) {
       if (json.usage) result.usage = json.usage
       const choice = json.choices?.[0]
       if (!choice) continue
+      hasChoices = true
       if (choice.finish_reason) result.finishReason = choice.finish_reason
 
       const delta = choice.delta ?? {}
@@ -299,13 +221,10 @@ async function readSSE(response, { onToken, onReasoning }) {
         onToken?.(delta.content)
       }
       for (const tc of delta.tool_calls ?? []) {
-        const idx = tc.index ?? 0
-        while (result.toolCalls.length <= idx) {
-          result.toolCalls.push({ id: "", type: "function", function: { name: "", arguments: "" } })
-        }
-        if (tc.id) result.toolCalls[idx].id = tc.id
-        if (tc.function?.name) result.toolCalls[idx].function.name += tc.function.name
-        if (tc.function?.arguments) result.toolCalls[idx].function.arguments += tc.function.arguments
+        const slot = (result.toolCalls[tc.index] ??= { id: "", name: "", arguments: "" })
+        if (tc.id) slot.id = tc.id
+        if (tc.function?.name && !slot.name) slot.name = tc.function.name
+        if (tc.function?.arguments) slot.arguments += tc.function.arguments
       }
     }
   }
@@ -319,33 +238,38 @@ async function readSSE(response, { onToken, onReasoning }) {
   }
   buffer += decoder.decode()
   processLines(buffer.split("\n"))
+
+  // If no SSE choices were found, the response is likely a JSON error
+  if (!hasChoices) {
+    const contentType = response.headers.get("content-type") || ""
+    // Try to extract error from raw body
+    let errorMsg = ""
+    try {
+      const raw = buffer.trim() || ""
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        // Common error formats: { error: { message } }, { base_resp: { status_msg } }, { detail }
+        errorMsg = parsed?.error?.message
+          || parsed?.base_resp?.status_msg
+          || parsed?.detail
+          || parsed?.message
+          || parsed?.msg
+          || (typeof parsed.error === "string" ? parsed.error : "")
+      }
+    } catch { /* not JSON */ }
+    if (!errorMsg && !contentType.includes("event-stream")) {
+      errorMsg = `Response is not SSE (Content-Type: ${contentType || "unknown"})`
+    }
+    if (errorMsg) {
+      throw new Error(`API error: ${errorMsg}`)
+    }
+  }
+
   return result
 }
 
 function betaBaseURL(baseURL) {
-  // Already on beta endpoint — don't double-append (handles recursive continuation)
-  if (/\/beta$/.test(baseURL)) return baseURL
+  // DeepSeek prefix continuation uses /beta endpoint; only handle /v1 suffix, append /beta when /v1 is missing
   if (/\/v1$/.test(baseURL)) return baseURL.replace(/\/v1$/, "/beta")
   return baseURL.endsWith("/") ? baseURL + "beta" : baseURL + "/beta"
-}
-
-// ── Model listing ─────────────────────────────────────────
-
-/**
- * Fetch available model IDs from the provider's /models endpoint.
- * Returns empty array on failure (non-blocking — the preset default model is always available).
- */
-export async function listModels(provider) {
-  try {
-    const url = `${provider.baseURL.replace(/\/+$/, "")}/models`
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${provider.apiKey}` },
-      signal: AbortSignal.timeout(10000),
-    })
-    if (!res.ok) return []
-    const data = await res.json()
-    return (data.data ?? []).map((m) => m.id).filter(Boolean).sort()
-  } catch {
-    return []
-  }
 }

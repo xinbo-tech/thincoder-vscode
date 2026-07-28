@@ -5,75 +5,55 @@
 
 import * as vscode from "vscode"
 import { runAgent } from "./src/agent.mjs"
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, renameSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import { listModels } from "./src/provider.mjs"
-import { specForModel } from "./src/specs.mjs"
 import { closeAllMcp } from "./src/mcp.mjs"
+import { providerNames, getKey, buildProvider, initProviderKeyStore, loadProviderKeyCache } from "./src/extension/presets.mjs"
+import { loadMessages, saveMessages, deleteMessages, loadIndex, saveIndex, sessionsKey, loadModelPrefs, saveModelPrefs } from "./src/extension/session-io.mjs"
+import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus } from "./src/extension/settings.mjs"
+import { generateTitle } from "./src/extension/generate-title.mjs"
+import { savePastedImages } from "./src/extension/image-handler.mjs"
+import { injectEditorContext } from "./src/extension/editor-context.mjs"
+import { specForModel } from "./src/specs.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-export function activate(context) {
+export async function activate(context) {
+  // Initialize SecretStorage-based key store
+  initProviderKeyStore(context.secrets)
+  await loadProviderKeyCache()
+
   const chat = new ChatPanel(context)
+  // Status bar
+  const sb = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
+  sb.text = "$(hubot) ThinCoder"; sb.tooltip = "ThinCoder — Click to open"; sb.command = "thincoder.openChat"; sb.show()
+  context.subscriptions.push(sb)
+  chat._statusBar = sb
+
   context.subscriptions.push(vscode.commands.registerCommand("thincoder.openChat", () => chat.show()))
   context.subscriptions.push(vscode.commands.registerCommand("thincoder.setup", () => { chat.show() }))
   context.subscriptions.push(vscode.commands.registerCommand("thincoder.sendMessage", async () => {
     const input = await vscode.window.showInputBox({ prompt: "What to do?", placeHolder: "e.g. Add a README" })
     if (input) { chat.show(); chat.sendMessage(input) }
   }))
+  context.subscriptions.push(vscode.commands.registerCommand("thincoder.askSelection", async () => {
+    const editor = vscode.window.activeTextEditor
+    if (!editor) return
+    let text = editor.document.getText(editor.selection)
+    if (!text) return
+    // Truncate if too long
+    if (text.length > 4000) text = text.slice(0, 4000) + "\n... (truncated)"
+    const file = editor.document.fileName.split(/[/\\]/).pop() || ""
+    const msg = `Explain this code from ${file}:\n\`\`\`\n${text}\n\`\`\``
+    chat.show()
+    chat.sendMessage(msg)
+  }))
   // Reopen panel if it was open when VS Code last closed
   try { if (existsSync(join(context.storageUri.fsPath, ".panel-open"))) chat.show() } catch {}
 }
 
 export function deactivate() { closeAllMcp() }
-
-// ─── Provider presets ────────────────────────────────────────────
-
-const PRESETS = {
-  deepseek: { baseURL: "https://api.deepseek.com/v1", model: "deepseek-v4-pro", label: "DeepSeek", defaultEffort: "max" },
-  kimi:     { baseURL: "https://api.moonshot.cn/v1", model: "kimi-k3", label: "Kimi (Moonshot)", defaultEffort: "max" },
-  glm:      { baseURL: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.2", label: "GLM (Zhipu)", defaultEffort: "max" },
-  qwen:     { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen3.7-max", label: "Qwen (Alibaba)" },
-  minimax:  { baseURL: "https://api.minimax.chat/v1", model: "MiniMax-M3", label: "MiniMax", chatPath: "/text/chatcompletion_v2" },
-  openai:   { baseURL: "https://api.openai.com/v1", model: "gpt-4o", label: "OpenAI" },
-}
-
-function providerNames() { return [...Object.keys(PRESETS), "custom"] }
-
-function readProviders() {
-  return vscode.workspace.getConfiguration("thincoder").get("providers") || {}
-}
-
-function getKey(name) {
-  const providers = readProviders()
-  const entry = providers[name]
-  if (!entry) return null
-  return typeof entry === "string" ? entry : entry.key || null
-}
-
-function buildProvider(name) {
-  const providers = readProviders()
-  const apiKey = getKey(name)
-  if (!apiKey) return null
-
-  if (name === "custom") {
-    const entry = providers.custom
-    if (typeof entry !== "object" || !entry.baseURL || !entry.model) return null
-    return { baseURL: entry.baseURL, apiKey, model: entry.model, maxTokens: entry.maxTokens || 131072 }
-  }
-
-  const preset = PRESETS[name]
-  if (!preset) return null
-  const spec = specForModel(preset.model)
-  return {
-    baseURL: preset.baseURL, apiKey, model: preset.model,
-    maxTokens: spec.maxOutput || 131072,
-    thinking: spec.thinkApi === "type" ? { type: "enabled" } : null,
-    reasoningEffort: preset.defaultEffort || null,
-    ...(preset.chatPath ? { chatPath: preset.chatPath } : {}),
-  }
-}
 
 // ─── Chat Panel ──────────────────────────────────────────────────
 
@@ -83,66 +63,28 @@ class ChatPanel {
     this._extensionUri = context.extensionUri
     this._panel = null
     this._abortController = null
+    this._permissionResolve = null
     // Session messages stored as files under storageUri; workspaceState only holds index
     this._msgDir = join(context.storageUri.fsPath, "sessions")
     this._panelFlagPath = join(context.storageUri.fsPath, ".panel-open")
     try { mkdirSync(this._msgDir, { recursive: true }) } catch {}
   }
 
-  // ─── Session file I/O ──────────────────────────
+  // ─── Session file I/O (delegated to session-io.mjs) ─────
 
-  _msgPath(name) {
-    const safe = Buffer.from(name).toString("base64url")
-    return join(this._msgDir, `${safe}.json`)
-  }
-
-  _loadMessages(name) {
-    try {
-      const data = readFileSync(this._msgPath(name), "utf8")
-      const parsed = JSON.parse(data)
-      return Array.isArray(parsed) ? parsed : (parsed.messages || [])
-    } catch { return [] }
-  }
-
-  _saveMessages(name, messages) {
-    try {
-      mkdirSync(this._msgDir, { recursive: true })
-      writeFileSync(this._msgPath(name), JSON.stringify(messages), "utf8")
-    } catch (e) { console.warn("ThinCoder: failed to save messages", e.message) }
-  }
-
-  _deleteMessages(name) {
-    try { unlinkSync(this._msgPath(name)) } catch {}
-  }
-
-  _renameMessages(oldName, newName) {
-    try { renameSync(this._msgPath(oldName), this._msgPath(newName)) } catch {}
-  }
+  _loadMessages(name) { return loadMessages(this._msgDir, name) }
+  _saveMessages(name, messages) { saveMessages(this._msgDir, name, messages) }
+  _deleteMessages(name) { deleteMessages(this._msgDir, name) }
 
   // ─── Session index (workspaceState) ─────────────
 
-  get _sessionsKey() {
-    const ws = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || "global"
-    return `thincoder.sessions.${Buffer.from(ws).toString("base64").slice(0, 32)}`
-  }
+  get _sessionsKey() { return sessionsKey(vscode.workspace.workspaceFolders) }
 
-  _loadModelPrefs() {
-    try { return this._context.workspaceState.get("thincoder.modelPrefs") || {} } catch { return {} }
-  }
+  _loadModelPrefs() { return loadModelPrefs(this._context.workspaceState) }
+  _saveModelPrefs(prefs) { saveModelPrefs(this._context.workspaceState, prefs) }
 
-  _saveModelPrefs(prefs) { try { this._context.workspaceState.update("thincoder.modelPrefs", prefs) } catch {} }
-
-  /** Returns { active, sessions: { name: { title, count, updated } } } — no messages in workspaceState */
-  _loadIndex() {
-    try {
-      const saved = this._context.workspaceState.get(this._sessionsKey)
-      // Must have `sessions` object (not old `items` format); treat anything else as corrupted
-      if (saved && typeof saved === "object" && saved.active && saved.sessions) return saved
-    } catch {}
-    return { active: "Session 1", sessions: { "Session 1": { title: "", count: 0, updated: "" } } }
-  }
-
-  _saveIndex(s) { try { this._context.workspaceState.update(this._sessionsKey, s) } catch {} }
+  _loadIndex() { return loadIndex(this._context.workspaceState, this._sessionsKey) }
+  _saveIndex(s) { saveIndex(this._context.workspaceState, this._sessionsKey, s) }
 
   _activeHistory() {
     const ix = this._loadIndex()
@@ -220,43 +162,7 @@ class ChatPanel {
   }
 
   async _generateTitle() {
-    const ix = this._loadIndex()
-    const entry = ix.sessions[ix.active]
-    if (!entry || entry.title) return
-    const msgs = this._loadMessages(ix.active)
-    const firstUser = msgs.find((m) => m.type === "user")
-    if (!firstUser || firstUser.content.length < 10) return
-
-    const provName = providerNames().find((n) => getKey(n))
-    if (!provName) return
-    const prov = buildProvider(provName)
-    if (!prov) return
-
-    try {
-      const body = JSON.stringify({
-        model: prov.model,
-        messages: [
-          { role: "system", content: "Generate a concise title (max 40 chars, no quotes) for this conversation. Reply ONLY with the title." },
-          { role: "user", content: firstUser.content.slice(0, 200) },
-        ],
-        max_tokens: 30, stream: false,
-      })
-      const chatPath = prov.chatPath ?? "/chat/completions"
-      const res = await fetch(`${prov.baseURL.replace(/\/+$/, "")}${chatPath}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${prov.apiKey}` },
-        body,
-        signal: AbortSignal.timeout(10000),
-      })
-      if (!res.ok) return
-      const data = await res.json()
-      const title = data.choices?.[0]?.message?.content?.trim().slice(0, 40)
-      if (title) {
-        entry.title = title
-        this._saveIndex(ix)
-        this._pushSessions()
-      }
-    } catch { /* best-effort */ }
+    await generateTitle(() => this._loadIndex(), (ix) => this._saveIndex(ix), (n) => this._loadMessages(n), () => this._pushSessions(), this._loadIndex().active)
   }
 
   // ─── Panel lifecycle ──────────────────────────
@@ -278,7 +184,7 @@ class ChatPanel {
     // Register message handler BEFORE anything that might throw
     this._panel.webview.onDidReceiveMessage((msg) => {
       switch (msg.type) {
-        case "userMessage":    this._chat(msg.text, msg.model, msg.reasoning, msg.provider); break
+        case "userMessage":    this._chat(msg.text, msg.model, msg.reasoning, msg.provider, msg.images); break
         case "abort":          this._abortController?.abort(); break
         case "saveProviderKey": this._saveProviderKey(msg.name, msg.key); break
         case "deleteProviderKey": this._deleteProviderKey(msg.name); break
@@ -288,8 +194,17 @@ class ChatPanel {
         case "switchSession":  this._switchSession(msg.name); break
         case "deleteSession":  this._deleteSession(msg.name); break
         case "getSessions":    this._pushSessions(); break
-        case "selectModel":    this._saveModelPrefs({ ...this._loadModelPrefs(), model: msg.model, provider: msg.provider || "" }); break
+        case "selectModel":
+          this._saveModelPrefs({ ...this._loadModelPrefs(), model: msg.model, provider: msg.provider || "" })
+          if (this._statusBar) this._statusBar.text = `$(hubot) ${msg.model}`
+          break
         case "selectReasoning": this._saveModelPrefs({ ...this._loadModelPrefs(), reasoning: msg.reasoning }); break
+        case "permissionResponse":
+          if (this._permissionResolve) {
+            this._permissionResolve(msg.approved === true || msg.approved === "approveAll")
+            this._permissionResolve = null
+          }
+          break
       }
     })
 
@@ -313,112 +228,46 @@ class ChatPanel {
 
   // ─── Settings ─────────────────────────────────
 
-  _providerStatus() {
-    const providers = readProviders()
-    const status = {}
-    const builtins = [...Object.keys(PRESETS), "custom"]
-    for (const name of builtins) {
-      const entry = providers[name]
-      if (!entry) { status[name] = { configured: false }; continue }
-      if (typeof entry === "string") {
-        status[name] = { configured: true, masked: entry.slice(0, 4) + "…" + entry.slice(-4) }
-      } else {
-        status[name] = { configured: true, masked: (entry.key || "").slice(0, 4) + "…" + (entry.key || "").slice(-4), baseURL: entry.baseURL, model: entry.model }
-      }
-    }
-    const custom = providers.custom
-    const customCfg = (custom && typeof custom === "object") ? { baseURL: custom.baseURL || "", model: custom.model || "", hasKey: !!custom.key } : null
-    return { providers: status, custom: customCfg }
-  }
-
-  async _saveProviderKey(name, key) {
-    if (!key || !key.trim()) return
-    const c = vscode.workspace.getConfiguration("thincoder")
-    const providers = { ...(c.get("providers") || {}) }
-    providers[name] = key.trim()
-    await c.update("providers", providers, vscode.ConfigurationTarget.Global)
-    this._pushStatus()
-  }
-
-  async _saveCustomProvider({ key, baseURL, model }) {
-    const c = vscode.workspace.getConfiguration("thincoder")
-    const providers = { ...(c.get("providers") || {}) }
-    if (key && baseURL && model) {
-      providers.custom = { key: key.trim(), baseURL: baseURL.trim(), model: model.trim() }
-    } else {
-      delete providers.custom
-    }
-    await c.update("providers", providers, vscode.ConfigurationTarget.Global)
-    this._pushStatus()
-  }
-
-  async _deleteProviderKey(name) {
-    const c = vscode.workspace.getConfiguration("thincoder")
-    const providers = { ...(c.get("providers") || {}) }
-    delete providers[name]
-    await c.update("providers", providers, vscode.ConfigurationTarget.Global)
-    this._pushStatus()
-  }
-
-  _pushStatus() {
-    const status = this._providerStatus()
-    const anyKey = Object.values(status.providers).some((s) => s.configured)
-    this._panel?.webview.postMessage({
-      type: "providerStatus",
-      keyOk: anyKey,
-      status,
-    })
-  }
-
+  _providerStatus() { return providerStatus() }
+  async _saveProviderKey(name, key) { await saveProviderKey(name, key); this._pushStatus() }
+  async _saveCustomProvider(config) { await saveCustomProvider(config); this._pushStatus() }
+  async _deleteProviderKey(name) { await deleteProviderKey(name); this._pushStatus() }
+  _pushStatus() { pushStatus(this._panel) }
   async _status() {
-    this._pushStatus()
-    const status = this._providerStatus()
-    const anyKey = Object.values(status.providers).some((s) => s.configured)
-
-    if (!anyKey) return
-
-    const results = await Promise.allSettled(
-      providerNames().filter((n) => status.providers[n]?.configured).map(async (name) => {
-        const prov = buildProvider(name)
-        if (!prov) return { name, models: [] }
-        try {
-          const ids = await listModels(prov)
-          const presetModel = PRESETS[name]?.model || prov.model
-          const list = ids.length > 0 ? ids : [presetModel]
-          return { name, models: list.map((id) => {
-            const spec = specForModel(id)
-            const r = spec.reasoningEffortEnum || (spec.thinking ? ["enabled"] : [])
-            return { id, label: id, provider: name, group: PRESETS[name]?.label || "Custom", reasoning: r }
-          })}
-        } catch {
-          const m = PRESETS[name]?.model || prov.model
-          const spec = specForModel(m)
-          const r = spec.reasoningEffortEnum || (spec.thinking ? ["enabled"] : [])
-          return { name, models: [{ id: m, label: m, provider: name, group: PRESETS[name]?.label || "Custom", reasoning: r }] }
-        }
-      })
-    )
-    const allModels = results.flatMap((r) => r.status === "fulfilled" ? r.value.models : [])
-    this._panel?.webview.postMessage({ type: "models", models: allModels, prefs: this._loadModelPrefs() })
-    this._pushSessions()
+    await loadProviderKeyCache() // ensure cache is fresh (extension may already be running)
+    await fullStatus(this._panel, this._context.workspaceState, () => this._pushSessions())
+    const prefs = this._loadModelPrefs()
+    if (prefs.model && this._statusBar) this._statusBar.text = `$(hubot) ${prefs.model}`
   }
 
   // ─── Chat ─────────────────────────────────────
 
-  async _chat(text, modelOverride, reasoning, providerName) {
+  async _chat(text, modelOverride, reasoning, providerName, images) {
     if (!this._panel) { vscode.window.showErrorMessage("_chat: panel is null"); return }
-    if (!providerName) providerName = providerNames().find((n) => getKey(n))
+    if (!providerName) {
+      for (const n of providerNames()) { if (await getKey(n)) { providerName = n; break } }
+    }
     if (!providerName) { this._panel.webview.postMessage({ type: "error", text: "No provider configured — click ⚙ to set API keys" }); return }
-    let p = buildProvider(providerName)
+    let p = await buildProvider(providerName)
     if (!p) { this._panel.webview.postMessage({ type: "error", text: `Failed to build provider "${providerName}" — check your API key` }); return }
     if (modelOverride) p = { ...p, model: modelOverride }
-    if (reasoning === "enabled") { p = { ...p, thinking: { type: "enabled" }, reasoningEffort: null } }
+    if (reasoning === "enabled") {
+      const spec = specForModel(p.model)
+      const thinkVal = spec.thinkEnabledValue || "enabled"
+      p = { ...p, thinking: { type: thinkVal }, ...(spec.thinkApi === "effort" ? { reasoningEffort: null } : {}) }
+    }
     else if (reasoning && reasoning !== "off") { p = { ...p, reasoningEffort: reasoning } }
     else if (reasoning === "off") { p = { ...p, thinking: null, reasoningEffort: null } }
 
     const c = vscode.workspace.getConfiguration("thincoder")
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
     const ts = new Date().toISOString()
+
+    // Handle pasted images
+    text = savePastedImages(images, cwd, text)
+
+    // Inject active editor context
+    text = injectEditorContext(text, cwd)
 
     const history = this._activeHistory()
     history.push({ type: "user", content: text, provider: providerName || "", model: modelOverride || p.model, timestamp: ts })
@@ -433,6 +282,7 @@ class ChatPanel {
     try {
       await runAgent(p, cwd, text, {
         onToken: (t) => { out += t; this._panel?.webview.postMessage({ type: "token", text: t }) },
+        onReasoning: (r) => { this._panel?.webview.postMessage({ type: "reasoning", text: r }) },
         onToolCall: (n, a) => this._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2) }),
         onToolResult: (n, r) => this._panel?.webview.postMessage({ type: "toolResult", name: n, text: r.slice(0, 500) }),
         onComplete: () => {
@@ -444,7 +294,12 @@ class ChatPanel {
           this._pushSessions()
           if (isFirstMessage) this._generateTitle()
         },
-      }, this._abortController.signal, c.get("autoApprove", false))
+        onPermissionRequired: c.get("autoApprove", false) ? undefined : (toolName, args) =>
+          new Promise((resolve) => {
+            this._permissionResolve = resolve
+            this._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2) })
+          }),
+      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}) })
     } catch (e) {
       if (e.name === "AbortError") { this._panel.webview.postMessage({ type: "aborted" }) }
       else {
@@ -458,7 +313,14 @@ class ChatPanel {
 
   _html() {
     let html = readFileSync(join(__dirname, "webview", "index.html"), "utf8")
-    html = html.replace("__CSS_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "webview", "style.css"))).toString())
+    const csp = this._panel.webview.cspSource
+    html = html.replace("__CSP__",
+      `default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp}; img-src ${csp} https: data:; font-src ${csp}; connect-src ${csp};`)
+    html = html.replace("__CSS_BASE_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "webview", "base.css"))).toString())
+    html = html.replace("__CSS_CHAT_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "webview", "chat.css"))).toString())
+    html = html.replace("__CSS_CONTROLS_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "webview", "controls.css"))).toString())
+    html = html.replace("__CSS_SESSION_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "webview", "session.css"))).toString())
+    html = html.replace("__CSS_SETTINGS_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "webview", "settings.css"))).toString())
     html = html.replace("__CHAT_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "webview", "chat.js"))).toString())
     return html
   }

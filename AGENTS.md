@@ -22,23 +22,34 @@ Design docs in `docs/design/`. Independent product — no dependency on thincode
 - **Tool approval**: `thincoder.autoApprove` defaults to `false`. When off, the model runs in permission mode — it describes planned changes and waits for confirmation before executing file-modifying tools. When on, all tools execute automatically.
 - **No legacy migration code**: project is pre-release — breaking changes are expected. When storage format changes, just change it. Migration boilerplate becomes dead code instantly.
 - **Model specs**: self-contained `src/config.mjs` with MODEL_SPECS table. No runtime dependency on any external product.
+- **Error surfacing**: `isNonRetryableError` in provider.mjs detects billing/param errors across all provider formats and fails immediately (no retry). `readSSE` detects non-SSE responses (API errors returned as JSON) and extracts error messages.
+- **Provider-specific thinking values**: not all providers accept `thinking.type: "enabled"`. MiniMax requires `"adaptive"`. The `thinkEnabledValue` spec field maps the generic `"enabled"` UI toggle to the correct provider value.
 
 ## Key Modules
 
 ```
-extension.mjs        Extension entry + ChatPanel class (session CRUD, settings, LLM title generation)
-src/agent.mjs        Agent main loop — tool execution, context compaction, subagent spawning
-src/agent-tools.mjs  Self-discipline tools: task, recent_changes, subagent, plan, goal, skill, verify
-src/tools.mjs        VS Code-adapted tools (20+): file ops, bash, glob, grep, git, web, checkpoint
-src/provider.mjs     LLM provider (fetch + SSE, rate-limit retry with backoff)
-src/context.mjs      Context compaction + repo dependency outline builder
-src/config.mjs        Model capability specs (self-contained copy — context window, thinking API, temp ranges)
-src/specs.mjs         Re-export from config.mjs (kept for backward compat)
-src/prompts/         System prompts (6 files): system.md, discipline.md, main.md, explore/coder/plan.md
+extension.mjs        Extension entry + ChatPanel class (session CRUD, settings, LLM title generation, CSP injection)
+src/agent.mjs         Agent main loop — parallel tool batching, multimodal image injection, context compaction, subagent spawning, reasoningEcho
+src/agent-tools.mjs   Re-export shim → src/agent-tools/ (task, subagent, plan, goal, skill, verify)
+src/tools.mjs         Re-export shim → src/tools/ (file ops, bash, glob, grep, git, web, checkpoint, read_image)
+src/mcp.mjs           Re-export shim → src/mcp/ (stdio/http transport, MCP client)
+src/provider.mjs      LLM provider (fetch + SSE, non-retryable error detection, rate-limit retry) + re-exports rate gate
+src/provider/rate.mjs TPM rate limiting gate
+src/context.mjs       Context compaction + repo outline builder + context injection
+src/memory.mjs        Long-term memory (FTS5 full-text search, no vector/embedding)
+src/repomap.mjs       Repository dependency graph parsing
+src/config.mjs        Model capability specs (context, thinkApi, thinkEnabledValue, noUsageStream, temp ranges)
+src/specs.mjs         Re-export from config.mjs (backward compat)
+src/extension/        Extracted ChatPanel modules: presets, session-io, settings
+src/prompts/          System prompts: system.md, discipline.md, main.md, explore/coder/plan.md
 webview/chat.js      Frontend orchestration: message handling, model selector, session history
 webview/ui.js        DOM helpers: welcome banner, message bubbles, tool call rendering
 webview/md.js        Lightweight Markdown → HTML renderer
-webview/style.css    Chat panel styles
+webview/base.css     Base styles, variables, layout
+webview/chat.css     Messages, markdown, tool calls, error
+webview/controls.css Input area, controls, dropdown
+webview/session.css  Session bar
+webview/settings.css Settings panel
 webview/index.html   Webview shell (referenced by ChatPanel._html())
 ```
 
@@ -51,6 +62,7 @@ webview/index.html   Webview shell (referenced by ChatPanel._html())
 | webview → extension | `newSession` / `switchSession` / `deleteSession` / `getSessions` | `{ name? }` |
 | webview → extension | `selectModel` / `selectReasoning` | `{ model, provider? }` / `{ reasoning }` |
 | extension → webview | `token` | `{ text }` |
+| extension → webview | `reasoning` | `{ text }` (model's thinking process, shown in collapsible block) |
 | extension → webview | `toolCall` / `toolResult` | `{ name, args? / text }` |
 | extension → webview | `complete` / `loading` / `aborted` / `error` | `{ text? }` |
 | extension → webview | `providerInfo` | `{ text, keyOk, needsSetup?, settings? }` |
@@ -65,14 +77,16 @@ webview/index.html   Webview shell (referenced by ChatPanel._html())
 2. Abort previous run via `AbortController`
 3. Append user message to persisted history
 4. Call `runAgent(provider, cwd, text, callbacks, signal, autoApprove)`
-5. Agent loop runs (tool execution, context compaction, subagent spawning)
+5. Agent loop runs (tool execution with parallel batching, context compaction, subagent spawning)
 6. Each token → `onToken` callback → webview `token` message
-7. Tool calls/results → `onToolCall`/`onToolResult` callbacks → webview messages
-8. On complete → append assistant message to history, trigger title generation if first exchange
-9. On abort → send `aborted` to webview
-10. On error → send `error` with provider/model context
+7. Reasoning tokens → `onReasoning` callback → webview `reasoning` message (collapsible "Thinking..." block)
+8. Tool calls/results → `onToolCall`/`onToolResult` callbacks → webview messages
+9. On complete → append assistant message to history, trigger title generation if first exchange
+10. On abort → send `aborted` to webview
+11. On error → send `error` with provider/model context
 
 ## Testing
 
-- No test suite yet (planned). Manual smoke test: open a workspace, configure a provider, send a message, verify tool execution and response streaming.
+- **Smoke test**: `node test/smoke-provider.mjs <provider> <api-key>` — directly tests an API provider (single turn, no tools).
+- No test suite yet (planned). Manual test: open a workspace, configure a provider, send a message, verify tool execution and response streaming.
 - After modifying agent loop or tools: test with a simple file operation (read + write) and a multi-turn conversation.
