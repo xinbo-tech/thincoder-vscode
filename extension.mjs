@@ -17,7 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export function activate(context) {
   const chat = new ChatPanel(context)
   context.subscriptions.push(vscode.commands.registerCommand("thincoder.openChat", () => chat.show()))
-  context.subscriptions.push(vscode.commands.registerCommand("thincoder.setup", () => chat.runSetup()))
+  context.subscriptions.push(vscode.commands.registerCommand("thincoder.setup", () => { chat.show() }))
   context.subscriptions.push(vscode.commands.registerCommand("thincoder.sendMessage", async () => {
     const input = await vscode.window.showInputBox({ prompt: "What to do?", placeHolder: "e.g. Add a README" })
     if (input) { chat.show(); chat.sendMessage(input) }
@@ -283,6 +283,7 @@ class ChatPanel {
         case "saveProviderKey": this._saveProviderKey(msg.name, msg.key); break
         case "deleteProviderKey": this._deleteProviderKey(msg.name); break
         case "getProviderStatus": this._pushStatus(); break
+        case "saveCustomProvider": this._saveCustomProvider(msg.config); break
         case "newSession":     this._newSession(); break
         case "switchSession":  this._switchSession(msg.name); break
         case "deleteSession":  this._deleteSession(msg.name); break

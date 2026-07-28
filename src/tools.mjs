@@ -18,6 +18,7 @@ const BASH_TIMEOUT_MS = 120000
 
 export const readTool = {
   name: "read",
+  readonly: true,
   description:
     "Read a text file. Returns numbered lines. Use offset/limit to page large files.\n" +
     "Parameters:\n" +
@@ -110,6 +111,7 @@ export const editTool = {
 
 export const globTool = {
   name: "glob",
+  readonly: true,
   description:
     "Find files by glob pattern. Returns matching paths. Supports ** for recursive matching.\n" +
     "Parameters:\n" +
@@ -136,6 +138,7 @@ export const globTool = {
 
 export const grepTool = {
   name: "grep",
+  readonly: true,
   description:
     "Search file contents with a regex. Returns matching lines.\n" +
     "Parameters:\n" +
@@ -219,6 +222,7 @@ export const bashTool = {
 // ─── git tools ────────────────────────────────────────────────
 
 export const gitDiffTool = {
+  readonly: true,
   name: "git_diff",
   description: "Show git diff (unified format). Use to see uncommitted changes.",
   parameters: {
@@ -242,6 +246,7 @@ export const gitDiffTool = {
 }
 
 export const gitStatusTool = {
+  readonly: true,
   name: "git_status",
   description: "Show git status — staged, unstaged, untracked files.",
   parameters: { type: "object", properties: {} },
@@ -256,6 +261,7 @@ export const gitStatusTool = {
 }
 
 export const gitLogTool = {
+  readonly: true,
   name: "git_log",
   description: "Show recent git commit history.",
   parameters: {
@@ -281,6 +287,7 @@ export const gitLogTool = {
 // ─── web tools ────────────────────────────────────────────────
 
 export const websearchTool = {
+  readonly: true,
   name: "websearch",
   description:
     "Search the web. Returns result titles, URLs, and snippets.\n" +
@@ -322,6 +329,7 @@ export const websearchTool = {
 }
 
 export const fetchTool = {
+  readonly: true,
   name: "fetch",
   description:
     "Fetch a URL and return its content as text.\n" +
@@ -723,6 +731,7 @@ export const readImageTool = {
 // ─── code understanding ─────────────────────────────────────────
 
 export const codeSearchTool = {
+  readonly: true,
   name: "code_search",
   description:
     "Search the project's source code for relevant code. Use this to find functions, classes, or code patterns across the codebase. " +
@@ -785,6 +794,7 @@ export const codeSearchTool = {
 }
 
 export const docSearchTool = {
+  readonly: true,
   name: "doc_search",
   description:
     "Search the project's documentation (README, design docs, guides, markdown files) for relevant information. " +

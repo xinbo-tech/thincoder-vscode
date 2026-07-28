@@ -96,6 +96,7 @@ export const subagentTool = {
 }
 
 export const planTool = {
+  readonly: true,
   name: "plan",
   description:
     "Enter or exit plan mode. In plan mode, only read-only tools are allowed — useful for exploring code before committing changes.\n" +

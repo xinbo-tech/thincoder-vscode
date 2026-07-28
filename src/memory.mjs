@@ -166,6 +166,7 @@ export function search(cwd, query, { limit = 5 } = {}) {
 }
 
 export const memorySearchTool = {
+  readonly: true,
   name: "memory_search",
   description:
     "Search long-term memory across all entries for relevant knowledge saved in previous sessions. " +
