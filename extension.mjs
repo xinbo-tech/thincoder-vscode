@@ -5,7 +5,7 @@
 
 import * as vscode from "vscode"
 import { runAgent } from "./src/agent.mjs"
-import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync, readdirSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { closeAllMcp } from "./src/mcp.mjs"
@@ -246,15 +246,26 @@ class ChatPanel {
           if (this._permissionQueue.length > 0) {
             const pending = this._permissionQueue.shift()
             pending.resolve(msg.approved === true || msg.approved === "approveAll")
-            // If "approveAll", resolve all remaining
             if (msg.approved === "approveAll") {
               for (const p of this._permissionQueue) p.resolve(true)
               this._permissionQueue = []
             }
           }
-        case "atComplete":
-          this._atComplete(msg.query, msg.cwd)
           break
+        case "atComplete":
+        case "retry":
+          // Re-send last user message
+          {
+            const hist = this._activeHistory()
+            const lastUser = [...hist].reverse().find((m) => m.type === "user")
+            if (lastUser) {
+              hist.pop() // remove last assistant response if any
+              this._saveHistory(hist)
+              this._chat(lastUser.content, lastUser.model, lastUser.reasoning, lastUser.provider, lastUser.images)
+            }
+          }
+          break
+          this._atComplete(msg.query, msg.cwd)
           break
       }
     })
@@ -293,13 +304,29 @@ class ChatPanel {
     if (!this._panel || !query) return
     const root = vscode.workspace.workspaceFolders?.[0]?.uri
     if (!root) return
-    // Normalize query: remove leading @ if present, prepend **/
+    const base = cwd || root.fsPath
     let pattern = query.startsWith("@") ? query.slice(1) : query
+    // Directory listing: if query ends with /, list contents
+    if (pattern.endsWith("/")) {
+      try {
+        const dirPath = pattern.replace(/\/$/, "")
+        const absDir = join(base, dirPath)
+        let files
+        try { files = readdirSync(absDir, { withFileTypes: true }) } catch { files = [] }
+        const matches = files.slice(0, 15).map((e) => ({
+          path: (dirPath + "/" + e.name).replace(/\\/g, "/") + (e.isDirectory() ? "/" : ""),
+          name: e.name + (e.isDirectory() ? "/" : ""),
+          isDir: e.isDirectory(),
+        }))
+        this._panel.webview.postMessage({ type: "atResults", matches })
+      } catch { /* */ }
+      return
+    }
+    // File pattern search
     if (!pattern.includes("*")) pattern = `**/${pattern}*`
     else if (!pattern.startsWith("**")) pattern = `**/${pattern}`
     try {
       const files = await vscode.workspace.findFiles(pattern, "**/node_modules/**,**/.git/**", 20)
-      const base = cwd || root.fsPath
       const rel = (uri) => uri.fsPath.startsWith(base) ? uri.fsPath.slice(base.length + 1) : uri.fsPath
       const matches = files.slice(0, 12).map((uri) => ({
         path: rel(uri).replace(/\\/g, "/"),

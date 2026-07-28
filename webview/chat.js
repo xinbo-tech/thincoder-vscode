@@ -330,11 +330,19 @@ function renderToolPanels() {
       <div class="tool-panel-header">
         <span class="tool-panel-name">${escHtml(name)}</span>
         <span class="tool-panel-age">${age}</span>
+        <button class="tool-panel-close" data-name="${escHtml(name)}">✕</button>
       </div>
       <pre class="tool-panel-body">${escHtml(data.text.slice(-4000))}</pre>
     </div>`
   }).join("")
   panel.style.display = "block"
+  // Wire close buttons
+  panel.querySelectorAll(".tool-panel-close").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      delete _toolPanels[btn.dataset.name]
+      renderToolPanels()
+    })
+  })
 }
 
 function clearPanels() {
@@ -753,8 +761,8 @@ window.addEventListener("message", (e) => {
     case "loading": {
       if (m.loading) {
         document.getElementById("status-line").innerHTML = _planActive
-          ? `<span style="color:var(--accent)">PLAN</span> <span class="status-sep">|</span> Thinking…`
-          : "Thinking…"
+          ? `<span style="color:var(--accent)">PLAN</span> <span class="status-sep">|</span> Thinking<span class="loading-dots"></span>`
+          : `Thinking<span class="loading-dots"></span>`
       }
       setLoading(ctx, m.loading)
       break
@@ -865,6 +873,7 @@ window.addEventListener("message", (e) => {
     }
     case "planMode":
       _planActive = m.active
+      document.getElementById("input-row").classList.toggle("plan-active", _planActive)
       renderStatusBar()
       break
     case "subagent":

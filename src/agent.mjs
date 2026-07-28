@@ -214,7 +214,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     for (const batch of batches) {
       const runOne = async ({ tc, tool }) => {
         const toolName = tc.name
-        let args = {}
+        let args
         try { args = JSON.parse(tc.arguments || "{}") } catch {
           return { tool_call_id: tc.id, toolName, content: "Error: invalid JSON", meta: null }
         }

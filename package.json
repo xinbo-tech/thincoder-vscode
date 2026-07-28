@@ -80,6 +80,11 @@
   },
   "scripts": {
     "package": "npx @vscode/vsce package",
-    "test": "node --test test/unit.test.mjs"
+    "test": "node --test test/unit.test.mjs",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0"
   }
 }

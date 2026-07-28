@@ -10,7 +10,9 @@ import { md, mdInline, esc } from "./md.js"
 export function showWelcome(ctx) {
   const el = document.createElement("div")
   el.className = "welcome"
-  el.innerHTML = `<h2>ThinCoder</h2><p>Ask me to read, write, search, or explain code in this workspace.</p>`
+  el.innerHTML = `<h2>ThinCoder</h2>
+    <p>Ask me to read, write, search, or explain code in this workspace.</p>
+    <p style="margin-top:8px;opacity:0.7">Type <code>@</code> for file references · <code>Enter</code> to send · <code>Shift+Enter</code> for newline</p>`
   ctx.messagesEl.appendChild(el)
 }
 
@@ -119,9 +121,17 @@ export function showError(ctx, text) {
   if (!ctx.currentBlock) newBlock(ctx)
   const err = document.createElement("div")
   err.className = "error-banner"
-  err.textContent = text
+  err.innerHTML = `<div class="error-text">${escHtml(text)}</div>
+    <button class="error-retry-btn">Retry</button>`
+  err.querySelector(".error-retry-btn").addEventListener("click", () => {
+    ctx.vscode.postMessage({ type: "retry" })
+  })
   ctx.currentBlock.appendChild(err)
   scrollDown(ctx)
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 export function scrollDown(ctx) {
