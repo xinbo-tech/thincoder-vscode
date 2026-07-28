@@ -6,11 +6,11 @@
 
 CLI 的 Agent 动手前先"读"项目，VS Code 版全靠 grep 硬撞。这三个工具是 Agent 的"眼睛"。
 
-| # | 能力 | CLI 位置 | 说明 |
-|---|------|---------|------|
-| 1 | `repo_outline` | `src/tools/repomap.mjs` | 文件依赖关系图。Agent 看到哪些文件 import 了哪些文件，改一处知道影响面。 |
-| 2 | `code_search` | `src/memory/code-sync.mjs` | FTS5 全文搜索源代码。Agent 用自然语言查函数/类/模式，比 grep 正则更智能。 |
-| 3 | `doc_search` | `src/memory/docs.mjs` | 搜索 README、设计文档、AGENTS.md。Agent 动手前先读项目规范。 |
+| # | 能力 | CLI 位置 | 说明 | 状态 |
+|---|------|---------|------|------|
+| 1 | `repo_outline` | `src/tools/repomap.mjs` | 文件依赖关系图。Agent 看到哪些文件 import 了哪些文件，改一处知道影响面。 | ✅ |
+| 2 | `code_search` | `src/memory/code-sync.mjs` | 搜索源代码，返回匹配代码块 + 行号。基于 VS Code 内置文件搜索，无 FTS5。 | ✅ |
+| 3 | `doc_search` | `src/memory/docs.mjs` | 搜索 README、设计文档、AGENTS.md。按 ## 标题分块返回。 | ✅ |
 
 ## 长期记忆（4 项）
 
