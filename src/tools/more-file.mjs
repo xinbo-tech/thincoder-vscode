@@ -2,7 +2,6 @@
  * more-file.mjs — Additional file tools: insert_after, apply_patch, syntax_check, ls, delete
  */
 
-import * as vscode from "vscode"
 import { readFile, writeFile } from "node:fs/promises"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
@@ -51,8 +50,6 @@ export const insertAfterTool = {
     if (target < 0 || target >= lines.length) return `Error: line ${target + 1} out of range (file has ${lines.length} lines)`
     lines.splice(target + 1, 0, content)
     await writeFile(abs, lines.join("\n"), "utf8")
-    const doc = await vscode.workspace.openTextDocument(abs)
-    await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One, preserveFocus: true })
     return `Inserted after line ${target + 1} in ${path}`
   },
 }
@@ -142,10 +139,6 @@ export const applyPatchTool = {
       }
 
       await writeFile(abs, lines.join("\n"), "utf8")
-      try {
-        const doc = await vscode.workspace.openTextDocument(abs)
-        await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One, preserveFocus: true })
-      } catch { /* ok if file doesn't open */ }
       results.push(`Patched ${filePath}: ${applied} hunk(s) applied`)
     }
 
