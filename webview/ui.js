@@ -77,6 +77,9 @@ export function addTool(ctx, name, args) {
 
   const h = document.createElement("div")
   h.className = "tool-call-header"
+  h.tabIndex = 0
+  h.setAttribute("role", "button")
+  h.setAttribute("aria-expanded", "false")
   h.innerHTML =
     `<span class="tool-call-icon"></span>` +
     `<span class="tool-call-name">${esc(name)}</span>` +
@@ -85,11 +88,14 @@ export function addTool(ctx, name, args) {
 
   const b = document.createElement("div")
   b.className = "tool-call-body"
+  b.setAttribute("role", "region")
+  b.setAttribute("aria-label", `Output of ${name}`)
   b.textContent = t("tool.initial")
 
   h.addEventListener("click", () => {
     h.querySelector(".tool-call-icon").classList.toggle("open")
     b.classList.toggle("open")
+    h.setAttribute("aria-expanded", String(b.classList.contains("open")))
   })
 
   c.appendChild(h)

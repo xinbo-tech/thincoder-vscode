@@ -112,17 +112,19 @@ function handleAtInput() {
 function showAtDropdown(matches) {
   if (matches.length === 0) { closeAtDropdown(); return }
   atDropdown.innerHTML = matches.map((m, i) =>
-    `<div class="dropdown-item${i === 0 ? " active" : ""}" data-path="${escHtml(m.path)}">
+    `<div class="dropdown-item${i === 0 ? " active" : ""}" data-path="${escHtml(m.path)}" tabindex="0" role="option" aria-selected="${i === 0}">
       <span class="at-file-name">${escHtml(m.name)}</span>
       <span class="at-file-path">${escHtml(m.path)}</span>
     </div>`
   ).join("")
   atDropdown.style.display = "block"
+  atDropdown.setAttribute("aria-expanded", "true")
   _atActive = true
 }
 
 function closeAtDropdown() {
   atDropdown.style.display = "none"
+  atDropdown.setAttribute("aria-expanded", "false")
   _atActive = false
   atDropdown.innerHTML = ""
   clearTimeout(_atTimer)
@@ -217,7 +219,15 @@ ctx.sessionSelector.addEventListener("click", (e) => {
   e.stopPropagation()
   const open = ctx.sessionDropdown.style.display !== "none"
   ctx.sessionDropdown.style.display = open ? "none" : "block"
+  ctx.sessionSelector.setAttribute("aria-expanded", String(!open))
   if (!open) buildSessionDropdown()
+})
+
+ctx.sessionSelector.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault()
+    ctx.sessionSelector.click()
+  }
 })
 
 ctx.sessionDropdown.addEventListener("click", (e) => {
@@ -229,10 +239,13 @@ function buildSessionDropdown() {
   for (const s of ctx._sessions) {
     const item = document.createElement("div")
     item.className = "session-item"
+    item.tabIndex = 0
+    item.setAttribute("role", "option")
+    item.setAttribute("aria-selected", String(!!s.active))
     if (s.active) item.classList.add("active")
     item.innerHTML = `<span class="session-item-title">${escHtml(s.title)}</span>
       <span class="session-item-meta">${s.count}msgs${s.updated ? " · " + fmtDate(s.updated) : ""}</span>
-      <button class="session-delete" title="${t("session.delete")}">✕</button>`
+      <button class="session-delete" title="${t("session.delete")}" aria-label="${t("session.delete")} ${escHtml(s.title)}">✕</button>`
     item.addEventListener("click", (e) => {
       if (e.target.closest(".session-delete")) return
       vscode.postMessage({ type: "switchSession", name: s.name })
@@ -331,7 +344,7 @@ function renderToolPanels() {
       <div class="tool-panel-header">
         <span class="tool-panel-name">${escHtml(name)}</span>
         <span class="tool-panel-age">${age}</span>
-        <button class="tool-panel-close" data-name="${escHtml(name)}">✕</button>
+        <button class="tool-panel-close" data-name="${escHtml(name)}" aria-label="Close tool panel">✕</button>
       </div>
       <pre class="tool-panel-body">${escHtml(data.text.slice(-4000))}</pre>
     </div>`
@@ -383,14 +396,14 @@ function renderStatusBar(m) {
   const cachePct = cacheHit + cacheMiss > 0 ? Math.round((cacheHit / (cacheHit + cacheMiss)) * 100) : null
   let parts = []
   if (_planActive) parts.push(`<span style="color:var(--accent)">${t("status.plan")}</span>`)
-  if (_goalInfo?.status === "active") parts.push(`<span id="goal-badge" style="cursor:pointer">🎯</span>`)
+  if (_goalInfo?.status === "active") parts.push(`<span id="goal-badge" role="button" tabindex="0" aria-label="Goal panel" style="cursor:pointer">🎯</span>`)
   parts.push(`↑${fmtK(prompt)} ↓${fmtK(completion)}`)
   if (cachePct !== null) parts.push(`hit${cachePct}%`)
   if (m && m.ctxPct != null) parts.push(`ctx ${m.ctxPct}%`)
   else if (_lastCtxPct != null) parts.push(`ctx ${_lastCtxPct}%`)
   const subCount = Object.keys(_subagentMap).length
-  if (subCount > 0) parts.push(`<span id="sub-badge" style="cursor:pointer">sub:${subCount}</span>`)
-  if (_taskStatus) parts.push(`<span id="task-badge" style="cursor:pointer">${_taskStatus}</span>`)
+  if (subCount > 0) parts.push(`<span id="sub-badge" role="button" tabindex="0" aria-label="${subCount} subagents" style="cursor:pointer">sub:${subCount}</span>`)
+  if (_taskStatus) parts.push(`<span id="task-badge" role="button" tabindex="0" aria-label="Task progress" style="cursor:pointer">${_taskStatus}</span>`)
   document.getElementById("status-line").innerHTML = parts.join(` <span class="status-sep">|</span> `)
   // Wire click handlers for all three badges
   const wire = (id, panelId) => {
@@ -442,20 +455,25 @@ function showAutoConfirm() {
   backdrop.addEventListener("click", () => {
     backdrop.remove()
     document.querySelector(".auto-confirm")?.remove()
+    ctx.inputEl.focus()
   })
 
   const popover = document.createElement("div")
   popover.className = "auto-confirm"
+  popover.setAttribute("role", "alertdialog")
+  popover.setAttribute("aria-label", t("toolbar.autoApprove"))
   popover.innerHTML = `<div class="auto-confirm-text">${t("auto.confirmText")}</div>
     <div class="auto-confirm-actions">
-      <button class="auto-confirm-yes">${t("auto.enable")}</button>
-      <button class="auto-confirm-no">${t("auto.cancel")}</button>
+      <button class="auto-confirm-yes" aria-label="${t("auto.enable")}">${t("auto.enable")}</button>
+      <button class="auto-confirm-no" aria-label="${t("auto.cancel")}">${t("auto.cancel")}</button>
     </div>`
 
   document.body.appendChild(backdrop)
   document.body.appendChild(popover)
+  // Focus the cancel button (safer default)
+  setTimeout(() => popover.querySelector(".auto-confirm-no")?.focus(), 50)
 
-  const close = () => { popover.remove(); backdrop.remove() }
+  const close = () => { popover.remove(); backdrop.remove(); ctx.inputEl.focus() }
   popover.querySelector(".auto-confirm-yes").addEventListener("click", () => {
     close()
     _autoApprove = true
@@ -483,6 +501,9 @@ function buildModelDropdown() {
     if (m.group !== lastGroup) { ctx.dropdown.appendChild(sectionEl(m.group)); lastGroup = m.group }
     const item = document.createElement("div")
     item.className = "dropdown-item"
+    item.tabIndex = 0
+    item.setAttribute("role", "option")
+    item.setAttribute("aria-selected", String(m.id === ctx.selectedModel))
     item.innerHTML = `<span>${m.label}</span>${m.id === ctx.selectedModel ? '<span class="check">✓</span>' : ""}`
     item.addEventListener("click", () => selectModel(m))
     ctx.dropdown.appendChild(item)
@@ -506,6 +527,9 @@ function buildReasoningDropdown() {
   for (const level of levels) {
     const item = document.createElement("div")
     item.className = "dropdown-item"
+    item.tabIndex = 0
+    item.setAttribute("role", "option")
+    item.setAttribute("aria-selected", String(level === ctx.selectedReasoning))
     const label = reasoningLabel(level)
     item.innerHTML = `<span>${label}</span>${level === ctx.selectedReasoning ? '<span class="check">✓</span>' : ""}`
     item.addEventListener("click", () => {
@@ -543,14 +567,47 @@ function toggleDropdown(el, build) {
   ctx.dropdown.style.display = "none"
   ctx.reasoningDropdown.style.display = "none"
   ctx.sessionDropdown.style.display = "none"
+  if (ctx.sessionSelector) ctx.sessionSelector.setAttribute("aria-expanded", "false")
   el.style.display = open ? "none" : "block"
   if (!open) build()
+  // Update aria-expanded on the trigger button
+  if (el === ctx.dropdown) ctx.modelBtn.setAttribute("aria-expanded", String(!open))
+  if (el === ctx.reasoningDropdown) ctx.reasoningBtn.setAttribute("aria-expanded", String(!open))
 }
+
+// Close all dropdowns on Escape
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    ctx.dropdown.style.display = "none"
+    ctx.reasoningDropdown.style.display = "none"
+    ctx.sessionDropdown.style.display = "none"
+    if (ctx.sessionSelector) ctx.sessionSelector.setAttribute("aria-expanded", "false")
+    if (document.getElementById("settings-panel").style.display !== "none") {
+      document.getElementById("settings-panel").style.display = "none"
+      document.getElementById("settings-panel").setAttribute("aria-hidden", "true")
+      ctx.inputEl.focus()
+    }
+    const autoConfirm = document.querySelector(".auto-confirm")
+    if (autoConfirm) { autoConfirm.remove(); document.querySelector(".auto-backdrop")?.remove(); ctx.inputEl.focus() }
+  }
+})
+
+// Enter/Space activates focused custom elements
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT" || e.target.tagName === "BUTTON") return
+  if (e.target.closest("#input")) return
+  e.preventDefault()
+  e.target.click()
+})
 
 document.addEventListener("click", (e) => {
   if (!ctx.dropdown.contains(e.target) && e.target !== ctx.modelBtn) ctx.dropdown.style.display = "none"
   if (!ctx.reasoningDropdown.contains(e.target) && e.target !== ctx.reasoningBtn) ctx.reasoningDropdown.style.display = "none"
-  if (!ctx.sessionDropdown.contains(e.target) && !ctx.sessionSelector.contains(e.target)) ctx.sessionDropdown.style.display = "none"
+  if (!ctx.sessionDropdown.contains(e.target) && !ctx.sessionSelector.contains(e.target)) {
+    ctx.sessionDropdown.style.display = "none"
+    ctx.sessionSelector.setAttribute("aria-expanded", "false")
+  }
 })
 
 // ─── Settings panel ────────────────────────────
@@ -563,8 +620,15 @@ const PROVIDER_LABELS = {
 let _providerStatus = {}
 
 function openSettings() {
-  document.getElementById("settings-panel").style.display = "flex"
+  const panel = document.getElementById("settings-panel")
+  panel.style.display = "flex"
+  panel.setAttribute("aria-hidden", "false")
   buildSettings()
+  // Focus first focusable element in panel
+  setTimeout(() => {
+    const firstBtn = panel.querySelector("button, input")
+    if (firstBtn) firstBtn.focus()
+  }, 50)
 }
 
 function buildSettings() {
@@ -700,7 +764,10 @@ window._delKey = function(name) {
 }
 
 document.getElementById("settings-close").addEventListener("click", () => {
-  document.getElementById("settings-panel").style.display = "none"
+  const panel = document.getElementById("settings-panel")
+  panel.style.display = "none"
+  panel.setAttribute("aria-hidden", "true")
+  ctx.inputEl.focus()
 })
 
 document.getElementById("settings-body").addEventListener("change", () => {
@@ -824,6 +891,8 @@ window.addEventListener("message", (e) => {
     case "permissionRequest": {
       const el = document.createElement("div")
       el.className = "permission-prompt"
+      el.setAttribute("role", "alert")
+      el.setAttribute("aria-label", t("perm.wantsTo") + " " + m.tool)
       const argsPreview = m.args ? m.args.slice(0, 150) + (m.args.length > 150 ? "…" : "") : ""
       let diffHtml = ""
       if (m.diff && m.diff.old !== m.diff.new) {
@@ -834,9 +903,9 @@ window.addEventListener("message", (e) => {
       if (argsPreview) html += '<br><span style="font-size:11px;opacity:0.7">' + escHtml(argsPreview) + '</span>'
       html += '</div>' + diffHtml
       html += '<div class="permission-prompt-actions">'
-      html += '<button class="approve">' + t("perm.approve") + '</button>'
-      html += '<button class="approve-all">' + t("perm.approveAll") + '</button>'
-      html += '<button class="deny">' + t("perm.deny") + '</button>'
+      html += '<button class="approve" aria-label="' + t("perm.approve") + ' ' + m.tool + '">' + t("perm.approve") + '</button>'
+      html += '<button class="approve-all" aria-label="' + t("perm.approveAll") + '">' + t("perm.approveAll") + '</button>'
+      html += '<button class="deny" aria-label="' + t("perm.deny") + ' ' + m.tool + '">' + t("perm.deny") + '</button>'
       html += '</div>'
       el.innerHTML = html
       el.querySelector(".approve").addEventListener("click", () => {
@@ -853,6 +922,8 @@ window.addEventListener("message", (e) => {
       })
       document.getElementById("messages").appendChild(el)
       el.scrollIntoView({ behavior: "smooth" })
+      // Focus the deny button (safest default)
+      setTimeout(() => el.querySelector(".deny")?.focus(), 50)
       break
     }
     case "atResults":

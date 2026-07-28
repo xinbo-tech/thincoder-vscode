@@ -261,3 +261,43 @@ body {
   opacity: 0.5;
   user-select: none;
 }
+
+/* ─── Accessibility — keyboard focus ──────────── */
+
+/* Remove default focus outline for mouse users, show for keyboard */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Interactive custom elements need visible focus */
+.dropdown-item:focus-visible,
+.session-item:focus-visible,
+.tool-call-header:focus-visible,
+.tool-panel-close:focus-visible,
+.permission-prompt button:focus-visible,
+.auto-confirm button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--hover-bg-strong);
+}
+
+/* Status bar badges */
+#goal-badge:focus-visible,
+#sub-badge:focus-visible,
+#task-badge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Screen-reader-only text */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  border: 0;
+}
