@@ -615,6 +615,7 @@ document.addEventListener("click", (e) => {
 const PROVIDER_LABELS = {
   deepseek: "DeepSeek", kimi: "Kimi (Moonshot)", glm: "GLM (Zhipu)",
   qwen: "Qwen (Alibaba)", minimax: "MiniMax", openai: "OpenAI",
+  claude: "Claude (Anthropic)", gemini: "Gemini (Google)",
 }
 
 let _providerStatus = {}

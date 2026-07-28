@@ -13,6 +13,8 @@ export const PRESETS = {
   qwen:     { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen3.7-max", label: "Qwen (Alibaba)", maxTokens: 131072 },
   minimax:  { baseURL: "https://api.minimax.chat/v1", model: "MiniMax-M3", label: "MiniMax", chatPath: "/text/chatcompletion_v2", maxTokens: 128000 },
   openai:   { baseURL: "https://api.openai.com/v1", model: "gpt-4o", label: "OpenAI" },
+  claude:   { baseURL: "https://api.anthropic.com/v1", model: "claude-sonnet-4", label: "Claude (Anthropic)", format: "anthropic", maxTokens: 8192 },
+  gemini:   { baseURL: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-flash", label: "Gemini (Google)", format: "google", maxTokens: 8192 },
 }
 
 const KEY_PREFIX = "thincoder.provider."
@@ -133,5 +135,6 @@ export async function buildProvider(name) {
     ...(preset.thinking ? { thinking: preset.thinking } : {}),
     ...(preset.defaultEffort ? { reasoningEffort: preset.defaultEffort } : {}),
     ...(preset.chatPath ? { chatPath: preset.chatPath } : {}),
+    ...(preset.format ? { format: preset.format } : {}),
   }
 }

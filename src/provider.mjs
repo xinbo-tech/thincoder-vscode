@@ -1,6 +1,6 @@
 /**
  * provider.mjs — LLM call core (synced from thincoder CLI src/provider/core.mjs)
- * chat / listModels / requestWithRetry / readSSE
+ * chat / listModels / requestWithRetry / transport dispatch
  */
 
 import { specForModel } from "./specs.mjs"
@@ -9,68 +9,72 @@ import {
   RATE_LIMIT_BACKOFF_MS, _rateHooks,
   estimateRequestTokens, rateGate, recordRate,
 } from "./provider/rate.mjs"
+import * as openaiTransport from "./provider/transports/openai.mjs"
+import * as anthropicTransport from "./provider/transports/anthropic.mjs"
+import * as googleTransport from "./provider/transports/google.mjs"
 
 const FETCH_TIMEOUT_MS = 120000
+
+const TRANSPORTS = {
+  openai: openaiTransport,
+  anthropic: anthropicTransport,
+  google: googleTransport,
+}
+
+function getTransport(provider) {
+  return TRANSPORTS[provider.format] || TRANSPORTS.openai
+}
 
 /** Send a streaming chat completion request with automatic continuation on truncation */
 export async function chat(provider, { messages, tools, onToken, onReasoning, onWait, signal }) {
   const spec = specForModel(provider.model)
-  const body = {
-    model: provider.model,
-    messages,
-    stream: true,
-    ...(spec.noUsageStream ? {} : { stream_options: { include_usage: true } }),
-  }
-  if (provider.maxTokens) body.max_tokens = provider.maxTokens
-  if (provider.temperature != null) {
-    let t = provider.temperature
-    if (spec.tempRange) {
-      t = Math.min(spec.tempRange[1], Math.max(spec.tempRange[0], t))
-      t = Math.round(t * 100) / 100
-    }
-    body.temperature = t
-  }
-  if (provider.thinking) body.thinking = provider.thinking
-  if (provider.reasoningEffort) {
+  const transport = getTransport(provider)
+
+  // Validate reasoning effort for models that use it
+  if (provider.reasoningEffort && provider.format !== "anthropic" && provider.format !== "google") {
     if (spec.reasoningEffortEnum && !spec.reasoningEffortEnum.includes(provider.reasoningEffort)) {
       throw new Error(
         `reasoning_effort "${provider.reasoningEffort}" not supported by model "${provider.model}"; ` +
         `valid values: ${spec.reasoningEffortEnum.join(", ")}`
       )
     }
-    body.reasoning_effort = provider.reasoningEffort
   }
-  if (tools?.length) body.tools = tools
-  if (provider.responseFormat) body.response_format = provider.responseFormat
 
-  const estimated = estimateRequestTokens(body)
+  const normalizedTools = transport.normalizeTools(tools)
+  const req = transport.buildRequest(provider, messages, normalizedTools)
+  const estimated = estimateRequestTokens(JSON.parse(req.body))
   await rateGate(provider, estimated, onWait, signal)
 
-  const response = await requestWithRetry(provider, body, signal, onWait)
-  const result = await readSSE(response, { onToken, onReasoning })
+  const response = await requestWithRetry(provider, req.url, req.headers, req.body, signal, onWait)
+  const result = await transport.parseStream(response, { onToken, onReasoning })
   recordRate(provider, estimated, result.usage)
 
-  if (!spec.partialMode && !spec.prefixMode) return result
-  if (spec.prefixMode && !spec.partialMode && result.reasoning) return result
+  // Continuation handling (OpenAI-format only — Claude/Gemini handle truncation differently)
+  const isOpenAI = provider.format === "openai" || !provider.format
+  if (isOpenAI && (!spec.partialMode && !spec.prefixMode)) return result
+  if (isOpenAI && spec.prefixMode && !spec.partialMode && result.reasoning) return result
   for (let n = 0; result.finishReason === "length" && result.content && n < MAX_CONTINUATIONS; n++) {
-    const continued = await chat(spec.prefixMode ? { ...provider, baseURL: betaBaseURL(provider.baseURL) } : provider, {
-      messages: [
-        ...messages,
-        spec.partialMode
-          ? {
-              role: "assistant",
-              content: result.content,
-              partial: true,
-              ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
-            }
-          : { role: "assistant", content: result.content, prefix: true },
-      ],
-      tools,
-      onToken,
-      onReasoning,
-      onWait,
-      signal,
-    })
+    const continued = await chat(
+      isOpenAI && spec.prefixMode ? { ...provider, baseURL: betaBaseURL(provider.baseURL) } : provider,
+      {
+        messages: [
+          ...messages,
+          spec.partialMode
+            ? {
+                role: "assistant",
+                content: result.content,
+                partial: true,
+                ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
+              }
+            : { role: "assistant", content: result.content, prefix: true },
+        ],
+        tools,
+        onToken,
+        onReasoning,
+        onWait,
+        signal,
+      },
+    )
     result.content += continued.content
     result.reasoning += continued.reasoning ?? ""
     for (const tc of continued.toolCalls ?? []) {
@@ -109,7 +113,7 @@ export async function listModels(provider, { signal } = {}) {
   return (data.data ?? []).map((m) => m.id).filter(Boolean).sort()
 }
 
-async function requestWithRetry(provider, body, signal, onWait) {
+async function requestWithRetry(provider, url, headers, body, signal, onWait) {
   let lastError
   let lastWas429 = false
   let rateLimitHits = 0
@@ -119,13 +123,10 @@ async function requestWithRetry(provider, body, signal, onWait) {
 
     let response
     try {
-      response = await fetch(`${provider.baseURL}${provider.chatPath ?? "/chat/completions"}`, {
+      response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${provider.apiKey}`,
-        },
-        body: JSON.stringify(body),
+        headers,
+        body,
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) : AbortSignal.timeout(FETCH_TIMEOUT_MS),
       })
     } catch (error) {
@@ -188,84 +189,6 @@ function isNonRetryableError(status, text) {
     } catch {}
   }
   return false
-}
-
-async function readSSE(response, { onToken, onReasoning }) {
-  const result = { content: "", reasoning: "", toolCalls: [], usage: null, finishReason: null }
-  const decoder = new TextDecoder()
-  let buffer = ""
-  let hasChoices = false
-
-  const processLines = (lines) => {
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue
-      const data = line.slice(5).trim()
-      if (!data || data === "[DONE]") continue
-
-      let json
-      try { json = JSON.parse(data) } catch { continue }
-
-      if (json.usage) result.usage = json.usage
-      const choice = json.choices?.[0]
-      if (!choice) continue
-      hasChoices = true
-      if (choice.finish_reason) result.finishReason = choice.finish_reason
-
-      const delta = choice.delta ?? {}
-      if (delta.reasoning_content) {
-        result.reasoning += delta.reasoning_content
-        onReasoning?.(delta.reasoning_content)
-      }
-      if (delta.content) {
-        result.content += delta.content
-        onToken?.(delta.content)
-      }
-      for (const tc of delta.tool_calls ?? []) {
-        const slot = (result.toolCalls[tc.index] ??= { id: "", name: "", arguments: "" })
-        if (tc.id) slot.id = tc.id
-        if (tc.function?.name && !slot.name) slot.name = tc.function.name
-        if (tc.function?.arguments) slot.arguments += tc.function.arguments
-      }
-    }
-  }
-
-  if (!response.body) throw new Error("No stream response body")
-  for await (const chunk of response.body) {
-    buffer += decoder.decode(chunk, { stream: true })
-    const lines = buffer.split("\n")
-    buffer = lines.pop()
-    processLines(lines)
-  }
-  buffer += decoder.decode()
-  processLines(buffer.split("\n"))
-
-  // If no SSE choices were found, the response is likely a JSON error
-  if (!hasChoices) {
-    const contentType = response.headers.get("content-type") || ""
-    // Try to extract error from raw body
-    let errorMsg = ""
-    try {
-      const raw = buffer.trim() || ""
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        // Common error formats: { error: { message } }, { base_resp: { status_msg } }, { detail }
-        errorMsg = parsed?.error?.message
-          || parsed?.base_resp?.status_msg
-          || parsed?.detail
-          || parsed?.message
-          || parsed?.msg
-          || (typeof parsed.error === "string" ? parsed.error : "")
-      }
-    } catch { /* not JSON */ }
-    if (!errorMsg && !contentType.includes("event-stream")) {
-      errorMsg = `Response is not SSE (Content-Type: ${contentType || "unknown"})`
-    }
-    if (errorMsg) {
-      throw new Error(`API error: ${errorMsg}`)
-    }
-  }
-
-  return result
 }
 
 function betaBaseURL(baseURL) {

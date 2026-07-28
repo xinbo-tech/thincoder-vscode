@@ -25,13 +25,14 @@
 
 | | ThinCoder | Copilot | Cline | Cursor | Continue |
 |---|---|---|---|---|---|
-| 内置供应商数 | **7** + custom | 1（GitHub） | 5+ | 5+ | 10+ |
+| 内置供应商数 | **9** + custom | 1（GitHub） | 5+ | 5+ | 10+ |
 | 自定义 provider | ✅ | ❌ | ✅ | ✅ | ✅ |
 | 思考模式（reasoning） | ✅ 分级 | ❌ | ✅ | ✅ | ✅ |
 | 多模态（图片） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | API key 系统密钥链存储 | ✅ SecretStorage | N/A | ✅ 明文 | ✅ | ✅ |
+| 非 OpenAI 协议原生支持 | ✅ Claude + Gemini | ❌ | ❌ | ❌ | ❌ |
 
-**★ ★ ★ ★ 中国大陆全覆盖。** 7 供应商 + reasoning 6 级分级 + 自定义 provider。密钥安全优于 Cline（明文）。
+**★ ★ ★ ★ 从中国大陆到国际化完整覆盖。** 9 供应商（DeepSeek/Kimi/GLM/Qwen/MiniMax/OpenAI/Claude/Gemini + custom），业内唯一同时原生支持 OpenAI、Anthropic、Google 三种 API 协议的工具。
 
 ---
 
@@ -133,7 +134,7 @@
 ```
                     ThinCoder   Copilot    Cline     Cursor    Continue
 Agent 智能体         ★★★★★      ★★        ★★★★      ★★★       ★★★
-模型供应商           ★★★★       ★         ★★★★      ★★★★      ★★★★★
+模型供应商           ★★★★★      ★         ★★★★      ★★★★      ★★★★★
 代码编辑             ★★★        ★★★★★     ★★★★      ★★★★★     ★★★★
 会话管理             ★★★★★      ★★★       ★★★       ★★★★      ★★★
 扩展性               ★★★★       ★         ★★★       ★★        ★★★★★
