@@ -5,7 +5,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
-import { resolvePath, formatSize } from "./shared.mjs"
+import { resolvePath, formatSize, checkDirtyEditors } from "./shared.mjs"
 
 export const insertAfterTool = {
   name: "insert_after",
@@ -49,6 +49,8 @@ export const insertAfterTool = {
 
     if (target < 0 || target >= lines.length) return `Error: line ${target + 1} out of range (file has ${lines.length} lines)`
     lines.splice(target + 1, 0, content)
+    const dirtyErr = checkDirtyEditors(abs)
+    if (dirtyErr) return `Error: ${dirtyErr}`
     await writeFile(abs, lines.join("\n"), "utf8")
     return `Inserted after line ${target + 1} in ${path}`
   },
@@ -138,6 +140,8 @@ export const applyPatchTool = {
         applied++
       }
 
+      const dirtyErr = checkDirtyEditors(abs)
+      if (dirtyErr) return `Error: ${dirtyErr}`
       await writeFile(abs, lines.join("\n"), "utf8")
       results.push(`Patched ${filePath}: ${applied} hunk(s) applied`)
     }

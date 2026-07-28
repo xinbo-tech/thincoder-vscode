@@ -4,7 +4,7 @@
 
 import { readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { resolvePath } from "./shared.mjs"
+import { resolvePath, checkDirtyEditors } from "./shared.mjs"
 
 export const readTool = {
   name: "read",
@@ -54,6 +54,8 @@ export const writeTool = {
     const abs = resolvePath(path, ctx.cwd)
     const { mkdir } = await import("node:fs/promises")
     await mkdir(dirname(abs), { recursive: true })
+    const dirtyErr = checkDirtyEditors(abs)
+    if (dirtyErr) return `Error: ${dirtyErr}`
     await writeFile(abs, content, "utf8")
     return `Wrote ${content.length} chars to ${path}`
   },
@@ -87,6 +89,8 @@ export const editTool = {
       return `Error: old_string matches ${count} times in ${path} — set replace_all=true or add more context to make it unique`
     }
     const result = replace_all ? text.replaceAll(old_string, new_string) : text.replace(old_string, new_string)
+    const dirtyErr = checkDirtyEditors(abs)
+    if (dirtyErr) return `Error: ${dirtyErr}`
     await writeFile(abs, result, "utf8")
     return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path}`
   },
