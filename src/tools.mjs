@@ -9,6 +9,8 @@ import { readFileSync, existsSync } from "node:fs"
 import { execSync } from "node:child_process"
 import { join, dirname } from "node:path"
 import { repoOutlineTool } from "./repomap.mjs"
+import { memoryPutTool, memorySearchTool } from "./memory.mjs"
+import { mcpTool } from "./mcp.mjs"
 
 const BASH_TIMEOUT_MS = 120000
 
@@ -809,6 +811,7 @@ export const builtinTools = [
   gitDiffTool, gitStatusTool, gitLogTool, checkpointTool,
   websearchTool, fetchTool, questionTool,
   repoOutlineTool, codeSearchTool, docSearchTool,
+  memoryPutTool, memorySearchTool, mcpTool,
 ]
 
 /** Convert a tool definition to OpenAI function schema */

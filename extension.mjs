@@ -10,6 +10,7 @@ import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { listModels } from "./src/provider.mjs"
 import { specForModel } from "./src/specs.mjs"
+import { closeAllMcp } from "./src/mcp.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -25,7 +26,7 @@ export function activate(context) {
   try { if (existsSync(join(context.storageUri.fsPath, ".panel-open"))) chat.show() } catch {}
 }
 
-export function deactivate() {}
+export function deactivate() { closeAllMcp() }
 
 // ─── Provider presets ────────────────────────────────────────────
 

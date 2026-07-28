@@ -1,19 +1,125 @@
 /**
- * provider.mjs — LLM provider with rate-limit retry + backoff
+ * provider.mjs — LLM provider with TPM gate, partial/prefix continuation, retry+backoff
  * OpenAI-compatible, fetch + SSE streaming. Zero dependencies.
  */
 
 import { specForModel } from "./specs.mjs"
 
+// ── Constants ──────────────────────────────────────────────
+
 const FETCH_TIMEOUT_MS = 120000
 const MAX_RETRIES = 3
-const RETRY_BACKOFF_MS = [1000, 4000, 12000]
-const RATE_LIMIT_BACKOFF_MS = 15000
+const MAX_CONTINUATIONS = 3
+const RATE_LIMIT_BACKOFF_MS = [15_000, 30_000, 60_000]
+const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504])
+
+// ── Rate-limiting infrastructure ──────────────────────────
 
 /**
- * Send a streaming chat completion request with automatic retry on 429/5xx.
+ * Test hooks: sleep/clock/window length are replaceable.
+ * Production code should never call setTimeout/sleep directly — always go through these.
  */
-export async function chat(provider, { messages, tools, onToken, signal }) {
+export const _rateHooks = {
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now: () => Date.now(),
+  windowMs: 60_000,
+}
+
+const rateWindows = new Map() // key → { tokens: [{ts, n}], requests: [ts] }
+
+function rateKey(provider) {
+  // Normalize: /beta and /v1 share the same account's rate-limit window
+  const base = provider.baseURL.replace(/\/beta$/, "/v1")
+  return `${base}|${provider.apiKey ?? ""}`
+}
+
+/**
+ * Rough estimate of text token count.
+ * ASCII ~4 chars/token; non-ASCII (CJK/emoji) ~1 char/token.
+ */
+export function estimateText(s) {
+  let nonAscii = 0
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) > 0x7f) nonAscii++
+  return Math.ceil((s.length - nonAscii) / 4) + nonAscii
+}
+
+/** Estimated prompt tokens for this request */
+export function estimateRequestTokens(body) {
+  let tokens = 0
+  for (const m of body.messages ?? []) {
+    if (typeof m.content === "string") tokens += estimateText(m.content)
+    if (typeof m.reasoning_content === "string") tokens += estimateText(m.reasoning_content)
+    for (const tc of m.tool_calls ?? []) {
+      tokens += estimateText(tc.function?.name ?? "") + estimateText(tc.function?.arguments ?? "")
+    }
+  }
+  if (body.tools) tokens += estimateText(JSON.stringify(body.tools))
+  return tokens
+}
+
+/** Gate: sleep until window frees space when over budget */
+export async function rateGate(provider, estimated, onWait, signal) {
+  const tpm = provider.tpm != null && estimated <= provider.tpm ? provider.tpm : null
+  const rpm = provider.rpm ?? null
+  if (tpm == null && rpm == null) return
+  const w = rateWindows.get(rateKey(provider)) ?? { tokens: [], requests: [] }
+  rateWindows.set(rateKey(provider), w)
+  for (;;) {
+    const now = _rateHooks.now()
+    const cutoff = now - _rateHooks.windowMs
+    w.tokens = w.tokens.filter((e) => e.ts > cutoff)
+    w.requests = w.requests.filter((ts) => ts > cutoff)
+    const usedTokens = w.tokens.reduce((s, e) => s + e.n, 0)
+    const overTokens = tpm != null ? usedTokens + estimated - tpm : 0
+    const overRequests = rpm != null ? w.requests.length + 1 - rpm : 0
+    if (overTokens <= 0 && overRequests <= 0) break
+    let waitMs = _rateHooks.windowMs
+    if (overTokens > 0) {
+      let freed = 0
+      for (const e of w.tokens) {
+        freed += e.n
+        if (freed >= overTokens) {
+          waitMs = Math.min(waitMs, e.ts + _rateHooks.windowMs - now)
+          break
+        }
+      }
+    }
+    if (overRequests > 0) {
+      waitMs = Math.min(waitMs, w.requests[overRequests - 1] + _rateHooks.windowMs - now)
+    }
+    waitMs = Math.max(waitMs, 50)
+    onWait?.({ phase: "gate", seconds: Math.ceil(waitMs / 1000) })
+    await _rateHooks.sleep(waitMs)
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+  }
+}
+
+/** Accounting: record measured usage after response returns */
+export function recordRate(provider, estimated, usage) {
+  if (provider.tpm == null && provider.rpm == null) return
+  const key = rateKey(provider)
+  const w = rateWindows.get(key) ?? { tokens: [], requests: [] }
+  const now = _rateHooks.now()
+  const cutoff = now - _rateHooks.windowMs
+  w.tokens = w.tokens.filter((e) => e.ts > cutoff)
+  w.requests = w.requests.filter((ts) => ts > cutoff)
+  w.requests.push(now)
+  w.tokens.push({ ts: now, n: usage ? (usage.prompt_tokens ?? estimated) + (usage.completion_tokens ?? 0) : estimated })
+  if (w.tokens.length === 0 && w.requests.length === 0) rateWindows.delete(key)
+  else rateWindows.set(key, w)
+}
+
+// ── Core: chat with continuation ──────────────────────────
+
+/**
+ * Send a streaming chat completion request with:
+ *  - TPM/RPM rate gating before sending
+ *  - Automatic continuation on truncation (finish_reason=length)
+ *  - DeepSeek prefix completion via /beta endpoint
+ *  - Exponential backoff on 429/5xx with Retry-After support
+ *  - Quota error detection (non-retryable)
+ */
+export async function chat(provider, { messages, tools, onToken, onReasoning, onWait, signal }) {
   const spec = specForModel(provider.model)
   const body = {
     model: provider.model,
@@ -44,139 +150,186 @@ export async function chat(provider, { messages, tools, onToken, signal }) {
   }
   if (tools?.length) body.tools = tools
 
-  const url = `${provider.baseURL.replace(/\/+$/, "")}${provider.chatPath ?? "/chat/completions"}`
+  const estimated = estimateRequestTokens(body)
+  await rateGate(provider, estimated, onWait, signal)
 
+  const response = await requestWithRetry(provider, body, signal, onWait)
+  const result = await readSSE(response, { onToken, onReasoning })
+  recordRate(provider, estimated, result.usage)
+
+  if (!spec.partialMode && !spec.prefixMode) return result
+  if (spec.prefixMode && !spec.partialMode && result.reasoning) return result
+  for (let n = 0; result.finishReason === "length" && result.content && n < MAX_CONTINUATIONS; n++) {
+    const continued = await chat(spec.prefixMode ? { ...provider, baseURL: betaBaseURL(provider.baseURL) } : provider, {
+      messages: [
+        ...messages,
+        spec.partialMode
+          ? {
+              role: "assistant",
+              content: result.content,
+              partial: true,
+              ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
+            }
+          : { role: "assistant", content: result.content, prefix: true },
+      ],
+      tools,
+      onToken,
+      onReasoning,
+      onWait,
+      signal,
+    })
+    result.content += continued.content
+    result.reasoning += continued.reasoning ?? ""
+    for (const tc of continued.toolCalls ?? []) {
+      const idx = tc.index ?? result.toolCalls.length
+      while (result.toolCalls.length <= idx) {
+        result.toolCalls.push({ id: "", type: "function", function: { name: "", arguments: "" } })
+      }
+      if (tc.id) result.toolCalls[idx].id = tc.id
+      result.toolCalls[idx].function.name += tc.function?.name ?? ""
+      result.toolCalls[idx].function.arguments += tc.function?.arguments ?? ""
+    }
+    result.finishReason = continued.finishReason
+    if (continued.usage) {
+      const sum = (k) => (result.usage?.[k] ?? 0) + (continued.usage[k] ?? 0)
+      result.usage = {
+        prompt_tokens: sum("prompt_tokens"),
+        completion_tokens: sum("completion_tokens"),
+        total_tokens: sum("total_tokens"),
+        prompt_cache_hit_tokens: sum("prompt_cache_hit_tokens"),
+        prompt_cache_miss_tokens: sum("prompt_cache_miss_tokens"),
+      }
+    }
+  }
+  return result
+}
+
+// ── HTTP request with retry ───────────────────────────────
+
+async function requestWithRetry(provider, body, signal, onWait) {
+  let lastError
+  let lastWas429 = false
+  let rateLimitHits = 0
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+    if (attempt > 0 && !lastWas429) await _rateHooks.sleep(2 ** (attempt - 1) * 1000)
+    lastWas429 = false
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-    const onAbort = () => controller.abort()
-    signal?.addEventListener("abort", onAbort)
-
-    let res
+    let response
     try {
-      res = await fetch(url, {
+      response = await fetch(`${provider.baseURL.replace(/\/+$/, "")}${provider.chatPath ?? "/chat/completions"}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${provider.apiKey}`,
         },
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) : AbortSignal.timeout(FETCH_TIMEOUT_MS),
       })
-    } catch (e) {
-      clearTimeout(timeout)
-      signal?.removeEventListener("abort", onAbort)
-      if (e.name === "AbortError") throw e
-      // Network error — retry
-      if (attempt < MAX_RETRIES) {
-        await sleep(RETRY_BACKOFF_MS[attempt] || 4000)
-        continue
-      }
-      throw new Error(`Network error after ${MAX_RETRIES + 1} attempts: ${e.message}`)
-    }
-
-    clearTimeout(timeout)
-    signal?.removeEventListener("abort", onAbort)
-
-    // Rate limited — retry with backoff
-    if (res.status === 429) {
-      const retryAfter = res.headers.get("Retry-After")
-      const waitMs = retryAfter ? parseInt(retryAfter) * 1000 : RATE_LIMIT_BACKOFF_MS
-      if (attempt < MAX_RETRIES) {
-        await sleep(waitMs)
-        continue
-      }
-      throw new Error(`Rate limited after ${MAX_RETRIES + 1} attempts`)
-    }
-
-    // Server error — retry
-    if (res.status >= 500 && attempt < MAX_RETRIES) {
-      await sleep(RETRY_BACKOFF_MS[attempt] || 4000)
+    } catch (error) {
+      if (error.name === "AbortError") throw error
+      lastError = error
       continue
     }
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "")
-      throw new Error(`LLM API error ${res.status}: ${text.slice(0, 500)}`)
+    if (response.ok) return response
+
+    const text = await response.text().catch(() => "")
+    const message = `LLM API error ${response.status}: ${text}`
+    if (isQuotaError(text)) throw new Error(message)
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get("retry-after"))
+      const waitMs =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : RATE_LIMIT_BACKOFF_MS[Math.min(rateLimitHits++, RATE_LIMIT_BACKOFF_MS.length - 1)]
+      lastError = new Error(message)
+      lastWas429 = true
+      if (attempt < MAX_RETRIES) {
+        onWait?.({ phase: "retry", seconds: Math.ceil(waitMs / 1000) })
+        await _rateHooks.sleep(waitMs)
+      }
+      continue
     }
-
-    const result = await readSSE(res.body, { onToken })
-    return result
+    if (RETRYABLE_STATUS.has(response.status)) {
+      lastError = new Error(message)
+      continue
+    }
+    throw new Error(message)
   }
-
-  throw new Error("Max retries exceeded")
+  throw lastError
 }
 
-/**
- * Read SSE (Server-Sent Events) stream and accumulate.
- */
-async function readSSE(body, { onToken }) {
-  const reader = body.getReader()
+function isQuotaError(text) {
+  try {
+    const type = JSON.parse(text)?.error?.type
+    return typeof type === "string" && type.includes("quota")
+  } catch {
+    return false
+  }
+}
+
+// ── SSE reader ────────────────────────────────────────────
+
+async function readSSE(response, { onToken, onReasoning }) {
+  const result = { content: "", reasoning: "", toolCalls: [], usage: null, finishReason: null }
   const decoder = new TextDecoder()
   let buffer = ""
-  let content = ""
-  const toolCalls = []
-  let finishReason = null
-  const usage = {}
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split("\n")
-    buffer = lines.pop() || ""
-
+  const processLines = (lines) => {
     for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed || !trimmed.startsWith("data:")) continue
-      const data = trimmed.slice(5).trim()
-      if (data === "[DONE]") continue
+      if (!line.startsWith("data:")) continue
+      const data = line.slice(5).trim()
+      if (!data || data === "[DONE]") continue
 
-      try {
-        const json = JSON.parse(data)
-        for (const choice of json.choices || []) {
-          const delta = choice.delta || {}
-          if (delta.content) {
-            content += delta.content
-            onToken?.(delta.content)
-          }
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const idx = tc.index ?? 0
-              while (toolCalls.length <= idx) {
-                toolCalls.push({ id: "", type: "function", function: { name: "", arguments: "" } })
-              }
-              if (tc.id) toolCalls[idx].id = tc.id
-              if (tc.function?.name) toolCalls[idx].function.name += tc.function.name
-              if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments
-            }
-          }
-          if (choice.finish_reason) finishReason = choice.finish_reason
+      let json
+      try { json = JSON.parse(data) } catch { continue }
+
+      if (json.usage) result.usage = json.usage
+      const choice = json.choices?.[0]
+      if (!choice) continue
+      if (choice.finish_reason) result.finishReason = choice.finish_reason
+
+      const delta = choice.delta ?? {}
+      if (delta.reasoning_content) {
+        result.reasoning += delta.reasoning_content
+        onReasoning?.(delta.reasoning_content)
+      }
+      if (delta.content) {
+        result.content += delta.content
+        onToken?.(delta.content)
+      }
+      for (const tc of delta.tool_calls ?? []) {
+        const idx = tc.index ?? 0
+        while (result.toolCalls.length <= idx) {
+          result.toolCalls.push({ id: "", type: "function", function: { name: "", arguments: "" } })
         }
-        if (json.usage) {
-          usage.prompt_tokens = json.usage.prompt_tokens
-          usage.completion_tokens = json.usage.completion_tokens
-          usage.total_tokens = json.usage.total_tokens
-        }
-      } catch {
-        // skip malformed SSE lines
+        if (tc.id) result.toolCalls[idx].id = tc.id
+        if (tc.function?.name) result.toolCalls[idx].function.name += tc.function.name
+        if (tc.function?.arguments) result.toolCalls[idx].function.arguments += tc.function.arguments
       }
     }
   }
 
-  return {
-    content,
-    toolCalls: toolCalls.filter((tc) => tc.function.name),
-    finishReason,
-    usage,
+  if (!response.body) throw new Error("No stream response body")
+  for await (const chunk of response.body) {
+    buffer += decoder.decode(chunk, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop()
+    processLines(lines)
   }
+  buffer += decoder.decode()
+  processLines(buffer.split("\n"))
+  return result
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms))
+function betaBaseURL(baseURL) {
+  // Already on beta endpoint — don't double-append (handles recursive continuation)
+  if (/\/beta$/.test(baseURL)) return baseURL
+  if (/\/v1$/.test(baseURL)) return baseURL.replace(/\/v1$/, "/beta")
+  return baseURL.endsWith("/") ? baseURL + "beta" : baseURL + "/beta"
 }
+
+// ── Model listing ─────────────────────────────────────────
 
 /**
  * Fetch available model IDs from the provider's /models endpoint.
