@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="__CSS_URI__">
+</head>
+<body>
+  <div id="chat-container">
+    <div id="session-bar">
+      <div id="session-selector">
+        <span id="session-title">Session 1</span>
+        <span id="session-arrow">▼</span>
+        <div id="session-dropdown" style="display:none"></div>
+      </div>
+      <button id="new-session-btn" title="New Session">+</button>
+    </div>
+    <div id="messages"></div>
+    <div id="toolbar">
+      <div id="input-row">
+        <textarea id="input" rows="1" placeholder="Ask ThinCoder... (Shift+Enter for new line)"></textarea>
+        <button id="send-btn" title="Send (Enter)">↑</button>
+        <button id="abort-btn" title="Stop" style="display:none">■</button>
+      </div>
+      <div id="controls-row">
+        <button id="model-btn" class="ctrl-btn" title="Change model">...</button>
+        <button id="reasoning-btn" class="ctrl-btn active" title="Reasoning effort">max</button>
+        <button id="settings-btn" class="ctrl-btn" title="Settings">⚙</button>
+        <div id="model-dropdown" class="dropdown" style="display:none"></div>
+        <div id="reasoning-dropdown" class="dropdown" style="display:none"></div>
+      </div>
+    </div>
+    <div id="settings-panel" style="display:none">
+      <div class="panel-header">
+        <h3>Settings</h3>
+        <button id="settings-close" class="close-btn">✕</button>
+      </div>
+      <div class="panel-body" id="settings-body"></div>
+    </div>
+  </div>
+  <script type="module" src="__CHAT_URI__"></script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+{
+  "name": "thincoder-vscode",
+  "displayName": "ThinCoder",
+  "version": "0.1.0",
+  "description": "ThinCoder AI coding assistant — prompts-driven, zero bloat",
+  "publisher": "thincoder",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://gitee.com/shanghai-xinbo/thincoder.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "type": "module",
+  "main": "./extension.mjs",
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:thincoder.openChat",
+    "onCommand:thincoder.sendMessage"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "thincoder.openChat",
+        "title": "ThinCoder: Open Chat"
+      },
+      {
+        "command": "thincoder.sendMessage",
+        "title": "ThinCoder: Send Message"
+      },
+      {
+        "command": "thincoder.setup",
+        "title": "ThinCoder: Setup Provider & API Key"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "thincoder.openChat",
+        "key": "ctrl+alt+t",
+        "mac": "cmd+alt+t"
+      }
+    ],
+    "configuration": {
+      "title": "ThinCoder",
+      "properties": {
+        "thincoder.providers": {
+          "type": "object",
+          "default": {},
+          "order": 1,
+          "markdownDescription": "# Providers\nAPI keys and custom provider config. Keys are provider names (`deepseek`, `kimi`, `glm`, `qwen`, `minimax`, `openai`).\n\nValue is either a key string: `\"sk-xxx\"`, or an object for custom providers: `{ \"key\": \"sk-xxx\", \"baseURL\": \"...\", \"model\": \"...\" }`.\n\nUse the in-panel Settings (⚙) for a easier UI."
+        },
+        "thincoder.autoApprove": {
+          "type": "boolean",
+          "default": false,
+          "order": 2,
+          "markdownDescription": "# Auto-Approve Tools\nWhen enabled, the agent automatically executes file-modifying tools without asking for confirmation. **Off by default — you must explicitly opt in to automatic execution.**"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "npx @vscode/vsce package"
+  }
+}
