@@ -155,7 +155,7 @@ function fmtDate(ts) {
     " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
 }
 
-function fmtK(n) { return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n) }
+function fmtK(n) { return n >= 10000 ? Math.round(n / 1000) + "k" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n) }
 
 function renderTaskPanel() {
   const panel = document.getElementById("task-panel")
@@ -280,8 +280,8 @@ function renderStatusBar(m) {
   if (_goalInfo?.status === "active") parts.push(`<span id="goal-badge" role="button" tabindex="0" aria-label="Goal panel" style="cursor:pointer">🎯</span>`)
   parts.push(`↑${fmtK(prompt)} ↓${fmtK(completion)}`)
   if (cachePct !== null) parts.push(`hit${cachePct}%`)
-  if (m && m.ctxPct != null) parts.push(`ctx ${m.ctxPct}%`)
-  else if (_lastCtxPct != null) parts.push(`ctx ${_lastCtxPct}%`)
+  if (m && m.ctxPct != null) parts.push(`context ${m.ctxPct}%`)
+  else if (_lastCtxPct != null) parts.push(`context ${_lastCtxPct}%`)
   const subCount = Object.keys(_subagentMap).length
   if (subCount > 0) parts.push(`<span id="sub-badge" role="button" tabindex="0" aria-label="${subCount} subagents" style="cursor:pointer">sub:${subCount}</span>`)
   if (_taskStatus) parts.push(`<span id="task-badge" role="button" tabindex="0" aria-label="Task progress" style="cursor:pointer">${_taskStatus}</span>`)
