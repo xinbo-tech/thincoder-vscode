@@ -288,13 +288,18 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         : {}),
     })
 
-    // Group tool calls into batches — consecutive readonly tools run in parallel
+    // Group tool calls into batches — consecutive readonly tools run in parallel,
+    // consecutive subagent calls also run in parallel (each has its own agent)
     const batches = []
     for (const tc of response.toolCalls) {
       const tool = toolByName.get(tc.name)
-      if (tool?.readonly && batches.length > 0) {
+      const batchable = tool?.readonly || tool?.name === "subagent"
+      if (batchable && batches.length > 0) {
         const last = batches[batches.length - 1]
-        if (last.every((item) => item.tool?.readonly)) { last.push({ tc, tool }); continue }
+        const lastBatchable = last[0]?.tool?.readonly || last[0]?.tool?.name === "subagent"
+        // Don't mix readonly with subagent — keep same type together
+        const sameType = tool?.readonly ? last[0]?.tool?.readonly : last[0]?.tool?.name === "subagent"
+        if (lastBatchable && sameType) { last.push({ tc, tool }); continue }
       }
       batches.push([{ tc, tool }])
     }
