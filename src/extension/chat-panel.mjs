@@ -495,6 +495,8 @@ export class ChatPanel {
     this._abortController = new AbortController()
 
     let out = ""
+    // Accumulate token usage across all LLM calls in this turn (matches CLI)
+    const totalUsage = { prompt: 0, completion: 0, cacheHit: 0, cacheMiss: 0 }
     try {
       await runAgent(p, cwd, text, {
         onToken: (t) => { out += t; this._panel?.webview.postMessage({ type: "token", text: t }) },
@@ -509,9 +511,13 @@ export class ChatPanel {
         onSubagent: (info) => this._panel?.webview.postMessage({ type: "subagent", ...info }),
         onGoal: (info) => this._panel?.webview.postMessage({ type: "goal", ...info }),
         onUsage: (u) => {
+          totalUsage.prompt += u.prompt_tokens ?? 0
+          totalUsage.completion += u.completion_tokens ?? 0
+          totalUsage.cacheHit += u.prompt_cache_hit_tokens ?? 0
+          totalUsage.cacheMiss += u.prompt_cache_miss_tokens ?? 0
           const ctxWin = specForModel(p.model)?.contextWindow ?? 128000
           const ctxPct = u.prompt_tokens ? Math.round((u.prompt_tokens / ctxWin) * 100) : null
-          this._panel?.webview.postMessage({ type: "usage", usage: u, ctxPct })
+          this._panel?.webview.postMessage({ type: "usage", usage: { ...totalUsage }, ctxPct })
         },
         onToolCall: (n, a, id) => this._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
         onToolResult: (n, r, id) => this._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 2000), id }),
