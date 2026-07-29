@@ -526,11 +526,9 @@ export class ChatPanel {
           if (out) {
             history.push({ type: "assistant", content: out, timestamp: new Date().toISOString() })
             this._saveHistory(history)
-          } else {
           }
           this._panel?.webview.postMessage({ type: "complete" })
           this._pushSessions()
-          if (isFirstMessage) this._generateTitle()
         },
         onPermissionRequired: c.get("autoApprove", false) ? undefined : (toolName, args, diffInfo) =>
           new Promise((resolve) => {
@@ -549,6 +547,8 @@ export class ChatPanel {
     } finally {
       this._panel.webview.postMessage({ type: "loading", loading: false })
     }
+    // Generate session title from first message (after agent completes)
+    if (isFirstMessage) await this._generateTitle()
   }
 
   // ─── HTML ─────────────────────────────────────
