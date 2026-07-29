@@ -3,7 +3,8 @@
  * Run a pre-completion self-check: syntax checks on changed files,
  * optionally the full test suite.
  */
-import { join } from "node:path"
+import { join, isAbsolute } from "node:path"
+import { resolvePath } from "../tools/shared.mjs"
 
 export const verifyTool = {
   name: "verify",
@@ -27,8 +28,8 @@ export const verifyTool = {
       if (/\.(m?js|cjs)$/.test(f)) {
         try {
           const { execSync } = await import("node:child_process")
-          const abs = join(ctx.cwd, f)
-          execSync(`node --check "${abs}"`, { encoding: "utf8", timeout: 10000, stdio: "pipe" })
+          const abs = resolvePath(f, ctx.cwd)
+          execSync(`node --check "${abs}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000, stdio: "pipe" })
           results.push(`✓ ${f}: syntax OK`)
         } catch (e) {
           anyFailure = true

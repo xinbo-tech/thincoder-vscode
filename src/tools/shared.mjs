@@ -2,7 +2,7 @@
  * shared.mjs — Helper functions and constants shared across tool modules
  */
 
-import { join } from "node:path"
+import { join, isAbsolute } from "node:path"
 import * as vscode from "vscode"
 
 export const BASH_TIMEOUT_MS = 120000
@@ -32,7 +32,7 @@ export async function applyEditorRangeEdit(doc, startLine, startCol, endLine, en
 
 /** Resolve a path relative to cwd or absolute */
 export function resolvePath(p, cwd) {
-  if (p.startsWith("/") || /^[A-Za-z]:/.test(p)) return p
+  if (isAbsolute(p)) return p
   return join(cwd, p)
 }
 
