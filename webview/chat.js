@@ -723,7 +723,25 @@ function onToken(text) {
 }
 
 function finish(aborted) {
-  if (aborted && ctx.currentBubble) { ctx.currentRaw += "\n\n*[" + t("status.stopped") + "]*"; ctx.currentBubble.innerHTML = md(ctx.currentRaw) }
+  if (aborted) {
+    // Insert a visible "cancelled" system message into the chat flow
+    if (ctx.currentBlock) {
+      const msg = document.createElement("div")
+      msg.className = "cancelled-notice"
+      msg.textContent = "⊘ " + t("status.stopped")
+      ctx.currentBlock.appendChild(msg)
+    } else {
+      // No assistant block yet — create one just for the notice
+      const block = document.createElement("div")
+      block.className = "message assistant"
+      block.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}:</div>`
+      const msg = document.createElement("div")
+      msg.className = "cancelled-notice"
+      msg.textContent = "⊘ " + t("status.stopped")
+      block.appendChild(msg)
+      ctx.messagesEl.appendChild(block)
+    }
+  }
   if (ctx.currentBubble) attachCopyButtons(ctx.currentBubble)
   ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
   ctx._toolRefs = {}

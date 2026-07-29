@@ -35,7 +35,7 @@
 
   "status.thinking": "Thinking",
   "status.plan": "PLAN",
-  "status.stopped": "[Stopped]",
+  "status.stopped": "User cancelled",
 
   "error.title": "Error",
   "error.provider": "No provider configured — click ⚙ to set API keys",
