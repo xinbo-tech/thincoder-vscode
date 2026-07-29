@@ -3,6 +3,9 @@
   "session.new": "New Session",
   "session.empty": "No sessions",
   "session.delete": "Delete",
+  "session.deleteConfirm": "Delete session \"${title}\"? This cannot be undone.",
+  "session.switchConfirm": "Switch session? Unsent message will be lost.",
+  "session.generatingTitle": "generating title…",
 
   "input.placeholder": "Ask ThinCoder... (Shift+Enter for new line)",
 
@@ -44,6 +47,10 @@
   "auto.enable": "⚠ Enable AUTO",
   "auto.cancel": "Cancel",
 
+  "panel.taskDesc": "Agent tracks multi-step work here — created and updated automatically",
+  "panel.subDesc": "Background sub-tasks — explore, plan, or implement independently",
+  "panel.goalDesc": "Long-running objective — runs until complete or cancelled",
+
   "perm.wantsTo": "ThinCoder wants to run",
   "perm.approve": "Approve",
   "perm.approveAll": "Approve All",
@@ -64,6 +71,10 @@
   "settings.apiKey": "API Key",
   "settings.baseUrl": "Base URL",
   "settings.model": "Model",
+
+  "settings.indexSection": "Semantic Index",
+  "settings.indexBuild": "Build Index",
+  "settings.indexRebuild": "Rebuild Index",
 
   "settings.mcpSection": "MCP Servers",
   "settings.mcpAdd": "+ Add Server",

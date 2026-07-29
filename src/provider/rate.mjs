@@ -22,22 +22,54 @@ export const _rateHooks = {
 
 const rateWindows = new Map()
 
+/** Normalize baseURL for consistent rate-key: /beta→/v1, strip trailing slashes, include apiKey */
 function rateKey(provider) {
-  return (provider.baseURL || "").replace(/\/+$/, "").toLowerCase()
+  const base = (provider.baseURL || "").replace(/\/beta$/, "/v1").replace(/\/+$/, "").toLowerCase()
+  return `${base}|${provider.apiKey ?? ""}`
+}
+
+function ensureWindow(key) {
+  if (!rateWindows.has(key)) {
+    rateWindows.set(key, { entries: [], reqCount: 0 })
+  }
+  return rateWindows.get(key)
+}
+
+/** Prune entries older than the sliding window */
+function pruneWindow(w, now) {
+  const cutoff = now - _rateHooks.windowMs
+  // Prune entries. Also deduct from reqCount — assume ~1 req per entry (reasonable proxy)
+  let removed = 0
+  w.entries = w.entries.filter(e => {
+    if (e.ts > cutoff) return true
+    removed++
+    return false
+  })
+  w.reqCount = Math.max(0, w.reqCount - removed)
+}
+
+function tokenSum(w) {
+  return w.entries.reduce((s, e) => s + e.tokens, 0)
 }
 
 export function estimateText(s) {
   if (!s) return 0
   if (Array.isArray(s)) {
-    // multimodal content array — count text parts + estimate image tokens
     let tokens = 0
     for (const part of s) {
-      if (part.type === "text") tokens += Math.ceil(part.text.replace(/\s+/g, " ").length / 4)
-      else if (part.type === "image_url") tokens += 85 // ~85 tokens per image
+      if (part.type === "text") tokens += _estimateSingle(part.text)
+      else if (part.type === "image_url") tokens += 85
     }
     return tokens
   }
-  return Math.ceil(s.replace(/\s+/g, " ").length / 4)
+  return _estimateSingle(s)
+}
+
+/** CJK-aware token estimation: ASCII ~4 chars/token, non-ASCII ~1 char/token with BPE */
+function _estimateSingle(s) {
+  let nonAscii = 0
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) > 0x7f) nonAscii++
+  return Math.ceil((s.length - nonAscii) / 4) + nonAscii
 }
 
 export function estimateRequestTokens(body) {
@@ -54,43 +86,38 @@ export function estimateRequestTokens(body) {
 export async function rateGate(provider, estimated, onWait, signal) {
   const key = rateKey(provider)
   const spec = specForModel(provider.model)
-  const tpm = provider.tpm ?? spec.tpm ?? 1_000_000
-  const rpm = provider.rpm ?? spec.rpm ?? 500
 
-  if (!rateWindows.has(key)) {
-    rateWindows.set(key, { tokens: 0, requests: 0, start: _rateHooks.now() })
-  }
-  const w = rateWindows.get(key)
+  // Opt-out: no explicit rate limit configured (self-hosted / local providers)
+  const tpm = provider.tpm ?? spec.tpm
+  const rpm = provider.rpm ?? spec.rpm
+  if (tpm == null && rpm == null) return
 
+  const effectiveTpm = tpm ?? 1_000_000
+  const effectiveRpm = rpm ?? 500
+
+  const w = ensureWindow(key)
   const now = _rateHooks.now()
-  if (now - w.start >= _rateHooks.windowMs) {
-    w.tokens = 0
-    w.requests = 0
-    w.start = now
-  }
+  pruneWindow(w, now)
 
-  while (w.tokens + estimated > tpm || w.requests + 1 > rpm) {
-    const remainMs = _rateHooks.windowMs - (now - w.start)
+  let tokens = tokenSum(w)
+  while (tokens + estimated > effectiveTpm || w.reqCount + 1 > effectiveRpm) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+    const remainMs = _rateHooks.windowMs - (now - w.entries[0]?.ts || now)
     if (remainMs <= 0) {
-      w.tokens = 0
-      w.requests = 0
-      w.start = now
-      break
+      pruneWindow(w, _rateHooks.now())
+      tokens = tokenSum(w)
+      if (tokens + estimated <= effectiveTpm && w.reqCount + 1 <= effectiveRpm) break
     }
-    const waitMs = Math.min(remainMs + 100, 10_000)
+    const waitMs = Math.min(Math.max(remainMs + 100, 100), 10_000)
     onWait?.({ phase: "rate", seconds: Math.ceil(waitMs / 1000) })
     await _rateHooks.sleep(waitMs)
-    const now2 = _rateHooks.now()
-    if (now2 - w.start >= _rateHooks.windowMs) {
-      w.tokens = 0
-      w.requests = 0
-      w.start = now2
-      break
-    }
+    pruneWindow(w, _rateHooks.now())
+    tokens = tokenSum(w)
   }
 
-  w.tokens += estimated
-  w.requests++
+  // Pre-book the estimated tokens (adjusted by recordRate when actual usage is known)
+  w.entries.push({ ts: _rateHooks.now(), tokens: estimated })
+  w.reqCount++
 }
 
 export function recordRate(provider, estimated, usage) {
@@ -99,5 +126,7 @@ export function recordRate(provider, estimated, usage) {
   const w = rateWindows.get(key)
   if (!w) return
   const actual = usage.total_tokens ?? estimated
-  w.tokens = Math.max(0, w.tokens - (estimated - actual))
+  // Replace the last entry's estimated tokens with the actual usage
+  const entry = w.entries[w.entries.length - 1]
+  if (entry) entry.tokens = actual
 }

@@ -3,6 +3,9 @@
   "session.new": "新建会话",
   "session.empty": "暂无会话",
   "session.delete": "删除",
+  "session.deleteConfirm": "确定删除会话 \"${title}\"？此操作不可恢复。",
+  "session.switchConfirm": "切换会话？未发送的消息将丢失。",
+  "session.generatingTitle": "正在生成标题…",
 
   "input.placeholder": "向 ThinCoder 提问...（Shift+Enter 换行）",
 
@@ -44,6 +47,10 @@
   "auto.enable": "⚠ 启用 AUTO",
   "auto.cancel": "取消",
 
+  "panel.taskDesc": "Agent 在此跟踪多步骤任务 — 自动创建和更新",
+  "panel.subDesc": "后台子任务 — 独立探索、规划或实现",
+  "panel.goalDesc": "长期目标 — 持续运行直到完成或取消",
+
   "perm.wantsTo": "ThinCoder 想要执行",
   "perm.approve": "批准",
   "perm.approveAll": "全部批准",
@@ -64,6 +71,10 @@
   "settings.apiKey": "API Key",
   "settings.baseUrl": "Base URL",
   "settings.model": "模型",
+
+  "settings.indexSection": "语义索引",
+  "settings.indexBuild": "构建索引",
+  "settings.indexRebuild": "重新构建",
 
   "settings.mcpSection": "MCP 服务器",
   "settings.mcpAdd": "+ 添加服务器",

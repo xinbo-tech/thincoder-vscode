@@ -20,7 +20,7 @@ export const questionTool = {
     },
     required: ["question"],
   },
-  async execute({ question, options }, ctx) {
+  async execute({ question, options }, _ctx) {
     let answer
     if (options?.length) {
       // Use createQuickPick for proper title support

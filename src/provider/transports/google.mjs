@@ -123,15 +123,13 @@ export async function parseStream(response, { onToken, onReasoning }) {
 
     const parts = candidate.content?.parts || []
     for (const part of parts) {
-      if (part.text) {
+      if (part.thought === true && part.text) {
+        // Gemini thinking/reasoning — thought flag + text
+        result.reasoning += part.text
+        onReasoning?.(part.text)
+      } else if (part.text) {
         result.content += part.text
         onToken?.(part.text)
-      } else if (part.thought === true) {
-        // Thinking/reasoning — Gemini signals thought via boolean flag on text
-        if (part.text) {
-          result.reasoning += part.text
-          onReasoning?.(part.text)
-        }
       } else if (part.functionCall) {
         // Gemini returns function calls as discrete objects, not deltas
         const existing = result.toolCalls.find((tc) => tc.name === part.functionCall.name)

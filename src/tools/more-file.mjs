@@ -5,7 +5,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
-import { resolvePath, formatSize, getOpenDoc, applyEditorEdit, applyEditorRangeEdit } from "./shared.mjs"
+import { resolvePath, formatSize, getOpenDoc, applyEditorRangeEdit } from "./shared.mjs"
 
 export const insertAfterTool = {
   name: "insert_after",
@@ -231,17 +231,20 @@ export const deleteTool = {
   description:
     "Delete a file. Refuses to delete git-tracked files as a safety measure.\n" +
     "Parameters:\n" +
-    "- path (required): File path, relative to workspace or absolute\n" +
+    "- path (required): File path, relative to cwd or absolute (alias: filePath)\n" +
     "- force: Allow deleting git-tracked files (default false)",
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path" },
+      path: { type: "string", description: "File path (alias: filePath)" },
+      filePath: { type: "string", description: "Alias for path" },
       force: { type: "boolean", description: "Force delete git-tracked files" },
     },
     required: ["path"],
   },
-  async execute({ path, force }, ctx) {
+  async execute({ path, force, filePath }, ctx) {
+    path = path || filePath
+    if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
     const abs = resolvePath(path, ctx.cwd)
     const { unlink } = await import("node:fs/promises")
     // Check if git-tracked — normalize to forward slashes for git (Windows compat)

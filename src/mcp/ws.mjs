@@ -4,7 +4,7 @@
  * Communicates with MCP servers over WebSocket. Requires Node.js >= 22
  * (built-in WebSocket global) or a runtime polyfill.
  */
-import { rpcId, withTimeout, CALL_TIMEOUT_MS } from "./utils.mjs"
+import { rpcId, withTimeout, CALL_TIMEOUT_MS, INIT_TIMEOUT_MS, withAuthToken } from "./utils.mjs"
 
 /** Create an MCP WebSocket transport */
 export function wsTransport(wsUrl, extraHeaders = {}) {
@@ -24,13 +24,7 @@ export function wsTransport(wsUrl, extraHeaders = {}) {
   const connect = () => {
     if (closed) throw new Error("MCP WebSocket connection closed")
 
-    // Build URL with Authorization in query param if provided
-    let url = wsUrl
-    const auth = extraHeaders.Authorization
-    if (auth) {
-      const sep = url.includes("?") ? "&" : "?"
-      url += `${sep}authorization=${encodeURIComponent(auth)}`
-    }
+    const url = withAuthToken(wsUrl, extraHeaders.Authorization)
 
     ws = new WebSocket(url)
 
@@ -38,7 +32,7 @@ export function wsTransport(wsUrl, extraHeaders = {}) {
       const timeout = setTimeout(() => {
         try { ws.close() } catch { /* ignore */ }
         reject(new Error(`WebSocket connect timeout: ${wsUrl}`))
-      }, 15000)
+      }, INIT_TIMEOUT_MS)
 
       ws.addEventListener("open", () => {
         clearTimeout(timeout)

@@ -20,6 +20,7 @@ Like the CLI, it's pure `.mjs`, zero npm dependencies, and connects directly to 
 - **Image input** — paste or drag images into chat, or use `read_image` tool; supported on vision models (Kimi K3, Qwen3.7, MiniMax M3)
 - **Reasoning display** — collapsible "Thinking..." block shows the model's reasoning process in real-time
 - **6 providers** — DeepSeek, Kimi, GLM, Qwen, MiniMax, OpenAI + custom OpenAI-compatible endpoint
+- **Vector search** — semantic code search with BAAI/bge-m3 embeddings via SiliconFlow (configurable in Settings)
 - **Model selection** — choose from all available models per provider, with reasoning effort control
 - **Permission control** — `autoApprove` (off by default) lets you decide whether tools run automatically or require confirmation
 - **Right-click** — select code in editor, right-click → "Ask ThinCoder"
@@ -32,8 +33,8 @@ Like the CLI, it's pure `.mjs`, zero npm dependencies, and connects directly to 
 ## Quick Start
 
 1. Install the extension from VS Code Marketplace (or `vsce package` + sideload)
-2. Press `Ctrl+Alt+T` (Mac: `Cmd+Alt+T`) to open the ThinCoder panel
-3. On first open, the setup wizard will prompt you to add an API key
+2. Press `Ctrl+Alt+T` (Mac: `Cmd+Alt+T`) — the ThinCoder panel opens in the sidebar
+3. Click ⚙ (Settings) in the toolbar, then add your API key for any supported provider
 4. Start chatting — ThinCoder reads your workspace and responds
 
 ## Commands
@@ -149,7 +150,7 @@ thincoder-vscode/
 | Feature | CLI (`thincoder`) | VS Code Extension |
 |---------|-------------------|-------------------|
 | Interface | Terminal TUI (ANSI) | VS Code side panel |
-| Memory system | 3-layer FTS5 + vector | FTS5 only (no vector search) |
+| Memory system | 3-layer FTS5 + vector | FTS5 + vector (embedding required) |
 | Checkpoint | Git snapshot restore | Git diff/status/log only |
 | MCP support | ✅ | ✅ |
 | Session persistence | 5 archive slots | Filesystem (storageUri) — no size limit |

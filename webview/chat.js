@@ -5,14 +5,14 @@ import { md } from "./md.js"
 import { renderDiff, lineDiff } from "./diff.js"
 import {
   showWelcome, showBanner, addUser, addAssistantHistory, newBlock,
-  addTool, finishTool, setLoading, showError, scrollDown,
+  addTool, finishTool, setLoading, showError, scrollDown, escHtml,
 } from "./ui.js"
 import { setStrings, t } from "./i18n.js"
+import { initAutocomplete } from "./autocomplete.js"
+import { initSettings } from "./settings.js"
 
 const vscode = acquireVsCodeApi()
 window._vscode = vscode
-
-const REASONING_LABELS = { max: "Maximum", xhigh: "Extra High", high: "High", medium: "Medium", low: "Low", minimal: "Minimal", none: "Off", enabled: "Reasoning" }
 
 const ctx = {
   vscode,
@@ -30,11 +30,24 @@ const ctx = {
   currentBubble: null, currentBlock: null, currentTools: [], currentRaw: "",
   currentReasoning: null, currentReasoningRaw: "",
   isRunning: false, hadToolResult: false,
+  _toolRefs: {}, // tool id → ref, for O(1) finishTool lookup
   _models: [],
   selectedModel: "", selectedProvider: "", selectedReasoning: "max",
   _sessions: [], activeSession: "",
   _pastedImages: [],
 }
+
+// ─── Shared mutable state (must be declared before setInterval / event handlers)
+
+let _autoApprove = false
+let _taskStatus = null
+let _taskProgress = null
+let _lastUsage = null
+let _lastCtxPct = null
+let _planActive = false
+let _subagentMap = {}
+let _goalInfo = null
+let _toolPanels = {}
 
 // ─── Init ──────────────────────────────────────
 
@@ -50,159 +63,19 @@ ctx.inputEl.addEventListener("input", () => {
   ctx.inputEl.style.height = Math.min(ctx.inputEl.scrollHeight, 150) + "px"
 })
 
-// ─── @‑autocomplete ────────────────────────────
+// ─── @-autocomplete & image paste ──────────────
 
-const atDropdown = document.getElementById("at-dropdown")
-let _atTimer = null, _atActive = false, _atBase = ""
-
-ctx.inputEl.addEventListener("input", () => {
-  if (!_atActive) return
-  handleAtInput()
+const _ac = initAutocomplete({
+  inputEl: ctx.inputEl,
+  atDropdown: document.getElementById("at-dropdown"),
+  vscode,
+  pastedImages: ctx._pastedImages,
 })
+const { showAtDropdown, closeAtDropdown } = _ac
 
-ctx.inputEl.addEventListener("keydown", (e) => {
-  if (!_atActive) return
-  if (e.key === "Escape") { closeAtDropdown(); e.preventDefault(); return }
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-    e.preventDefault()
-    const items = atDropdown.querySelectorAll(".dropdown-item")
-    if (items.length === 0) return
-    const cur = atDropdown.querySelector(".dropdown-item.active")
-    const idx = cur ? Array.from(items).indexOf(cur) : -1
-    if (e.key === "ArrowDown") {
-      const next = idx + 1 < items.length ? idx + 1 : 0
-      items.forEach(i => i.classList.remove("active"))
-      items[next].classList.add("active")
-      items[next].scrollIntoView({ block: "nearest" })
-    } else {
-      const prev = idx - 1 >= 0 ? idx - 1 : items.length - 1
-      items.forEach(i => i.classList.remove("active"))
-      items[prev].classList.add("active")
-      items[prev].scrollIntoView({ block: "nearest" })
-    }
-    return
-  }
-  if (e.key === "Enter" || e.key === "Tab") {
-    const active = atDropdown.querySelector(".dropdown-item.active")
-    if (active) {
-      e.preventDefault()
-      insertAtRef(active.dataset.path)
-      closeAtDropdown()
-    }
-    return
-  }
-})
-
-function handleAtInput() {
-  const pos = ctx.inputEl.selectionStart
-  const text = ctx.inputEl.value.slice(0, pos)
-  const atIdx = text.lastIndexOf("@")
-  if (atIdx < 0) { closeAtDropdown(); return }
-  // Check if there's a space between @ and cursor
-  const afterAt = text.slice(atIdx + 1)
-  if (/\s/.test(afterAt)) { closeAtDropdown(); return }
-  _atBase = text.slice(0, atIdx)
-  const query = text.slice(atIdx)
-  clearTimeout(_atTimer)
-  _atTimer = setTimeout(() => {
-    vscode.postMessage({ type: "atComplete", query, cwd: "" })
-  }, 150)
-}
-
-function showAtDropdown(matches) {
-  if (matches.length === 0) { closeAtDropdown(); return }
-  atDropdown.innerHTML = matches.map((m, i) =>
-    `<div class="dropdown-item${i === 0 ? " active" : ""}" data-path="${escHtml(m.path)}" tabindex="0" role="option" aria-selected="${i === 0}">
-      <span class="at-file-name">${escHtml(m.name)}</span>
-      <span class="at-file-path">${escHtml(m.path)}</span>
-    </div>`
-  ).join("")
-  atDropdown.style.display = "block"
-  atDropdown.setAttribute("aria-expanded", "true")
-  _atActive = true
-}
-
-function closeAtDropdown() {
-  atDropdown.style.display = "none"
-  atDropdown.setAttribute("aria-expanded", "false")
-  _atActive = false
-  atDropdown.innerHTML = ""
-  clearTimeout(_atTimer)
-}
-
-function insertAtRef(path) {
-  const pos = ctx.inputEl.selectionStart
-  const text = ctx.inputEl.value
-  const before = _atBase + "@" + path
-  const after = text.slice(pos)
-  ctx.inputEl.value = before + " " + after
-  ctx.inputEl.selectionStart = ctx.inputEl.selectionEnd = before.length + 1
-  ctx.inputEl.focus()
-}
-
-// Detect @ typing to activate autocomplete
-ctx.inputEl.addEventListener("input", (e) => {
-  const pos = ctx.inputEl.selectionStart
-  const prevChar = ctx.inputEl.value[pos - 2]
-  if (prevChar === "@") {
-    _atActive = true
-    handleAtInput()
-  }
-})
-
-// Image paste — only intercept images, let text through to textarea
-document.addEventListener("paste", (e) => {
-  const items = e.clipboardData?.items
-  if (!items) return
-  let hasImage = false
-  for (const item of items) {
-    if (item.type.startsWith("image/")) {
-      if (!hasImage) { e.preventDefault(); hasImage = true }
-      readImageFile(item.getAsFile())
-    }
-  }
-})
-
-// File upload button
-const fileInput = document.getElementById("file-input")
-document.getElementById("attach-btn").addEventListener("click", () => fileInput.click())
-fileInput.addEventListener("change", () => {
-  for (const file of fileInput.files) {
-    if (file.type.startsWith("image/")) readImageFile(file)
-  }
-  fileInput.value = "" // reset so same file can be re-selected
-})
-
-function readImageFile(file) {
-  const reader = new FileReader()
-  reader.onload = () => {
-    ctx._pastedImages.push(reader.result)
-    renderPasteBar()
-  }
-  reader.readAsDataURL(file)
-}
-
-function renderPasteBar() {
-  const bar = document.getElementById("paste-bar")
-  const badge = document.getElementById("paste-badge")
-  if (ctx._pastedImages.length === 0) {
-    bar.style.display = "none"
-    return
-  }
-  badge.innerHTML = ctx._pastedImages.map((_, i) =>
-    `<span class="paste-chip">📎 image ${i + 1}<span class="paste-chip-del" data-idx="${i}">✕</span></span>`
-  ).join(" ")
-  bar.style.display = "flex"
-  // Wire delete buttons
-  badge.querySelectorAll(".paste-chip-del").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation()
-      const idx = parseInt(btn.dataset.idx)
-      ctx._pastedImages.splice(idx, 1)
-      renderPasteBar()
-    })
-  })
-}
+// ─── Settings panel (init early so openSettings is available for toolbar binding) ──
+const _settings = initSettings({ vscode, inputEl: ctx.inputEl, onClose: () => ctx.inputEl.focus() })
+const { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus } = _settings
 
 // ─── Session bar ───────────────────────────────
 
@@ -244,15 +117,20 @@ function buildSessionDropdown() {
     item.setAttribute("aria-selected", String(!!s.active))
     if (s.active) item.classList.add("active")
     item.innerHTML = `<span class="session-item-title">${escHtml(s.title)}</span>
-      <span class="session-item-meta">${s.count}msgs${s.updated ? " · " + fmtDate(s.updated) : ""}</span>
-      <button class="session-delete" title="${t("session.delete")}" aria-label="${t("session.delete")} ${escHtml(s.title)}">✕</button>`
+      <span class="session-item-meta">${s.count}msgs${s.updated ? " · " + fmtDate(s.updated) : ""}</span>`
+    if (ctx._sessions.length > 1) {
+      item.innerHTML += `<button class="session-delete" title="${t("session.delete")}" aria-label="${t("session.delete")} ${escHtml(s.title)}">✕</button>`
+    }
     item.addEventListener("click", (e) => {
       if (e.target.closest(".session-delete")) return
+      const inputText = ctx.inputEl.value.trim()
+      if (inputText && !confirm(t("session.switchConfirm") || "Switch session? Unsent message will be lost.")) return
       vscode.postMessage({ type: "switchSession", name: s.name })
       ctx.sessionDropdown.style.display = "none"
     })
     item.querySelector(".session-delete").addEventListener("click", (e) => {
       e.stopPropagation()
+      if (!confirm(t("session.deleteConfirm") || "Delete session \"" + s.title + "\"? This cannot be undone.")) return
       vscode.postMessage({ type: "deleteSession", name: s.name })
     })
     ctx.sessionDropdown.appendChild(item)
@@ -285,17 +163,18 @@ function renderTaskPanel() {
     panel.style.display = "none"
     return
   }
-  const allDone = _taskProgress.items.every((t) => t.status === "done")
+  const allDone = _taskProgress.items.every((item) => item.status === "done")
   if (allDone && panel.style.display !== "block") {
     // Don't show — badge already says ✓N/N, no need for the panel
     return
   }
   const icons = { pending: "○", in_progress: "◉", done: "✓" }
-  panel.innerHTML = _taskProgress.items.map((t) =>
+  panel.innerHTML = `<div class="panel-desc">${t("panel.taskDesc") || "Tracks multi-step work — created and updated by the agent"}</div>` +
+    _taskProgress.items.map((item) =>
     `<div class="task-item">
-      <span class="task-mark">${icons[t.status] || " "}</span>
-      <span class="task-title">${escHtml(t.title)}</span>
-      <span class="task-status">${t.status === "in_progress" ? t("task.in_progress") : t.status}</span>
+      <span class="task-mark">${icons[item.status] || " "}</span>
+      <span class="task-title">${escHtml(item.title)}</span>
+      <span class="task-status">${item.status === "in_progress" ? t("task.in_progress") : item.status}</span>
     </div>`
   ).join("")
   panel.style.display = "block"
@@ -305,7 +184,8 @@ function renderSubagentPanel() {
   const panel = document.getElementById("subagent-panel")
   const subs = Object.values(_subagentMap)
   if (subs.length === 0) { panel.style.display = "none"; return }
-  panel.innerHTML = subs.map((s) => {
+  panel.innerHTML = `<div class="panel-desc">${t("panel.subDesc") || "Background sub-tasks — explore, plan, or implement independently"}</div>` +
+    subs.map((s) => {
     const statusCls = s.status === "started" ? "started" : s.status === "done" ? "done" : "error"
     const statusText = s.status === "started" ? t("sub.running") : s.status
     return `<div class="sub-item">
@@ -322,7 +202,8 @@ function renderGoalPanel() {
   if (!_goalInfo) { panel.style.display = "none"; return }
   const g = _goalInfo
   const statusCls = g.status === "active" ? "active" : g.status === "done" ? "done" : "cancelled"
-  panel.innerHTML = `<div class="goal-section">
+  panel.innerHTML = `<div class="panel-desc">${t("panel.goalDesc") || "Long-running objective — runs until complete or cancelled"}</div>
+    <div class="goal-section">
     <div class="goal-label">${t("goal.objective")}</div>
     <div class="goal-value">${escHtml(g.objective || "")}</div>
   </div>
@@ -423,15 +304,6 @@ function renderStatusBar(m) {
 
 document.getElementById("settings-btn").addEventListener("click", openSettings)
 
-let _autoApprove = false
-let _taskStatus = null
-let _taskProgress = null
-let _lastUsage = null
-let _lastCtxPct = null
-let _planActive = false
-let _subagentMap = {}
-let _goalInfo = null
-let _toolPanels = {}
 const autoBtn = document.getElementById("auto-btn")
 autoBtn.addEventListener("click", () => {
   if (!_autoApprove) {
@@ -485,8 +357,6 @@ function showAutoConfirm() {
 }
 ctx.modelBtn.addEventListener("click", () => toggleDropdown(ctx.dropdown, () => buildModelDropdown()))
 ctx.reasoningBtn.addEventListener("click", () => toggleDropdown(ctx.reasoningDropdown, () => buildReasoningDropdown()))
-
-function escHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;") }
 
 // ─── Model selector ────────────────────────────
 
@@ -583,8 +453,7 @@ document.addEventListener("keydown", (e) => {
     ctx.sessionDropdown.style.display = "none"
     if (ctx.sessionSelector) ctx.sessionSelector.setAttribute("aria-expanded", "false")
     if (document.getElementById("settings-panel").style.display !== "none") {
-      document.getElementById("settings-panel").style.display = "none"
-      document.getElementById("settings-panel").setAttribute("aria-hidden", "true")
+      closeSettings()
       ctx.inputEl.focus()
     }
     const autoConfirm = document.querySelector(".auto-confirm")
@@ -610,210 +479,6 @@ document.addEventListener("click", (e) => {
   }
 })
 
-// ─── Settings panel ────────────────────────────
-
-const PROVIDER_LABELS = {
-  deepseek: "DeepSeek", kimi: "Kimi (Moonshot)", glm: "GLM (Zhipu)",
-  qwen: "Qwen (Alibaba)", minimax: "MiniMax", openai: "OpenAI",
-  claude: "Claude (Anthropic)", gemini: "Gemini (Google)",
-  grok: "Grok (xAI)", mistral: "Mistral",
-}
-
-let _providerStatus = {}
-
-function openSettings() {
-  const panel = document.getElementById("settings-panel")
-  panel.style.display = "flex"
-  panel.setAttribute("aria-hidden", "false")
-  buildSettings()
-  // Focus first focusable element in panel
-  setTimeout(() => {
-    const firstBtn = panel.querySelector("button, input")
-    if (firstBtn) firstBtn.focus()
-  }, 50)
-}
-
-function buildSettings() {
-  const body = document.getElementById("settings-body")
-  const ps = _providerStatus.providers || {}
-  const custom = _providerStatus.custom || null
-
-  let html = ""
-  for (const [name, label] of Object.entries(PROVIDER_LABELS)) {
-    const s = ps[name] || {}
-    html += `<div class="key-row" id="row-${name}">
-      <span class="key-label">${label}</span>
-      <span class="key-status ${s.configured ? "ok" : ""}" id="status-${name}">${s.configured ? s.masked : "—"}</span>
-      ${s.configured
-        ? `<button class="key-btn" onclick="window._editKey('${name}')">${t("settings.changeKey")}</button>
-           <button class="key-btn del-key" onclick="window._delKey('${name}')">✕</button>`
-        : `<button class="key-btn" onclick="window._editKey('${name}')">${t("settings.addKey")}</button>`}
-    </div>`
-  }
-
-  html += `<div class="settings-sep"></div>
-    <h4 class="settings-section-title">${t("settings.customSection")}</h4>
-    <div class="key-field"><label>${t("settings.apiKey")}</label><input id="s-custom-key" type="password" placeholder="sk-..."></div>
-    <div class="key-field"><label>${t("settings.baseUrl")}</label><input id="s-custom-url" placeholder="https://api.example.com/v1" value="${escHtml(custom?.baseURL || "")}"></div>
-    <div class="key-field"><label>${t("settings.model")}</label><input id="s-custom-model" placeholder="model-name" value="${escHtml(custom?.model || "")}"></div>`
-
-  // MCP section
-  html += `<div class="settings-sep"></div>
-    <h4 class="settings-section-title">${t("settings.mcpSection")}</h4>
-    <div id="mcp-list"></div>
-    <button id="mcp-add-btn" class="key-btn" style="margin-top:6px">${t("settings.mcpAdd")}</button>
-    <div id="mcp-form" style="display:none;margin-top:8px">
-      <div class="key-field"><label>${t("settings.mcp.name")}</label><input id="mcp-name" placeholder="my-server"></div>
-      <div class="key-field"><label>${t("settings.mcp.type")}</label><select id="mcp-type"><option value="stdio">Command (stdio)</option><option value="http">HTTP</option><option value="ws">WebSocket</option></select></div>
-      <div id="mcp-stdio-fields">
-        <div class="key-field"><label>${t("settings.mcp.command")}</label><input id="mcp-command" placeholder="npx"></div>
-        <div class="key-field"><label>${t("settings.mcp.args")}</label><input id="mcp-args" placeholder="-y,@modelcontextprotocol/server-filesystem,/path"></div>
-      </div>
-      <div id="mcp-http-fields" style="display:none">
-        <div class="key-field"><label>${t("settings.mcp.url")}</label><input id="mcp-url" placeholder="https://example.com/mcp"></div>
-        <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
-      </div>
-      <div id="mcp-ws-fields" style="display:none">
-        <div class="key-field"><label>${t("settings.mcp.wsUrl")}</label><input id="mcp-ws-url" placeholder="wss://example.com/mcp"></div>
-        <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-ws-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
-      </div>
-      <button id="mcp-save-btn" class="key-btn">${t("settings.save")}</button>
-      <button id="mcp-cancel-btn" class="key-btn">${t("settings.cancel")}</button>
-    </div>`
-
-  body.innerHTML = html
-
-  // Bind MCP type toggle
-  document.getElementById("mcp-type").addEventListener("change", (e) => {
-    document.getElementById("mcp-stdio-fields").style.display = e.target.value === "stdio" ? "" : "none"
-    document.getElementById("mcp-http-fields").style.display = e.target.value === "http" ? "" : "none"
-    document.getElementById("mcp-ws-fields").style.display = e.target.value === "ws" ? "" : "none"
-  })
-
-  // Bind MCP add
-  document.getElementById("mcp-add-btn").addEventListener("click", () => {
-    document.getElementById("mcp-form").style.display = "block"
-    document.getElementById("mcp-name").value = ""
-    document.getElementById("mcp-command").value = ""
-    document.getElementById("mcp-args").value = ""
-    document.getElementById("mcp-url").value = ""
-    document.getElementById("mcp-headers").value = ""
-    document.getElementById("mcp-ws-url").value = ""
-    document.getElementById("mcp-ws-headers").value = ""
-    document.getElementById("mcp-type").value = "stdio"
-    document.getElementById("mcp-stdio-fields").style.display = ""
-    document.getElementById("mcp-http-fields").style.display = "none"
-    document.getElementById("mcp-ws-fields").style.display = "none"
-  })
-
-  // Bind MCP save
-  document.getElementById("mcp-save-btn").addEventListener("click", () => {
-    const name = document.getElementById("mcp-name").value.trim()
-    if (!name) return
-    const type = document.getElementById("mcp-type").value
-    const config = {}
-    if (type === "stdio") {
-      config.command = document.getElementById("mcp-command").value.trim()
-      const argsStr = document.getElementById("mcp-args").value.trim()
-      config.args = argsStr ? argsStr.split(",").map((s) => s.trim()) : []
-    } else if (type === "ws") {
-      config.wsUrl = document.getElementById("mcp-ws-url").value.trim()
-      try { config.headers = JSON.parse(document.getElementById("mcp-ws-headers").value || "{}") } catch { config.headers = {} }
-    } else {
-      config.url = document.getElementById("mcp-url").value.trim()
-      try { config.headers = JSON.parse(document.getElementById("mcp-headers").value || "{}") } catch { config.headers = {} }
-    }
-    vscode.postMessage({ type: "saveMcpServer", name, config })
-    document.getElementById("mcp-form").style.display = "none"
-  })
-
-  // Bind MCP cancel
-  document.getElementById("mcp-cancel-btn").addEventListener("click", () => {
-    document.getElementById("mcp-form").style.display = "none"
-  })
-
-  // Render MCP server list
-  renderMcpList()
-
-  // Request MCP status
-  vscode.postMessage({ type: "getMcpStatus" })
-}
-
-// Expose to inline onclick handlers
-window._editKey = function(name) {
-  const row = document.getElementById("row-" + name)
-  row.innerHTML = `<span class="key-label">${PROVIDER_LABELS[name]}</span>
-    <input id="input-${name}" type="password" placeholder="sk-..." style="flex:1;margin:0 8px;"
-      onkeydown="if(event.key==='Enter')window._saveKey('${name}')">
-    <button class="key-btn" onclick="window._saveKey('${name}')">${t("settings.save")}</button>
-    <button class="key-btn" onclick="window._cancelEdit('${name}')">${t("settings.cancel")}</button>`
-  setTimeout(() => document.getElementById("input-" + name)?.focus(), 50)
-}
-
-window._saveKey = function(name) {
-  const inp = document.getElementById("input-" + name)
-  const key = inp?.value?.trim()
-  if (!key) return
-  window._vscode.postMessage({ type: "saveProviderKey", name, key })
-}
-
-window._cancelEdit = function(name) {
-  window._vscode.postMessage({ type: "getProviderStatus" })
-}
-
-window._delKey = function(name) {
-  window._vscode.postMessage({ type: "deleteProviderKey", name })
-}
-
-document.getElementById("settings-close").addEventListener("click", () => {
-  const panel = document.getElementById("settings-panel")
-  panel.style.display = "none"
-  panel.setAttribute("aria-hidden", "true")
-  ctx.inputEl.focus()
-})
-
-document.getElementById("settings-body").addEventListener("change", () => {
-  // Save custom provider on any change
-  const key = document.getElementById("s-custom-key")?.value
-  const url = document.getElementById("s-custom-url")?.value
-  const model = document.getElementById("s-custom-model")?.value
-  if (key || url || model) {
-    vscode.postMessage({ type: "saveCustomProvider", config: { key, baseURL: url, model } })
-  }
-})
-
-// ─── MCP settings ──────────────────────────────
-
-window._mcpServers = {}
-
-function renderMcpList() {
-  const list = document.getElementById("mcp-list")
-  if (!list) return
-  const servers = window._mcpServers
-  const names = Object.keys(servers)
-  if (names.length === 0) {
-    list.innerHTML = `<div style="font-size:12px;opacity:0.5;padding:4px 0">${t("settings.mcp.noServers")}</div>`
-    return
-  }
-  list.innerHTML = names.map((n) => {
-    const s = servers[n]
-    const type = s.command ? "stdio" : (s.wsUrl ? "ws" : "http")
-    const detail = type === "stdio" ? `${s.command} ${(s.args||[]).join(" ")}` : (s.wsUrl || s.url)
-    return `<div class="key-row" style="font-size:12px">
-      <span class="key-label">${escHtml(n)}</span>
-      <span style="opacity:0.5;flex:1;margin:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(detail)}</span>
-      <span style="font-size:10px;opacity:0.4;margin-right:8px">${type}</span>
-      <button class="key-btn del-key mcp-del-btn" data-name="${escHtml(n)}">✕</button>
-    </div>`
-  }).join("")
-  list.querySelectorAll(".mcp-del-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const name = btn.dataset.name
-      vscode.postMessage({ type: "deleteMcpServer", name })
-    })
-  })
-}
-
 // ─── Message handling ──────────────────────────
 
 window.addEventListener("message", (e) => {
@@ -827,8 +492,8 @@ window.addEventListener("message", (e) => {
       break
     case "token":            onToken(m.text); break
     case "reasoning":        onReasoning(m.text); break
-    case "toolCall":         addTool(ctx, m.name, m.args); break
-    case "toolResult":       finishTool(ctx, m.name, m.text); break
+    case "toolCall":         addTool(ctx, m.name, m.args, m.id); break
+    case "toolResult":       finishTool(ctx, m.name, m.id, m.text); break
     case "loading": {
       if (m.loading) {
         document.getElementById("status-line").innerHTML = _planActive
@@ -840,7 +505,7 @@ window.addEventListener("message", (e) => {
     }
     case "complete":         finish(); break
     case "aborted":          finish(true); break
-    case "error":            showError(ctx, m.text); finish(); break
+    case "error":            showError(ctx, m.text, m.techInfo); finish(); break
     case "clearMessages":
       ctx.messagesEl.replaceChildren()
       ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""
@@ -855,6 +520,8 @@ window.addEventListener("message", (e) => {
     case "models":
       ctx._models = m.models || []
       if (ctx._models.length > 0) {
+        ctx.modelBtn.style.display = ""
+        ctx.reasoningBtn.style.display = ""
         const prefs = m.prefs || {}
         const match = ctx._models.find((x) => x.id === prefs.model && x.provider === prefs.provider)
         if (match) {
@@ -877,12 +544,16 @@ window.addEventListener("message", (e) => {
           vscode.postMessage({ type: "selectModel", model: m0.id, provider: m0.provider || "" })
           vscode.postMessage({ type: "selectReasoning", reasoning: ctx.selectedReasoning })
         }
+      } else {
+        ctx.modelBtn.textContent = ""
+        ctx.modelBtn.title = ""
+        ctx.modelBtn.style.display = "none"
+        ctx.reasoningBtn.style.display = "none"
       }
       break
     case "providerStatus":
-      _providerStatus = m.status || {}
+      updateProviderStatus(m.status || {})
       showBanner(ctx, m.keyOk ? t("banner.configured") : t("banner.notConfigured"), m.keyOk)
-      if (document.getElementById("settings-panel").style.display !== "none") buildSettings()
       break
     case "autoApprove":
       _autoApprove = m.value
@@ -934,6 +605,9 @@ window.addEventListener("message", (e) => {
     case "mcpStatus":
       window._mcpServers = m.servers || {}
       renderMcpList()
+      break
+    case "indexStatus":
+      updateIndexStatus(m.status)
       break
     case "usage": {
       _lastUsage = m.usage || {}
@@ -994,14 +668,23 @@ function send() {
   addUser(ctx, text)
   const images = ctx._pastedImages
   ctx._pastedImages = []
-  renderPasteBar()
+  document.getElementById("paste-bar").style.display = "none"
+  document.getElementById("paste-badge").innerHTML = ""
   vscode.postMessage({ type: "userMessage", text, model: ctx.selectedModel, reasoning: ctx.selectedReasoning, provider: ctx.selectedProvider, images })
+  // If session title is auto-generated (Session N), show a hint that a better title is coming
+  if (/^Session \d+$/.test(ctx.sessionTitle.textContent)) {
+    ctx.sessionTitle.textContent = ctx.sessionTitle.textContent + " — " + (t("session.generatingTitle") || "generating title…")
+  }
 }
 
 // ─── Token handling ────────────────────────────
 
 function onReasoning(text) {
-  if (ctx.hadToolResult) { ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false }
+  // Start a new block if tool results arrived or if there are tools in the current block
+  // (ensures reasoning always appears below tool calls, preserving session flow order)
+  if (ctx.hadToolResult || ctx.currentTools.length > 0) {
+    ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
+  }
   if (!ctx.currentBlock) newBlock(ctx)
   if (!ctx.currentReasoning) {
     const details = document.createElement("details")
@@ -1025,7 +708,8 @@ function onReasoning(text) {
 }
 
 function onToken(text) {
-  if (ctx.hadToolResult) { ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentRaw = ""; ctx.hadToolResult = false }
+  // Start a new block if tool results arrived or if there are tools in the current block
+  if (ctx.hadToolResult || ctx.currentTools.length > 0) { ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentRaw = ""; ctx.hadToolResult = false }
   if (!ctx.currentBlock) newBlock(ctx)
   if (!ctx.currentBubble) {
     ctx.currentBubble = document.createElement("div")
@@ -1042,6 +726,7 @@ function finish(aborted) {
   if (aborted && ctx.currentBubble) { ctx.currentRaw += "\n\n*[" + t("status.stopped") + "]*"; ctx.currentBubble.innerHTML = md(ctx.currentRaw) }
   if (ctx.currentBubble) attachCopyButtons(ctx.currentBubble)
   ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
+  ctx._toolRefs = {}
   setLoading(ctx, false)
 }
 

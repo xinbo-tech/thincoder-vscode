@@ -4,6 +4,8 @@
  * Docs: https://docs.anthropic.com/en/api/messages
  */
 
+import { specForModel } from "../../specs.mjs"
+
 const ANTHROPIC_VERSION = "2023-06-01"
 
 /** Convert OpenAI-format tools to Anthropic format */
@@ -35,7 +37,15 @@ export function buildRequest(provider, messages, tools) {
     max_tokens: provider.maxTokens || 8192,
   }
   if (systemMessages.length > 0) body.system = systemMessages.join("\n\n")
-  if (provider.temperature != null) body.temperature = provider.temperature
+  if (provider.temperature != null) {
+    const spec = specForModel(provider.model)
+    let t = provider.temperature
+    if (spec.tempRange) {
+      t = Math.min(spec.tempRange[1], Math.max(spec.tempRange[0], t))
+      t = Math.round(t * 100) / 100
+    }
+    body.temperature = t
+  }
   if (tools?.length) body.tools = tools
 
   // Anthropic uses x-api-key header, not Bearer

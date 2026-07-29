@@ -4,6 +4,7 @@
  */
 export const taskTool = {
   name: "task",
+  readonly: true,
   description:
     "Plan and track a task list for complex multi-step work. Each call replaces the entire list. " +
     "Keep exactly one item in_progress at a time. Statuses: pending | in_progress | done.\n" +

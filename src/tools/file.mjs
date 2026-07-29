@@ -14,19 +14,22 @@ export const readTool = {
   description:
     "Read a text file. Returns numbered lines. Use offset/limit to page large files.\n" +
     "Parameters:\n" +
-    "- path (required): File path, relative to workspace or absolute\n" +
+    "- path (required): File path, relative to cwd or absolute (alias: filePath)\n" +
     "- offset: 1-based line number to start reading from\n" +
     "- limit: Max lines to return (default 2000)",
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path" },
+      path: { type: "string", description: "File path (alias: filePath)" },
+      filePath: { type: "string", description: "Alias for path" },
       offset: { type: "number", description: "1-based line number to start from" },
       limit: { type: "number", description: "Max lines to return" },
     },
     required: ["path"],
   },
-  async execute({ path, offset, limit }, ctx) {
+  async execute({ path, offset, limit, filePath }, ctx) {
+    path = path || filePath
+    if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
     const abs = resolvePath(path, ctx.cwd)
     const doc = getOpenDoc(abs)
     const text = doc ? doc.getText() : await readFile(abs, "utf8")
@@ -43,17 +46,21 @@ export const writeTool = {
   description:
     "Write content to a file. Creates parent directories; overwrites existing file.\n" +
     "Parameters:\n" +
-    "- path (required): File path, relative to workspace or absolute\n" +
+    "- path (required): File path, relative to cwd or absolute (alias: filePath)\n" +
     "- content (required): Full content to write",
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path" },
+      path: { type: "string", description: "File path (alias: filePath)" },
+      filePath: { type: "string", description: "Alias for path" },
       content: { type: "string", description: "Full content to write" },
     },
     required: ["path", "content"],
   },
-  async execute({ path, content }, ctx) {
+  async execute({ path, content, filePath }, ctx) {
+    path = path || filePath
+    if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
+    if (typeof content !== "string") return "Error: content is required and must be a string"
     const abs = resolvePath(path, ctx.cwd)
     const { mkdir } = await import("node:fs/promises")
     await mkdir(dirname(abs), { recursive: true })
@@ -77,21 +84,24 @@ export const editTool = {
   description:
     "Edit a file by exact string replacement. old_string must match exactly once unless replace_all is set.\n" +
     "Parameters:\n" +
-    "- path (required): File path\n" +
+    "- path (required): File path, relative to cwd or absolute (alias: filePath)\n" +
     "- old_string (required): Exact text to find and replace\n" +
     "- new_string (required): Replacement text\n" +
     "- replace_all: Replace all occurrences instead of just one (default false)",
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path" },
+      path: { type: "string", description: "File path (alias: filePath)" },
+      filePath: { type: "string", description: "Alias for path" },
       old_string: { type: "string", description: "Exact text to replace" },
       new_string: { type: "string", description: "Replacement text" },
       replace_all: { type: "boolean", description: "Replace all occurrences" },
     },
     required: ["path", "old_string", "new_string"],
   },
-  async execute({ path, old_string, new_string, replace_all }, ctx) {
+  async execute({ path, old_string, new_string, replace_all, filePath }, ctx) {
+    path = path || filePath
+    if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
     const abs = resolvePath(path, ctx.cwd)
     const doc = getOpenDoc(abs)
     const text = doc ? doc.getText() : await readFile(abs, "utf8")

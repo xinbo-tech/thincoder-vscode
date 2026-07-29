@@ -1,29 +1,21 @@
 /**
  * generate-title.mjs — LLM-generated session titles
- * Extracted from extension.mjs ChatPanel._generateTitle()
+ * Called from ChatPanel._generateTitle() with (userContent, providerName, modelName).
  */
+import { getKey, buildProvider } from "./presets.mjs"
 
-import { providerNames, getKey, buildProvider } from "./presets.mjs"
-
-/** Generate a title for the current session using the first user message */
-export async function generateTitle(loadIndex, saveIndex, loadMessages, pushSessions, activeIx) {
-  const ix = loadIndex()
-  const entry = ix.sessions[activeIx]
-  if (!entry || entry.title) return
-  const msgs = loadMessages(activeIx)
-  const firstUser = msgs.find((m) => m.type === "user")
-  if (!firstUser) return
+/** Generate a session title from the first user message using an LLM. Returns title string or null. */
+export async function generateTitle(userContent, providerName, modelName) {
   // Extract text even from multimodal content (array of parts)
-  const userText = Array.isArray(firstUser.content)
-    ? firstUser.content.find(p => p.type === "text")?.text || ""
-    : firstUser.content
-  if (typeof userText !== "string" || userText.length < 10) return
+  const userText = Array.isArray(userContent)
+    ? userContent.find(p => p.type === "text")?.text || ""
+    : userContent
+  if (typeof userText !== "string" || userText.length < 10) return null
 
-  let provName
-  for (const n of providerNames()) { if (await getKey(n)) { provName = n; break } }
-  if (!provName) return
-  const prov = await buildProvider(provName)
-  if (!prov) return
+  const key = await getKey(providerName)
+  if (!key) return null
+  const prov = await buildProvider(providerName)
+  if (!prov) return null
 
   try {
     const body = JSON.stringify({
@@ -41,13 +33,11 @@ export async function generateTitle(loadIndex, saveIndex, loadMessages, pushSess
       body,
       signal: AbortSignal.timeout(10000),
     })
-    if (!res.ok) return
+    if (!res.ok) return null
     const data = await res.json()
     const title = data.choices?.[0]?.message?.content?.trim().slice(0, 40)
-    if (title) {
-      entry.title = title
-      saveIndex(ix)
-      pushSessions()
-    }
-  } catch { /* best-effort */ }
+    return title || null
+  } catch {
+    return null
+  }
 }

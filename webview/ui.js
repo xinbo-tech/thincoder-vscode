@@ -68,9 +68,8 @@ export function newBlock(ctx) {
   ctx.messagesEl.appendChild(ctx.currentBlock)
 }
 
-export function addTool(ctx, name, args) {
+export function addTool(ctx, name, args, id) {
   if (!ctx.currentBlock) newBlock(ctx)
-  ctx.hadToolResult = false
 
   const c = document.createElement("div")
   c.className = "tool-call"
@@ -100,18 +99,34 @@ export function addTool(ctx, name, args) {
 
   c.appendChild(h)
   c.appendChild(b)
+  c.dataset.toolId = id || name  // fallback: findable via DOM query even if _toolRefs cleared
   ctx.currentBlock.appendChild(c)
-  ctx.currentTools.push({ h, b, name })
+  const ref = { h, b, name, id: id || name }
+  ctx.currentTools.push(ref)
+  ctx._toolRefs[id || name] = ref  // flat lookup — primary path
   scrollDown(ctx)
 }
 
-export function finishTool(ctx, name, text) {
-  const t = ctx.currentTools.find((x) => x.name === name)
-  if (!t) return
-  t.b.textContent = text
-  t.h.querySelector(".tool-call-status").textContent = t("tool.done")
-  t.h.querySelector(".tool-call-status").style.color = "#4ec9b0"
-  ctx.hadToolResult = true
+export function finishTool(ctx, name, id, text) {
+  // Primary: O(1) flat lookup by tool_call_id
+  const key = id || name
+  const ref = ctx._toolRefs[key]
+  if (ref) {
+    ref.b.textContent = text || ""
+    const statusEl = ref.h.querySelector(".tool-call-status")
+    if (statusEl) { statusEl.textContent = t("tool.done"); statusEl.style.color = "#4ec9b0" }
+    ctx.hadToolResult = true
+    return
+  }
+  // Fallback: DOM traversal for any reason the map missed
+  const el = ctx.messagesEl.querySelector(`.tool-call[data-tool-id="${CSS.escape(key)}"] .tool-call-status`)
+  if (el) {
+    el.textContent = t("tool.done")
+    el.style.color = "#4ec9b0"
+    const body = el.closest(".tool-call")?.querySelector(".tool-call-body")
+    if (body) body.textContent = text || ""
+    ctx.hadToolResult = true
+  }
 }
 
 // ─── Loading / Error ───────────────────────────
@@ -124,12 +139,14 @@ export function setLoading(ctx, on) {
   ctx.isRunning = on
 }
 
-export function showError(ctx, text) {
+export function showError(ctx, text, techInfo) {
   if (!ctx.currentBlock) newBlock(ctx)
   const err = document.createElement("div")
   err.className = "error-banner"
-  err.innerHTML = `<div class="error-text">${escHtml(text)}</div>
-    <button class="error-retry-btn">${t("error.retry")}</button>`
+  let html = `<div class="error-text">${escHtml(text)}</div>`
+  if (techInfo) html += `<details class="error-details"><summary>Details</summary><pre>${escHtml(techInfo)}</pre></details>`
+  html += `<button class="error-retry-btn">${t("error.retry")}</button>`
+  err.innerHTML = html
   err.querySelector(".error-retry-btn").addEventListener("click", () => {
     ctx.vscode.postMessage({ type: "retry" })
   })
@@ -137,8 +154,8 @@ export function showError(ctx, text) {
   scrollDown(ctx)
 }
 
-function escHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+export function escHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 }
 
 export function scrollDown(ctx) {

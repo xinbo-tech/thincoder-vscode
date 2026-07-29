@@ -281,6 +281,14 @@
   font-size: 12px;
   max-height: 200px;
   overflow-y: auto;
+}
+.panel-desc {
+  font-size: 10px;
+  opacity: 0.5;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-color, #333);
+  margin-bottom: 4px;
+}
 
 /* ─── Plan mode visual ────────────────────────── */
 

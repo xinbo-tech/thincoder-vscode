@@ -20,6 +20,24 @@
     "onCommand:thincoder.sendMessage"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "thincoder",
+          "title": "ThinCoder",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "thincoder": [
+        {
+          "type": "webview",
+          "id": "thincoder.chat",
+          "name": "Chat"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "thincoder.openChat",

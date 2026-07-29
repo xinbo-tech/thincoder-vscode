@@ -29,3 +29,12 @@ export function quoteArg(s) {
 export function sanitizeToolName(name) {
   return name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64)
 }
+
+/** Attach an Authorization header as a query param for WebSocket URLs. Strips Bearer prefix. */
+export function withAuthToken(wsUrl, authorization) {
+  if (!authorization) return wsUrl
+  const token = authorization.replace(/^Bearer\s+/i, "")
+  const u = new URL(wsUrl)
+  u.searchParams.set("token", token)
+  return u.href
+}

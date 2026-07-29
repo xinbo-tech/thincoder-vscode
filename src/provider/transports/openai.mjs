@@ -5,8 +5,6 @@
 
 import { specForModel } from "../../specs.mjs"
 
-const FETCH_TIMEOUT_MS = 120000
-
 /** Convert our tool schemas to OpenAI format */
 export function normalizeTools(tools) {
   return tools

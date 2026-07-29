@@ -15,6 +15,30 @@ import * as googleTransport from "./provider/transports/google.mjs"
 
 const FETCH_TIMEOUT_MS = 120000
 
+// AbortSignal.any polyfill for Node 18 / VS Code's Electron (Node 20.3+ has native)
+const _anySignal = AbortSignal.any || ((signals) => {
+  const ctrl = new AbortController()
+  for (const s of signals) {
+    if (s.aborted) { ctrl.abort(s.reason); return ctrl.signal }
+    s.addEventListener("abort", () => ctrl.abort(s.reason), { once: true })
+  }
+  return ctrl.signal
+})
+
+/**
+ * Strip image parts from messages when the model doesn't support multimodal.
+ * Without this, switching from a vision model to a text-only model after images
+ * were injected into history → 400 Bad Request on every subsequent call.
+ */
+function stripImagesForTextModel(messages, spec) {
+  if (spec.multimodal) return messages
+  return messages.map((m) => {
+    if (!Array.isArray(m.content)) return m
+    const textOnly = m.content.filter((part) => part.type === "text")
+    return textOnly.length === m.content.length ? m : { ...m, content: textOnly }
+  })
+}
+
 const TRANSPORTS = {
   openai: openaiTransport,
   anthropic: anthropicTransport,
@@ -29,6 +53,7 @@ function getTransport(provider) {
 export async function chat(provider, { messages, tools, onToken, onReasoning, onWait, signal }) {
   const spec = specForModel(provider.model)
   const transport = getTransport(provider)
+  messages = stripImagesForTextModel(messages, spec)
 
   // Validate reasoning effort for models that use it
   if (provider.reasoningEffort && provider.format !== "anthropic" && provider.format !== "google") {
@@ -101,16 +126,26 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
 
 /** List available model IDs from the provider's /models endpoint */
 export async function listModels(provider, { signal } = {}) {
-  const response = await fetch(`${provider.baseURL}/models`, {
-    headers: { Authorization: `Bearer ${provider.apiKey}` },
-    signal,
-  })
-  if (!response.ok) {
-    const text = await response.text().catch(() => "")
-    throw new Error(`GET /models failed ${response.status}: ${text}`)
+  const ctrl = new AbortController()
+  const timeout = setTimeout(() => ctrl.abort(), 15000)
+  if (signal) signal.addEventListener("abort", () => ctrl.abort(), { once: true })
+  try {
+    const response = await fetch(`${provider.baseURL}/models`, {
+      headers: { Authorization: `Bearer ${provider.apiKey}` },
+      signal: ctrl.signal,
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => "")
+      throw new Error(`GET /models failed ${response.status}: ${text}`)
+    }
+    const data = await response.json()
+    return (data.data ?? []).map((m) => m.id).filter(Boolean).sort()
+  } catch (e) {
+    if (e.name === "AbortError") return [] // timeout/silence → empty list
+    throw e
+  } finally {
+    clearTimeout(timeout)
   }
-  const data = await response.json()
-  return (data.data ?? []).map((m) => m.id).filter(Boolean).sort()
 }
 
 async function requestWithRetry(provider, url, headers, body, signal, onWait) {
@@ -127,7 +162,7 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
         method: "POST",
         headers,
         body,
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) : AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal: signal ? _anySignal([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) : AbortSignal.timeout(FETCH_TIMEOUT_MS),
       })
     } catch (error) {
       if (error.name === "AbortError") throw error

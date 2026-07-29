@@ -5,7 +5,7 @@
 
 import { chat } from "./provider.mjs"
 import { specForModel } from "./specs.mjs"
-import { readFileSync, existsSync } from "node:fs"
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { builtinTools, toOpenAISchema, readImageTool } from "./tools.mjs"
@@ -13,7 +13,7 @@ import {
   taskTool, recentChangesTool, subagentTool,
   planTool, goalTool, skillTool, verifyTool,
 } from "./agent-tools.mjs"
-import { compactHistory, buildRepoOutline, injectContext } from "./context.mjs"
+import { compactHistory, injectContext } from "./context.mjs"
 import * as os from "node:os"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -29,7 +29,29 @@ const DEFAULT_MAX_TURNS = 100
 const STALL_WINDOW = 5
 const STALL_THRESHOLD = 3
 const MAX_VERIFY_PUSHBACKS = 2
-const MAX_TOOL_RESULT = 8000 // chars — truncate large results to prevent context explosion
+const MAX_VERIFY_RETRIES = 3
+const MAX_TOOL_RESULT = 16000 // chars — large results saved to disk instead of truncated (aligns with CLI)
+const TOOL_RESULT_PREVIEW = 2000 // chars shown inline when offloaded (aligns with CLI)
+
+/** Typed error for turn-limit exhaustion — consumers can detect and offer "Continue?" prompt */
+export class ContinueError extends Error {
+  constructor(turns) { super(`Agent reached max turns (${turns}).`); this.turns = turns }
+}
+
+/** Save large tool results to disk so the agent can read them with the read tool */
+function offloadToolResult(cwd, text) {
+  if (text.length <= MAX_TOOL_RESULT) return text
+  try {
+    if (!existsSync(join(cwd, ".thincoder", "tmp"))) mkdirSync(join(cwd, ".thincoder", "tmp"), { recursive: true })
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+    const path = join(cwd, ".thincoder", "tmp", `tool-${id}.txt`)
+    writeFileSync(path, text, "utf8")
+    return `[Large output saved. Read the full result with the read tool: ${path}]\n\n${text.slice(0, TOOL_RESULT_PREVIEW)}...`
+  } catch {
+    // If saving fails (disk full, permissions), fall back to truncation
+    return text.slice(0, MAX_TOOL_RESULT) + `\n... (truncated ${text.length - MAX_TOOL_RESULT} chars)`
+  }
+}
 
 export { builtinTools } from "./tools.mjs"
 
@@ -38,13 +60,19 @@ export { builtinTools } from "./tools.mjs"
  * @param {object} opts - { depth, role, maxTurns } for subagent context
  */
 export async function runAgent(provider, cwd, input, callbacks = {}, signal, autoApprove = true, opts = {}) {
-  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills } = opts
+  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills, conversationHistory } = opts
 
   const agentTools = depth === 0
     ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool]
     : [taskTool, recentChangesTool] // subagents get fewer meta-tools
 
-  const tools = [...builtinTools, ...(specForModel(provider.model).multimodal ? [readImageTool] : []), ...agentTools]
+  // Subagent role-based tool filtering: explore/plan get read-only tools only
+  const isReadOnlyRole = depth > 0 && (role === "explore" || role === "plan")
+  const tools = [
+    ...(isReadOnlyRole ? builtinTools.filter((t) => t.readonly) : builtinTools),
+    ...(specForModel(provider.model).multimodal ? [readImageTool] : []),
+    ...agentTools,
+  ]
   const toolSchemas = tools.map(toOpenAISchema)
   const toolByName = new Map(tools.map((t) => [t.name, t]))
 
@@ -94,6 +122,15 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     })
   }
 
+  // ─── Conversation history (multi-turn) ──────
+  if (depth === 0 && Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+    console.warn("[agent] injecting conversationHistory, length =", conversationHistory.length)
+    for (const m of conversationHistory) {
+      if (m.type === "user") history.push({ role: "user", content: m.content })
+      else if (m.type === "assistant") history.push({ role: "assistant", content: m.content })
+    }
+  }
+
   history.push({ role: "user", content: input })
 
   // Inject pasted images as multimodal content on the first user message
@@ -122,10 +159,34 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
 
     // Context compaction check
-    const compacted = compactHistory(history, systemPrompt)
+    const compacted = await compactHistory(history, systemPrompt, provider)
     if (compacted) {
       history.length = 0
       history.push(...compacted)
+
+      // Re-inject task list after compaction (single source of truth)
+      if (agent._tasks?.length > 0) {
+        const pending = agent._tasks.filter((t) => t.status !== "done")
+        const done = agent._tasks.filter((t) => t.status === "done")
+        const taskSummary = [
+          ...pending.map((t) => `- [${t.status}] ${t.title}`),
+          ...done.slice(0, 3).map((t) => `- [done] ${t.title}`),
+        ].join("\n")
+        history.push({
+          role: "user",
+          content: `[System reminder: your current task list after compaction:\n${taskSummary}\nContinue from where you left off.]`,
+        })
+      }
+
+      // Re-inject plan mode if active
+      if (agent._planMode) {
+        history.push({
+          role: "user",
+          content: "[System reminder: plan mode is active. Explore the codebase read-only, design your solution, then call plan with action='exit' to present it for user approval.]",
+        })
+      }
+
+      // Re-inject permission mode reminder
       if (autoApprove) {
         history.push({
           role: "user",
@@ -169,20 +230,43 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           history.push({ role: "assistant", content: response.content })
           history.push({
             role: "user",
-            content: `[System reminder: you still have pending tasks: ${pending.map((t) => t.title).join(", ")}. Update their status before finishing.]`,
+            content: `[System reminder: you still have pending tasks: ${pending.map((t) => t.title).join(", ")}. Update their status before finishing — if done, mark done; if not applicable, remove them.]`,
           })
           continue
         }
 
-        // Verify guard pushback
+        // Verify guard — push model to verify mutated files before completion
         if (agent._touchedFiles.length > 0 && !agent._verifiedThisRun && guardPushbacks < MAX_VERIFY_PUSHBACKS) {
           guardPushbacks++
           history.push({ role: "assistant", content: response.content })
           history.push({
             role: "user",
-            content: "[System reminder: you modified files but haven't verified. Before finishing: call verify to run syntax checks. If verify reports failures, fix them and run verify again.]",
+            content: "[System reminder: you modified files in this run but have not verified the changes. Before finishing: call the verify tool to run syntax checks and tests. If verify reports failures, fix them and run verify again. If verification is genuinely impossible here, say so explicitly in your reply.]",
           })
           continue
+        }
+        if (agent._verifiedThisRun && agent._verifyPassed === false) {
+          const retries = (agent._verifyRetries ?? 0) + 1
+          agent._verifyRetries = retries
+          if (retries < MAX_VERIFY_RETRIES) {
+            agent._verifyPassed = undefined // reset for next attempt
+            history.push({ role: "assistant", content: response.content })
+            history.push({
+              role: "user",
+              content: `[System reminder: verify reported failures (retry ${retries}/${MAX_VERIFY_RETRIES}). Review the failures, fix the issues, then run verify again. If you cannot fix after ${MAX_VERIFY_RETRIES} attempts, explain honestly what's blocking you.]`,
+            })
+            continue
+          }
+          // Exhausted retries — inject honest-declaration reminder
+          if (!agent._honestReminderInjected) {
+            agent._honestReminderInjected = true
+            history.push({ role: "assistant", content: response.content })
+            history.push({
+              role: "user",
+              content: `[System reminder: ${MAX_VERIFY_RETRIES} verify attempts exhausted and tests are still failing. In your response to the user, you MUST state explicitly: (1) what tests are still failing, (2) what you tried, (3) what you believe the root cause is. Do not present this as complete — the user needs to know the work is unfinished.]`,
+            })
+            continue
+          }
         }
       }
 
@@ -229,9 +313,8 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           return { tool_call_id: tc.id, toolName, content: "Error: plan mode active", meta: null }
         }
 
-        // Permission gate
-        const mutationTools = new Set(["write", "edit", "insert_after", "apply_patch", "delete", "bash"])
-        if (!autoApprove && tool && mutationTools.has(toolName) && depth === 0 && callbacks.onPermissionRequired) {
+        // Permission gate: any non-readonly tool at depth 0 in manual mode
+        if (!autoApprove && tool && !tool.readonly && depth === 0 && callbacks.onPermissionRequired) {
           // Compute diff preview for file-based tools
           let diffInfo = null
           if (toolName !== "bash" && args.path) {
@@ -267,7 +350,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           if (!approved) return { tool_call_id: tc.id, toolName, content: "Denied by user (permission mode).", meta: null }
         }
 
-        if (depth === 0) callbacks.onToolCall?.(toolName, args)
+        if (depth === 0) callbacks.onToolCall?.(toolName, args, tc.id)
 
         let result
         if (!tool) {
@@ -291,10 +374,8 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           }
         }
 
-        // Truncate
-        if (result.length > MAX_TOOL_RESULT) {
-          result = result.slice(0, MAX_TOOL_RESULT) + `\n... (truncated ${result.length - MAX_TOOL_RESULT} chars)`
-        }
+        // Truncate large results: save to disk so agent can read with read tool
+        result = offloadToolResult(cwd, result)
 
         return {
           tool_call_id: tc.id, toolName, content: result,
@@ -310,23 +391,18 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         if (multimodal) {
           history.push({ role: "tool", tool_call_id, content: multimodal.text })
           history.push({ role: "user", content: [{ type: "text", text: multimodal.text }, ...multimodal.images] })
-          if (depth === 0) callbacks.onToolResult?.(toolName, multimodal.text)
+          if (depth === 0) callbacks.onToolResult?.(toolName, multimodal.text, tool_call_id)
         } else {
           history.push({ role: "tool", tool_call_id, content })
-          if (depth === 0) callbacks.onToolResult?.(toolName, content)
+          if (depth === 0) callbacks.onToolResult?.(toolName, content, tool_call_id)
         }
 
-        // Track mutations
+        // Track mutations — use tool metadata, not a hardcoded list
         if (meta) {
           const { args, tool } = meta
-          if (tool && !tool.readonly) {
-            const mutators = ["write", "edit", "insert_after", "apply_patch", "delete"]
-            if (mutators.includes(toolName) && args.path) {
-              agent._touchedFiles.push(args.path)
-            }
-            if (toolName === "verify") {
-              agent._verifiedThisRun = true
-            }
+          if (tool && !tool.readonly && !tool.sideEffectExempt) {
+            if (args?.path) agent._touchedFiles.push(args.path)
+            if (toolName === "verify") agent._verifiedThisRun = true
           }
         }
 
@@ -359,6 +435,6 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     }
   }
 
-  throw new Error(`Agent reached max turns (${maxTurns}).`)
+  throw new ContinueError(maxTurns)
 }
 

@@ -33,12 +33,16 @@ export async function saveProviderKey(name, key) {
 export async function saveCustomProvider({ key, baseURL, model }) {
   const c = vscode.workspace.getConfiguration("thincoder")
   const providers = { ...(c.get("providers") || {}) }
-  if (key && baseURL && model) {
+  // Save as long as key is provided (baseURL and model are optional)
+  if (key) {
     await storeProviderKey("custom", key)
-    providers.custom = { baseURL: baseURL.trim(), model: model.trim() }
+    providers.custom = { baseURL: (baseURL || "").trim(), model: (model || "").trim() }
   } else {
-    await removeProviderKey("custom")
-    delete providers.custom
+    // Only delete if ALL fields are empty (user explicitly cleared everything)
+    if (!baseURL && !model) {
+      await removeProviderKey("custom")
+      delete providers.custom
+    }
   }
   await c.update("providers", providers, vscode.ConfigurationTarget.Global)
 }

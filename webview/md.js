@@ -48,7 +48,7 @@ export function md(raw) {
   text = text.replace(/^# (.+)$/gm, "<h1>$1</h1>")
 
   // 8. Unordered lists
-  text = text.replace(/^[\-\*] (.+)$/gm, "<li>$1</li>")
+  text = text.replace(/^[-*] (.+)$/gm, "<li>$1</li>")
   text = text.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>")
 
   // 9. Ordered lists
@@ -66,6 +66,7 @@ export function md(raw) {
   text = text.replace(/\n/g, "<br>")
 
   // 13. Restore placeholders
+  // eslint-disable-next-line no-control-regex
   text = text.replace(/\x00B(\d+)\x00/g, (_, i) => blocks[+i] || "")
 
   return text
@@ -86,9 +87,9 @@ export function esc(s) {
 
 // ─── Helpers ───────────────────────────────────
 
-function renderTable(md) {
-  const lines = md.trim().split("\n")
-  if (lines.length < 2) return esc(md)
+function renderTable(raw) {
+  const lines = raw.trim().split("\n")
+  if (lines.length < 2) return esc(raw)
 
   const parseRow = (line) =>
     line.replace(/^\||\|$/g, "").split("|").map((c) => c.trim())

@@ -21,7 +21,7 @@ import { wsTransport } from "./ws.mjs"
 // ─── MCP handshake ───────────────────────────────────────────────
 
 /** Initialize the MCP handshake and return the server's tool list */
-async function doInitialize(transport, name) {
+async function doInitialize(transport, _name) {
   const initResp = await withTimeout(
     transport.send("initialize", {
       protocolVersion: "2024-11-05",
@@ -58,6 +58,7 @@ export async function mcpConnect(config) {
 
   if (config.wsUrl) {
     transport = wsTransport(config.wsUrl, config.headers ?? {})
+    await transport.connect()
   } else if (config.url) {
     transport = httpTransport(config.url, config.headers ?? {})
     try {
@@ -173,7 +174,7 @@ export const mcpTool = {
     "available tools, then 'call' to invoke them.\n\n" +
     "Parameters:\n" +
     "- action (required): \"connect\" | \"list\" | \"call\" | \"disconnect\"\n" +
-    "- config: (for connect) { type: \"stdio\"|\"http\", command?, args?, url?, name?, headers? }\n" +
+    "- config: (for connect) { type: \"stdio\"|\"http\"|\"ws\", command?, args?, url?, wsUrl?, name?, headers? }\n" +
     "  - stdio example: { type: \"stdio\", command: \"npx\", args: [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/path\"], name: \"fs\" }\n" +
     "  - http example:  { type: \"http\",  url: \"http://localhost:3000/mcp\", name: \"my-server\" }\n" +
     "- serverId: (for list, call, disconnect) the id returned by connect\n" +
@@ -211,10 +212,11 @@ export const mcpTool = {
       case "connect": {
         if (!config) return "Error: 'config' is required for connect"
         const result = await mcpConnect({
-          type: config.type || (config.command ? "stdio" : config.url ? "http" : undefined),
+          type: config.type || (config.command ? "stdio" : config.wsUrl ? "ws" : config.url ? "http" : undefined),
           command: config.command,
           args: config.args,
           url: config.url,
+          wsUrl: config.wsUrl,
           name: config.name,
           headers: config.headers,
         })

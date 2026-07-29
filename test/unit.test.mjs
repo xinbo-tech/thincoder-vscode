@@ -7,7 +7,7 @@
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs"
-import { join, sep } from "node:path"
+import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 // ─── memory.mjs ──────────────────────────────────────────────

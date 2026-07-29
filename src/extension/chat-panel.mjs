@@ -1,0 +1,563 @@
+/**
+ * chat-panel.mjs — ChatPanel class: webview panel, message routing, session management.
+ * Extracted from extension.mjs to keep the entry point lean.
+ */
+import * as vscode from "vscode"
+import { readFileSync, existsSync } from "node:fs"
+import { join, dirname } from "node:path"
+import { homedir } from "node:os"
+import { fileURLToPath } from "node:url"
+import { runAgent } from "../agent.mjs"
+import { closeAllMcp } from "../mcp.mjs"
+import { providerNames, getKey, buildProvider, initProviderKeyStore, loadProviderKeyCache } from "./presets.mjs"
+import { loadMessages, saveMessages, deleteMessages, renameMessages, loadIndex, saveIndex, sessionsKey, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
+import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer } from "./settings.mjs"
+import { generateTitle } from "./generate-title.mjs"
+import { injectEditorContext } from "./editor-context.mjs"
+import { specForModel } from "../specs.mjs"
+import { t, loadLocaleStrings } from "../i18n.mjs"
+import { loadSkills } from "./skills.mjs"
+import { injectAtRefs } from "./file-refs.mjs"
+import { createEmbedder } from "../embedding.mjs"
+import { getEmbedder, setVSCodeEmbedder, resetEmbedder } from "../embed-config.mjs"
+import { buildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../indexer.mjs"
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const _sessionKey = () => sessionsKey(vscode.workspace.workspaceFolders)
+const _indexKey = () => _sessionKey() + ".index"
+
+export class ChatPanel {
+  /** @param {vscode.ExtensionContext} context */
+  constructor(context) {
+    this._context = context
+    try {
+      this._msgDir = join(context.globalStorageUri.fsPath, "messages")
+    } catch (e) {
+      console.error("[chat-panel] failed to init msgDir:", e.message)
+      this._msgDir = join(context.extensionUri.fsPath, "messages")
+    }
+    this._panel = null
+    this._abortController = null
+    this._permissionQueue = []
+    this._statusBar = null
+  }
+
+  // ─── WebviewViewProvider ─────────────────────────
+
+  /**
+   * Called by VS Code when the sidebar view becomes visible.
+   * Sets up the webview HTML, message listener, and initial state.
+   * @param {vscode.WebviewView} webviewView
+   * @param {vscode.WebviewViewResolveContext} _context
+   * @param {vscode.CancellationToken} _token
+   */
+  resolveWebviewView(webviewView, _context, _token) {
+    this._panel = webviewView
+
+    webviewView.webview.options = {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+    }
+
+    webviewView.onDidDispose(() => {
+      this._panel = null
+      this._abortController?.abort()
+      closeAllMcp()
+    })
+
+    webviewView.webview.html = this._html()
+    webviewView.webview.postMessage({ type: "i18n", strings: loadLocaleStrings(vscode.env.language) })
+
+    webviewView.webview.onDidReceiveMessage((msg) => {
+      (async () => {
+      switch (msg.type) {
+        case "userMessage": {
+          const text = msg.text || ""
+          this._chat(text, msg.model, msg.reasoning, msg.provider, msg.images)
+          break
+        }
+        case "selectModel": {
+          const prefs = this._loadModelPrefs()
+          prefs.model = msg.model
+          prefs.provider = msg.provider || ""
+          saveModelPrefs(this._context.workspaceState, prefs)
+          break
+        }
+        case "selectReasoning": {
+          const prefs = this._loadModelPrefs()
+          prefs.reasoning = msg.reasoning
+          saveModelPrefs(this._context.workspaceState, prefs)
+          break
+        }
+        case "newSession": this._newSession(); break
+        case "switchSession": {
+          this._context.workspaceState.update(_sessionKey(), msg.name)
+          await this._loadSession()
+          break
+        }
+        case "deleteSession": await this._deleteSession(msg.name); break
+        case "retry": {
+          const history = this._activeHistory()
+          const lastUser = [...history].reverse().find((m) => m.type === "user")
+          if (lastUser) this._chat(lastUser.content, lastUser.provider, undefined, lastUser.provider)
+          break
+        }
+        case "abort": this._abortController?.abort(); break
+        case "setAutoApprove": await this._setAutoApprove(!!msg.value); break
+        case "atComplete": await this._atComplete(msg.query, msg.cwd); break
+        case "permissionResponse": {
+          const entry = this._permissionQueue.shift()
+          if (msg.approved === "approveAll") {
+            this._permissionQueue.forEach((e) => e.resolve(true))
+            this._permissionQueue.length = 0
+            await this._setAutoApprove(true)
+            this._panel?.webview.postMessage({ type: "autoApprove", value: true })
+          }
+          entry?.resolve(msg.approved === "approveAll" ? true : !!msg.approved)
+          break
+        }
+        case "settings": await this._pushSettings(); break
+        case "saveProviderKey": await this._saveProviderKey(msg.name, msg.key); break
+        case "saveCustomProvider": await this._saveCustomProvider(msg.config); break
+        case "deleteProviderKey": await this._deleteProviderKey(msg.name); break
+        case "saveMcpServer": await this._saveMcpServer(msg.name, msg.config); break
+        case "deleteMcpServer": await this._deleteMcpServer(msg.name); break
+        case "saveEmbeddingConfig": await this._saveEmbeddingConfig(msg.config); break
+        case "saveEmbedKey": await this._saveEmbeddingConfig({ apiKey: msg.key }); break
+        case "deleteEmbedKey": await this._saveEmbeddingConfig({ apiKey: "" }); break
+        case "buildIndex": await this._buildIndex(); break
+        case "getMcpStatus": this._pushMcpStatus(); break
+      }
+      })()  // end async IIFE
+    })
+
+    this._status()
+  }
+
+  sendMessage(text) {
+    if (this._panel) {
+      this._panel.webview.postMessage({ type: "userMessage", text })
+      this._chat(text)
+    } else {
+      vscode.window.showWarningMessage("ThinCoder panel is not ready yet — please wait a moment and try again.")
+    }
+  }
+
+  dispose() {
+    closeAllMcp()
+    this._abortController?.abort()
+    this._panel?.dispose()
+  }
+
+  // ─── Session ───────────────────────────────────
+
+  _activeName() {
+    const key = _sessionKey()
+    const result = this._context.workspaceState.get(key, "default")
+    if (typeof result !== "string") {
+      return "default"
+    }
+    return result
+  }
+
+  _activeHistory() {
+    return loadMessages(this._msgDir, this._activeName())
+  }
+
+  _saveHistory(history) {
+    saveMessages(this._msgDir, this._activeName(), history)
+  }
+
+  _loadModelPrefs() {
+    return loadModelPrefs(this._context.workspaceState)
+  }
+
+  _loadSession() {
+    const history = this._activeHistory()
+    this._panel?.webview.postMessage({ type: "clearMessages" })
+    for (const m of history) {
+      if (m.type === "user") this._panel?.webview.postMessage({ type: "userMessage", text: m.content, timestamp: m.timestamp })
+      else if (m.type === "assistant") this._panel?.webview.postMessage({ type: "assistantMessage", text: m.content, timestamp: m.timestamp })
+    }
+    this._pushSessions()
+  }
+
+  async _newSession() {
+    const names = loadIndex(this._context.workspaceState, _indexKey())
+    // Generate next session number: "Session 2", "Session 3", ...
+    let n = names.length + 1
+    while (names.includes(`Session ${n}`)) n++
+    const newName = `Session ${n}`
+    // Add to index and save
+    const updated = [...names, newName]
+    saveIndex(this._context.workspaceState, _indexKey(), updated)
+    // Set as active
+    this._context.workspaceState.update(_sessionKey(), newName)
+    this._loadSession()
+  }
+
+  async _deleteSession(name) {
+    if (typeof name !== "string" || !name) return
+    const names = loadIndex(this._context.workspaceState, _indexKey())
+    if (names.length <= 1) return  // Keep at least one session
+    // Delete file and remove from index
+    deleteMessages(this._msgDir, name)
+    const updated = names.filter((n) => n !== name)
+    saveIndex(this._context.workspaceState, _indexKey(), updated)
+    // If deleting the active session, switch to another
+    if (this._activeName() === name) {
+      const next = updated[0] || "Session 1"
+      this._context.workspaceState.update(_sessionKey(), next)
+    }
+    this._loadSession()
+  }
+
+  async _generateTitle() {
+    try {
+      const history = this._activeHistory()
+      const firstUser = history.find((m) => m.type === "user")
+      if (!firstUser) return
+      const title = await generateTitle(firstUser.content, firstUser.provider, firstUser.model)
+      if (title) {
+        const names = loadIndex(this._context.workspaceState, _indexKey())
+        const oldName = this._activeName()
+        const idx = names.indexOf(oldName)
+        if (idx >= 0) {
+          // Rename file on disk and update index
+          renameMessages(this._msgDir, oldName, title)
+          names[idx] = title
+          saveIndex(this._context.workspaceState, _indexKey(), names)
+          this._context.workspaceState.update(_sessionKey(), title)
+          this._pushSessions()
+        }
+      }
+    } catch (e) {
+      console.error("[chat-panel] generateTitle failed:", e.message)
+    }
+  }
+
+  _pushSessions() {
+    const names = loadIndex(this._context.workspaceState, _indexKey())
+    const sessions = names.map((n) => {
+      const msgs = loadMessages(this._msgDir, n)
+      const last = msgs.at(-1)
+      return {
+        name: n,
+        title: n,
+        count: msgs.length,
+        updated: last?.timestamp,
+        active: n === this._activeName(),
+      }
+    })
+    this._panel?.webview.postMessage({ type: "sessions", sessions, active: this._activeName() })
+  }
+
+  _pushMcpStatus() {
+    this._panel?.webview.postMessage({ type: "mcpStatus", servers: getMcpServers(this._context.workspaceState) })
+  }
+
+  // ─── Settings ─────────────────────────────────
+
+  _providerStatus() { return providerStatus() }
+  async _saveProviderKey(name, key) { await saveProviderKey(name, key); this._pushStatus() }
+  async _saveCustomProvider(config) { await saveCustomProvider(config); this._pushStatus() }
+  async _deleteProviderKey(name) { await deleteProviderKey(name); this._pushStatus() }
+  async _saveMcpServer(name, config) { await saveMcpServer(name, config); this._pushMcpStatus() }
+  async _deleteMcpServer(name) { await deleteMcpServer(name); this._pushMcpStatus() }
+  async _setAutoApprove(value) {
+    const c = vscode.workspace.getConfiguration("thincoder")
+    await c.update("autoApprove", value, vscode.ConfigurationTarget.Global)
+  }
+
+  _pushStatus() {
+    pushStatus(this._panel)
+  }
+
+  _pushSettings() {
+    fullStatus(this._panel)
+    this._pushMcpStatus()
+    this._pushIndexStatus()
+  }
+
+  _pushIndexStatus() {
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath
+    if (!cwd) return
+    const embedder = this._getEmbedder()
+    let status = null
+    if (embedder) {
+      try {
+        const idx = loadVectorIndex(cwd)
+        if (idx) {
+          const files = Object.keys(idx.manifest.files).length
+          const chunks = Object.values(idx.manifest.files).reduce((sum, f) => sum + f.chunks.length, 0)
+          status = { built: true, files, chunks }
+        } else {
+          status = { built: false }
+        }
+      } catch { status = { built: false } }
+    }
+    this._panel?.webview.postMessage({ type: "indexStatus", status, hasEmbedder: !!embedder })
+  }
+
+  async _atComplete(query, cwd) {
+    try {
+      const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath
+      const base = cwd || wsFolder || process.cwd()
+      const dir = join(base, query.startsWith("@") ? query.slice(1).split("/").slice(0, -1).join("/") : "")
+      const searchBase = existsSync(dir) ? dir : base
+      const pattern = query.startsWith("@") ? query.slice(1) : query
+      const uris = await vscode.workspace.findFiles(
+        `**/${pattern}*`,
+        "**/node_modules/**,**/.git/**,**/dist/**",
+        20,
+      )
+      const matches = uris.slice(0, 20).map((u) => {
+        const abs = u.fsPath
+        const rel = abs.slice(base.length + 1).replace(/\\/g, "/")
+        const parts = rel.split("/")
+        return { name: parts[parts.length - 1], path: rel }
+      })
+      this._panel?.webview.postMessage({ type: "atResults", matches })
+    } catch (e) {
+      console.error("[chat-panel] atComplete failed:", e.message)
+      this._panel?.webview.postMessage({ type: "atResults", matches: [] })
+    }
+  }
+
+  async _status() {
+    // Auto-initialize: if no active session stored, default to first session
+    if (this._activeName() === "default") {
+      this._context.workspaceState.update(_sessionKey(), "Session 1")
+      saveIndex(this._context.workspaceState, _indexKey(), ["Session 1"])
+    }
+    // Migration: ensure active session exists in the index (fixes old data where
+    // active session and index shared the same key, so they clobbered each other)
+    const active = this._activeName()
+    const names = loadIndex(this._context.workspaceState, _indexKey())
+    if (active !== "default" && !names.includes(active)) {
+      saveIndex(this._context.workspaceState, _indexKey(), [...names, active])
+    }
+    this._pushSessions()
+    this._loadSession()
+    initProviderKeyStore(this._context.secrets)
+    await loadProviderKeyCache()
+    await fullStatus(this._panel, this._context.workspaceState, () => this._pushSessions())
+    this._pushMcpStatus()
+    const prefs = this._loadModelPrefs()
+    if (prefs.model && this._statusBar) this._statusBar.text = `$(hubot) ${prefs.model}`
+
+    // Auto-check: prompt to build vector index if available but missing
+    this._maybePromptIndex()
+  }
+
+  // ─── Index ─────────────────────────────────────
+
+  _getEmbedder() {
+    return getEmbedder()
+  }
+
+  async _resolveEmbedder() {
+    // Try VSCode SecretStorage
+    if (this._context.secrets) {
+      try {
+        const key = await this._context.secrets.get("thincoder.embedding.apiKey")
+        if (key) {
+          const emb = createEmbedder({ baseURL: "https://api.siliconflow.cn/v1", model: "BAAI/bge-m3", apiKey: key })
+          setVSCodeEmbedder({ baseURL: "https://api.siliconflow.cn/v1", model: "BAAI/bge-m3", apiKey: key })
+          return emb
+        }
+      } catch {}
+    }
+    return getEmbedder()
+  }
+
+  async _saveEmbeddingConfig({ apiKey }) {
+    if (apiKey) {
+      try { await this._context.secrets.store("thincoder.embedding.apiKey", apiKey) } catch {}
+      resetEmbedder()
+      setVSCodeEmbedder({ baseURL: "https://api.siliconflow.cn/v1", model: "BAAI/bge-m3", apiKey })
+    } else {
+      // Delete key — clear SecretStorage and reset embedder
+      try { await this._context.secrets.delete("thincoder.embedding.apiKey") } catch {}
+      resetEmbedder()
+    }
+    this._pushSettings()
+  }
+
+  async _maybePromptIndex() {
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath
+    if (!cwd) return
+    const embedder = this._getEmbedder()
+    if (!embedder) return
+
+    try {
+      const { needed } = needsRebuild(cwd)
+      if (!needed) return
+    } catch { return }
+
+    const answer = await vscode.window.showInformationMessage(
+      "Vector search index not built. Build now? (~30s for small projects, longer for large ones)",
+      "Build", "Later"
+    )
+    if (answer === "Build") this._buildIndex()
+  }
+
+  async _buildIndex() {
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath
+    if (!cwd) {
+      vscode.window.showErrorMessage("No workspace folder open.")
+      return
+    }
+    const embedder = await this._resolveEmbedder()
+    if (!embedder) {
+      vscode.window.showErrorMessage("No embedding API key configured. Set SILICONFLOW_API_KEY environment variable or configure embedding in ~/.thincoder/config.json")
+      return
+    }
+
+    await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Notification,
+      title: "Building search index...",
+      cancellable: true,
+    }, async (progress, token) => {
+      try {
+        const result = await buildIndex(cwd, embedder, {
+          onProgress: (p) => {
+            if (p.phase === "embed") {
+              progress.report({ message: `Embedding chunks ${p.done}/${p.total}`, increment: 0 })
+            } else if (p.phase === "done") {
+              progress.report({ message: "Done", increment: 100 })
+            }
+          },
+        })
+        vscode.window.showInformationMessage(
+          `Index built: ${result.files} files, ${result.chunks} chunks. Semantic search is now active.`
+        )
+      } catch (e) {
+        if (e.name === "AbortError" || token.isCancellationRequested) {
+          vscode.window.showWarningMessage("Index build cancelled.")
+        } else {
+          vscode.window.showErrorMessage(`Index build failed: ${e.message}`)
+        }
+      }
+    })
+  }
+
+  // ─── Chat ─────────────────────────────────────
+
+  async _chat(text, modelOverride, reasoning, providerName, images) {
+    if (!this._panel) { vscode.window.showErrorMessage("_chat: panel is null"); return }
+    if (!providerName) {
+      for (const n of providerNames()) {
+        try { if (await getKey(n)) { providerName = n; break } } catch {}
+      }
+    }
+    if (!providerName) { this._panel.webview.postMessage({ type: "error", text: t("error.provider") }); return }
+    let p
+    try {
+      p = await buildProvider(providerName)
+    } catch (e) {
+      console.error("[chat-panel] buildProvider failed:", e.message)
+      this._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }) })
+      return
+    }
+    if (!p) { this._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }) }); return }
+    if (modelOverride) p = { ...p, model: modelOverride }
+    if (reasoning === "enabled") {
+      const spec = specForModel(p.model)
+      const thinkVal = spec.thinkEnabledValue || "enabled"
+      p = { ...p, thinking: { type: thinkVal }, ...(spec.thinkApi === "effort" ? { reasoningEffort: null } : {}) }
+    } else if (reasoning && reasoning !== "off") {
+      p = { ...p, reasoningEffort: reasoning }
+    } else if (reasoning === "off") {
+      p = { ...p, thinking: null, reasoningEffort: null }
+    }
+
+    const c = vscode.workspace.getConfiguration("thincoder")
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
+    const ts = new Date().toISOString()
+
+    text = injectEditorContext(text, cwd)
+    text = injectAtRefs(text, cwd)
+
+    // Capture EXISTING history for multi-turn context (before appending this message)
+    const conversationHistory = this._activeHistory()
+    const history = [...conversationHistory]
+    history.push({ type: "user", content: text, provider: providerName || "", model: modelOverride || p.model, timestamp: ts })
+    const isFirstMessage = history.filter((m) => m.type === "user").length === 1
+    this._saveHistory(history)
+
+    // Persist model selection
+    const prefs = { model: modelOverride || p.model, provider: providerName, reasoning: reasoning || "" }
+    saveModelPrefs(this._context.workspaceState, prefs)
+
+    this._panel.webview.postMessage({ type: "loading", loading: true })
+    this._abortController?.abort()
+    this._abortController = new AbortController()
+
+    let out = ""
+    try {
+      await runAgent(p, cwd, text, {
+        onToken: (t) => { out += t; this._panel?.webview.postMessage({ type: "token", text: t }) },
+        onReasoning: (r) => { this._panel?.webview.postMessage({ type: "reasoning", text: r }) },
+        onTaskUpdate: (tasks) => {
+          const done = tasks.filter((t) => t.status === "done").length
+          const inProgress = tasks.filter((t) => t.status === "in_progress").length
+          const pending = tasks.filter((t) => t.status === "pending").length
+          this._panel?.webview.postMessage({ type: "taskProgress", done, inProgress, pending, total: tasks.length, items: tasks })
+        },
+        onPlanMode: (active) => this._panel?.webview.postMessage({ type: "planMode", active }),
+        onSubagent: (info) => this._panel?.webview.postMessage({ type: "subagent", ...info }),
+        onGoal: (info) => this._panel?.webview.postMessage({ type: "goal", ...info }),
+        onUsage: (u) => {
+          const ctxWin = specForModel(p.model)?.contextWindow ?? 128000
+          const ctxPct = u.prompt_tokens ? Math.round((u.prompt_tokens / ctxWin) * 100) : null
+          this._panel?.webview.postMessage({ type: "usage", usage: u, ctxPct })
+        },
+        onToolCall: (n, a, id) => this._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
+        onToolResult: (n, r, id) => this._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 2000), id }),
+        onToolPanel: (name, text) => this._panel?.webview.postMessage({ type: "toolPanel", name, text }),
+        onComplete: () => {
+          if (out) {
+            history.push({ type: "assistant", content: out, timestamp: new Date().toISOString() })
+            this._saveHistory(history)
+          } else {
+          }
+          this._panel?.webview.postMessage({ type: "complete" })
+          this._pushSessions()
+          if (isFirstMessage) this._generateTitle()
+        },
+        onPermissionRequired: c.get("autoApprove", false) ? undefined : (toolName, args, diffInfo) =>
+          new Promise((resolve) => {
+            this._permissionQueue.push({ resolve, toolName })
+            this._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
+          }),
+      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}), images, skills: loadSkills(cwd), conversationHistory })
+    } catch (e) {
+      if (e.name === "AbortError") {
+        this._panel.webview.postMessage({ type: "aborted" })
+      } else {
+        console.error("[chat-panel] runAgent failed:", e.message, "provider:", p.baseURL, "model:", p.model)
+        const techInfo = `→ Provider: ${p.baseURL}\n→ Model: ${p.model}`
+        this._panel.webview.postMessage({ type: "error", text: `${e.message || String(e)}`, techInfo })
+      }
+    } finally {
+      this._panel.webview.postMessage({ type: "loading", loading: false })
+    }
+  }
+
+  // ─── HTML ─────────────────────────────────────
+
+  _html() {
+    let html = readFileSync(join(__dirname, "..", "..", "webview", "index.html"), "utf8")
+    const csp = this._panel.webview.cspSource
+    html = html.replace("__CSP__",
+      `default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp} 'unsafe-inline'; img-src ${csp} https: data:; font-src ${csp}; connect-src ${csp};`)
+    html = html.replace("__CSS_BASE_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "..", "..", "webview", "base.css"))).toString())
+    html = html.replace("__CSS_CHAT_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "..", "..", "webview", "chat.css"))).toString())
+    html = html.replace("__CSS_CONTROLS_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "..", "..", "webview", "controls.css"))).toString())
+    html = html.replace("__CSS_SESSION_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "..", "..", "webview", "session.css"))).toString())
+    html = html.replace("__CSS_SETTINGS_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "..", "..", "webview", "settings.css"))).toString())
+    html = html.replace("__CHAT_URI__", this._panel.webview.asWebviewUri(vscode.Uri.file(join(__dirname, "..", "..", "webview", "chat.js"))).toString())
+    return html
+  }
+}

@@ -3,6 +3,9 @@
  * Returns [{type:"same"|"add"|"del", text}]
  */
 
+import { escHtml } from "./ui.js"
+
+
 /**
  * Compute line-level diff between two strings.
  * Uses simplified prefix/suffix matching — fast and sufficient for code changes.
@@ -93,8 +96,4 @@ export function renderDiff(diffLines) {
     const text = escHtml(l.text)
     return `<div class="diff-line ${cls}"><span class="diff-prefix">${prefix}</span>${text || " "}</div>`
   }).join("")
-}
-
-function escHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }

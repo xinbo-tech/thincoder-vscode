@@ -21,6 +21,7 @@ export const verifyTool = {
     const files = ctx.agent._touchedFiles || []
     if (files.length === 0) return "(no files modified — nothing to verify)"
 
+    let anyFailure = false
     const results = []
     for (const f of files) {
       if (/\.(m?js|cjs)$/.test(f)) {
@@ -30,6 +31,7 @@ export const verifyTool = {
           execSync(`node --check "${abs}"`, { encoding: "utf8", timeout: 10000, stdio: "pipe" })
           results.push(`✓ ${f}: syntax OK`)
         } catch (e) {
+          anyFailure = true
           results.push(`✗ ${f}: ${(e.stderr || e.message).slice(0, 200)}`)
         }
       } else {
@@ -43,11 +45,13 @@ export const verifyTool = {
         const testResult = execSync("npm test", { cwd: ctx.cwd, encoding: "utf8", timeout: 60000, stdio: "pipe" })
         results.push(`\n=== Test suite ===\n${testResult.slice(0, 3000)}`)
       } catch (e) {
+        anyFailure = true
         results.push(`\n=== Test suite FAILED ===\n${(e.stdout || e.stderr || e.message).slice(0, 2000)}`)
       }
     }
 
     ctx.agent._verifiedThisRun = true
+    ctx.agent._verifyPassed = !anyFailure
     return results.join("\n")
   },
 }

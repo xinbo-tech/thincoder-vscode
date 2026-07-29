@@ -6,6 +6,7 @@ let _subIdCounter = 0
 
 export const subagentTool = {
   name: "subagent",
+  sideEffectExempt: true, // subagent mutations are tracked by the child, not the parent
   description:
     "Spawn a sub-agent for an independent subtask. role: explore (read-only search), plan (architecture design), coder (implementation).\n" +
     "Parameters:\n" +

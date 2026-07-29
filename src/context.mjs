@@ -1,15 +1,55 @@
 /**
  * context.mjs — context compaction + repo outline
  */
-import { readdirSync, readFileSync, existsSync, statSync } from "node:fs"
-import { join, extname, relative } from "node:path"
+import { readdirSync, readFileSync, existsSync } from "node:fs"
+import { join, relative } from "node:path"
 import { execSync } from "node:child_process"
 import * as os from "node:os"
 import { search as memorySearch } from "./memory.mjs"
 import { loadRules } from "./extension/rules.mjs"
+import { chat } from "./provider.mjs"
+import { specForModel } from "./config.mjs"
 
-const COMPACT_THRESHOLD = 80000  // estimated tokens
 const TOKEN_ESTIMATE_CHARS = 3.5
+
+// ─── Model-aware compaction thresholds ──────────────────────────
+
+/** Fraction of context window to use as the compaction trigger point.
+ *  80% leaves headroom for the model's response (output tokens + reasoning). */
+const THRESHOLD_FRACTION = 0.80
+
+/**
+ * Calculate the compaction threshold for a given model.
+ * Uses 80% of the model's actual context window — no arbitrary caps.
+ */
+function compactionThreshold(provider) {
+  const model = provider?.model || ""
+  const ctxWindow = specForModel(model).context
+  return Math.floor(ctxWindow * THRESHOLD_FRACTION)
+}
+
+/**
+ * Calculate how many messages to keep after compaction.
+ * Scales with context window: ~30 per 100K tokens.
+ */
+function keepTailSize(provider) {
+  const ctxWindow = specForModel(provider?.model || "").context
+  return Math.max(10, Math.floor((ctxWindow / 100_000) * 30))
+}
+
+const SUMMARIZE_PROMPT = `You are a conversation compressor. Summarize the following agent work log. Write in first person ("I") — these are handover notes to your future self.
+
+Requirements:
+- Preserve the user's original request and what task you're working on
+- List files modified and why
+- Preserve design decisions: architecture choices, API contracts, naming conventions, trade-off reasoning
+- Note unresolved issues and next steps
+- Drop: pleasantries, repetition, fine-grained tool output
+- Be honest: mark uncertain items as "unverified"; don't present guesses as facts
+- Output as bullet points; err on the long side in the 1M-context era
+
+Work log:
+`
 
 /**
  * Estimate token count from message array.
@@ -22,7 +62,7 @@ function estimateTokens(messages) {
     } else if (Array.isArray(m.content)) {
       for (const part of m.content) {
         if (part.type === "text") chars += part.text.length
-        else if (part.type === "image_url") chars += 2000 // ~85 tokens × 3.5 chars/token, round up for safety
+        else if (part.type === "image_url") chars += 2000
       }
     }
     if (m.tool_calls) chars += JSON.stringify(m.tool_calls).length
@@ -31,33 +71,85 @@ function estimateTokens(messages) {
 }
 
 /**
- * Compact history: summarize old messages, keep recent ones.
+ * Compact history with LLM summarization for old messages.
  * Returns a new history array or null if no compaction needed.
+ * @param {object} provider - provider config for the summarization LLM call
  */
-export function compactHistory(history, systemPrompt) {
+export async function compactHistory(history, systemPrompt, provider) {
+  const threshold = compactionThreshold(provider)
   const systemTokens = Math.ceil(systemPrompt.length / TOKEN_ESTIMATE_CHARS)
   const total = systemTokens + estimateTokens(history)
+  if (total < threshold) return null
 
-  if (total < COMPACT_THRESHOLD) return null
+  // Keep a model-aware number of recent messages — scales with context window
+  const keepCountBase = keepTailSize(provider)
+  let keepCount = Math.min(keepCountBase, Math.floor(history.length * 0.4))
+  if (history.length - keepCount <= 1) return null // nothing meaningful to compress
 
-  // Find cutoff: keep last ~30 messages, summarize the rest
-  const keepCount = Math.min(30, Math.floor(history.length * 0.4))
+  // Safety: ensure the cut point doesn't split tool_calls from their tool responses.
+  // If a message in the tail is a tool message whose assistant was in oldMessages,
+  // pull that assistant into the tail (avoids protocol 400: orphan tool messages)
+  const tailStart = history.length - keepCount
+  const tailToolIds = new Set()
+  for (let i = tailStart; i < history.length; i++) {
+    if (history[i].role === "tool") tailToolIds.add(history[i].tool_call_id)
+  }
+  for (let i = tailStart - 1; i >= 0; i--) {
+    const m = history[i]
+    if (m.role === "assistant" && m.tool_calls?.some((tc) => tailToolIds.has(tc.id))) {
+      keepCount = history.length - i
+      break
+    }
+  }
+
   const oldMessages = history.slice(0, history.length - keepCount)
   const recentMessages = history.slice(history.length - keepCount)
 
-  // Build summary of old messages
-  const summary = buildSummary(oldMessages)
+  // Serialize old messages for the summary LLM
+  const serialized = oldMessages
+    .map((m) => {
+      let prefix = `[${m.role}]`
+      if (m.tool_calls) prefix += ` [called: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}]`
+      const cap = m.role === "user" ? 8000 : 2000
+      const content = typeof m.content === "string" ? m.content.slice(0, cap) : ""
+      return `${prefix} ${content}`
+    })
+    .join("\n")
+
+  // Try LLM summarization; fall back to heuristic on failure
+  let summary
+  if (provider) {
+    try {
+      const resp = await chat({ ...provider, thinking: null, reasoningEffort: null }, {
+        messages: [{ role: "user", content: SUMMARIZE_PROMPT + serialized }],
+      })
+      summary = resp.content || ""
+    } catch {
+      summary = buildHeuristicSummary(oldMessages)
+    }
+  } else {
+    summary = buildHeuristicSummary(oldMessages)
+  }
 
   return [
     {
       role: "user",
-      content: `[Context compacted: earlier conversation summarized below. Trust the summary — don't redo work it reports done. But re-verify transient state (open editors, file contents) before acting on it.]\n\n<conversation_summary>\n${summary}\n</conversation_summary>`,
+      content:
+        "[Context was automatically compacted. Below is a summary of earlier work. " +
+        "Treat it as notes, not proof — trust its conclusions (don't redo what it reports as done) " +
+        "but re-verify transient state with tools. Check memory_search for any missing decisions.]\n\n" +
+        `<handoff_notes>\n${summary}\n</handoff_notes>`,
+    },
+    {
+      role: "assistant",
+      content: "Understood. I'll continue from these notes, re-verifying anything transient.",
     },
     ...recentMessages,
   ]
 }
 
-function buildSummary(messages) {
+/** Heuristic fallback — same as before, for when LLM summarization fails */
+function buildHeuristicSummary(messages) {
   const parts = []
   let currentSpeaker = null
   let currentText = ""
@@ -221,15 +313,19 @@ export function injectContext(history, cwd, userInput) {
   // Time
   history.push({ role: "user", content: `[System reminder: current time is ${new Date().toISOString()}.]` })
 
-  // Project instructions
-  if (existsSync(join(cwd, "AGENTS.md"))) {
-    try {
-      const content = readFileSync(join(cwd, "AGENTS.md"), "utf8").slice(0, 3000)
-      history.push({
-        role: "user",
-        content: `[Project instructions:\n<untrusted_project_instructions>\n${content}\n</untrusted_project_instructions>]`,
-      })
-    } catch { /* */ }
+  // Project instructions (AGENTS.md / project_rules.md)
+  const INSTRUCTION_FILES = ["AGENTS.md", "project_rules.md"]
+  for (const name of INSTRUCTION_FILES) {
+    if (existsSync(join(cwd, name))) {
+      try {
+        const content = readFileSync(join(cwd, name), "utf8").slice(0, 32000)
+        history.push({
+          role: "user",
+          content: `[Project instructions (from ${name}):\n<untrusted_project_instructions>\n${content}\n</untrusted_project_instructions>]`,
+        })
+      } catch { /* */ }
+      break // only inject the first found file
+    }
   }
 
   // Skills listing
@@ -316,7 +412,7 @@ export function injectContext(history, cwd, userInput) {
 }
 
 function findDocChunks(cwd, query, limit) {
-  const keywords = query.split(/[\s,.;:()\[\]{}"'`!@#$%^&*+=|\\<>?/~]+/).filter(w => w.length > 1).slice(0, 6)
+  const keywords = query.split(/[\s,.;:()[\]{}"'`!@#$%^&*+=|\\<>?/~]+/).filter(w => w.length > 1).slice(0, 6)
   if (keywords.length === 0) return []
   const pattern = new RegExp(keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i")
 

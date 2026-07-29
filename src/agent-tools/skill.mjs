@@ -36,7 +36,7 @@ export const skillTool = {
     }
 
     if (action === "load" && name) {
-      const safeName = name.replace(/[^a-zA-Z0-9_\-]/g, "_")
+      const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_")
       const filePath = join(skillsDir, `${safeName}.md`)
       if (!existsSync(filePath)) return `Skill "${name}" not found at .thincoder/skills/${safeName}.md`
       try {

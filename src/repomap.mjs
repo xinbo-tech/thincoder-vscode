@@ -7,7 +7,7 @@
  */
 
 import { workspace } from "vscode"
-import { join, dirname, basename } from "node:path"
+import { relative as _relPath } from "node:path"
 
 // ─── Parse helpers ──────────────────────────
 
@@ -146,7 +146,7 @@ export const repoOutlineTool = {
     // 1) Directory-level dependencies (only for multi-directory projects)
     const dirDeps = new Map()
     const dirSet = new Set()
-    for (const [rel, d] of deps) {
+    for (const [_rel, d] of deps) {
       dirSet.add(d.dir)
       if (!dirDeps.has(d.dir)) dirDeps.set(d.dir, new Set())
       for (const imp of d.imports) {
