@@ -496,7 +496,7 @@ export class ChatPanel {
 
     let out = ""
     // Accumulate token usage across all LLM calls in this turn (matches CLI)
-    const totalUsage = { prompt: 0, completion: 0, cacheHit: 0, cacheMiss: 0 }
+    const totalUsage = { prompt_tokens: 0, completion_tokens: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 }
     try {
       await runAgent(p, cwd, text, {
         onToken: (t) => { out += t; this._panel?.webview.postMessage({ type: "token", text: t }) },
@@ -511,10 +511,10 @@ export class ChatPanel {
         onSubagent: (info) => this._panel?.webview.postMessage({ type: "subagent", ...info }),
         onGoal: (info) => this._panel?.webview.postMessage({ type: "goal", ...info }),
         onUsage: (u) => {
-          totalUsage.prompt += u.prompt_tokens ?? 0
-          totalUsage.completion += u.completion_tokens ?? 0
-          totalUsage.cacheHit += u.prompt_cache_hit_tokens ?? 0
-          totalUsage.cacheMiss += u.prompt_cache_miss_tokens ?? 0
+          totalUsage.prompt_tokens += u.prompt_tokens ?? 0
+          totalUsage.completion_tokens += u.completion_tokens ?? 0
+          totalUsage.prompt_cache_hit_tokens += u.prompt_cache_hit_tokens ?? 0
+          totalUsage.prompt_cache_miss_tokens += u.prompt_cache_miss_tokens ?? 0
           const ctxWin = specForModel(p.model)?.contextWindow ?? 128000
           const ctxPct = u.prompt_tokens ? Math.round((u.prompt_tokens / ctxWin) * 100) : null
           this._panel?.webview.postMessage({ type: "usage", usage: { ...totalUsage }, ctxPct })
