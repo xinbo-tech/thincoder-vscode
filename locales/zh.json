@@ -35,7 +35,7 @@
 
   "status.thinking": "思考中",
   "status.plan": "规划",
-  "status.stopped": "用户取消",
+  "status.stopped": "[已停止]",
 
   "error.title": "错误",
   "error.provider": "未配置 API 密钥 — 点击 ⚙ 设置",

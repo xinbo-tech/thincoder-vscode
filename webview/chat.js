@@ -724,23 +724,16 @@ function onToken(text) {
 
 function finish(aborted) {
   if (aborted) {
-    // Insert a visible "cancelled" system message into the chat flow
-    if (ctx.currentBlock) {
-      const msg = document.createElement("div")
-      msg.className = "cancelled-notice"
-      msg.textContent = "⊘ " + t("status.stopped")
-      ctx.currentBlock.appendChild(msg)
-    } else {
-      // No assistant block yet — create one just for the notice
-      const block = document.createElement("div")
-      block.className = "message assistant"
-      block.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}:</div>`
-      const msg = document.createElement("div")
-      msg.className = "cancelled-notice"
-      msg.textContent = "⊘ " + t("status.stopped")
-      block.appendChild(msg)
-      ctx.messagesEl.appendChild(block)
+    // Match CLI: push "[stopped]" as a line in the output stream
+    if (!ctx.currentBubble) {
+      ctx.currentRaw = ""
+      if (!ctx.currentBlock) newBlock(ctx)
+      ctx.currentBubble = document.createElement("div")
+      ctx.currentBubble.className = "bubble content"
+      ctx.currentBlock.appendChild(ctx.currentBubble)
     }
+    ctx.currentRaw += `\n\n<span style="color:var(--vscode-editorWarning-foreground, #cca700);font-style:italic">${t("status.stopped")}</span>`
+    ctx.currentBubble.innerHTML = md(ctx.currentRaw)
   }
   if (ctx.currentBubble) attachCopyButtons(ctx.currentBubble)
   ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false

@@ -325,12 +325,3 @@
   max-width: 280px;
   margin: 0 auto;
 }
-
-/* Cancelled notice */
-.cancelled-notice {
-  color: var(--vscode-editorWarning-foreground, #cca700);
-  font-style: italic;
-  padding: 4px 0;
-  margin-top: 4px;
-  border-top: 1px dashed var(--border);
-}
