@@ -509,7 +509,7 @@ window.addEventListener("message", (e) => {
     case "clearMessages":
       ctx.messagesEl.replaceChildren()
       ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""
-      document.getElementById("status-line").innerHTML = ""
+      renderStatusBar()
       showWelcome(ctx)
       break
     case "sessions":
@@ -728,6 +728,7 @@ function finish(aborted) {
   ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
   ctx._toolRefs = {}
   setLoading(ctx, false)
+  renderStatusBar()
 }
 
 /** Attach copy buttons to all code blocks in a container */
