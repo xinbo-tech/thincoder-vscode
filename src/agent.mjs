@@ -32,10 +32,25 @@ const MAX_VERIFY_PUSHBACKS = 2
 const MAX_VERIFY_RETRIES = 3
 const MAX_TOOL_RESULT = 16000 // chars — large results saved to disk instead of truncated (aligns with CLI)
 const TOOL_RESULT_PREVIEW = 2000 // chars shown inline when offloaded (aligns with CLI)
+const MAX_PARALLEL_SUBAGENTS = 3
 
 /** Typed error for turn-limit exhaustion — consumers can detect and offer "Continue?" prompt */
 export class ContinueError extends Error {
   constructor(turns) { super(`Agent reached max turns (${turns}).`); this.turns = turns }
+}
+
+/** Run async tasks with a concurrency limit */
+async function runWithLimit(items, fn, limit) {
+  const results = new Array(items.length)
+  let idx = 0
+  async function worker() {
+    while (idx < items.length) {
+      const i = idx++
+      results[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()))
+  return results
 }
 
 /** Save large tool results to disk so the agent can read them with the read tool */
@@ -289,20 +304,31 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     })
 
     // Group tool calls into batches — consecutive readonly tools run in parallel,
-    // consecutive subagent calls also run in parallel (each has its own agent)
+    // consecutive subagent calls also run in parallel (each has its own agent).
+    // sideEffectExempt tools (like subagent) don't block readonly merging.
     const batches = []
+    let pendingReadonly = []
     for (const tc of response.toolCalls) {
       const tool = toolByName.get(tc.name)
-      const batchable = tool?.readonly || tool?.name === "subagent"
-      if (batchable && batches.length > 0) {
-        const last = batches[batches.length - 1]
-        const lastBatchable = last[0]?.tool?.readonly || last[0]?.tool?.name === "subagent"
-        // Don't mix readonly with subagent — keep same type together
-        const sameType = tool?.readonly ? last[0]?.tool?.readonly : last[0]?.tool?.name === "subagent"
-        if (lastBatchable && sameType) { last.push({ tc, tool }); continue }
+      if (tool?.readonly) {
+        pendingReadonly.push({ tc, tool })
+      } else {
+        // Flush pending readonly batch before this mutation
+        if (pendingReadonly.length > 0) { batches.push(pendingReadonly); pendingReadonly = [] }
+        if (tool?.name === "subagent") {
+          // Subagents run in parallel with each other
+          const last = batches[batches.length - 1]
+          if (last?.length > 0 && last[0]?.tool?.name === "subagent") {
+            last.push({ tc, tool })
+          } else {
+            batches.push([{ tc, tool }])
+          }
+        } else {
+          batches.push([{ tc, tool }])
+        }
       }
-      batches.push([{ tc, tool }])
     }
+    if (pendingReadonly.length > 0) batches.push(pendingReadonly)
 
     // Execute batches in order (parallel within batch, serial between batches)
     for (const batch of batches) {
@@ -388,7 +414,11 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         }
       }
 
-      const results = await Promise.all(batch.map(runOne))
+      // Concurrency limit for subagent batches
+      const isSubagentBatch = batch.length > 0 && batch[0]?.tool?.name === "subagent"
+      const results = isSubagentBatch
+        ? await runWithLimit(batch, runOne, MAX_PARALLEL_SUBAGENTS)
+        : await Promise.all(batch.map(runOne))
 
       for (const r of results) {
         const { tool_call_id, toolName, content, multimodal, meta } = r
