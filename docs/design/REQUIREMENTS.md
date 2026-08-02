@@ -13,8 +13,8 @@
 | 入口 | `extension.mjs` → `activate()` | 标准 VS Code 扩展激活模式 |
 | LLM 调用 | 原生 `fetch` + SSE 流式 | OpenAI 兼容协议，支持 reasoning / thinking |
 | 支持的 Provider | 6 个内置 preset + 自定义开放端点 | 见下表 |
-| 模型配置 | `thincoder.providers` | `{ name: key \| {key, baseURL, model} }` |
-| 会话存储 | `context.workspaceState`，per-workspace | 键名含 workspace hash，项目隔离 |
+| 模型配置 | `~/.thincoder/config.json`（与 CLI 共享） | providers[] + activeProvider，见「与 CLI 的关系」 |
+| 会话存储 | `~/.thincoder/sessions/`（与 CLI 共享） | 完整 sha1(cwd) + 槽位，两端互读 |
 | 工具审批 | `autoApprove` 默认 `false` | 用户显式开启才自动执行 |
 | 模型能力 | 自包含 `src/config.mjs` | MODEL_SPECS 表独立维护 |
 | Session 标题 | LLM 自动生成（首条消息后触发） | 失败静默降级为截断消息 |
@@ -89,15 +89,17 @@
 
 ## 与 thincoder CLI 的关系
 
-两个独立产品，共享设计理念和提示词体系，代码完全独立：
+两个独立产品，共享设计理念、提示词体系，以及**会话数据与配置数据**——两端读写同一份磁盘文件，可无缝接续同一会话、同一组 provider：
 
 ```
 thincoder CLI                       thincoder-vscode
 ├── 终端 TUI（裸 ANSI）              ├── VS Code 侧面板（Webview）
-├── 文件系统会话存储                  ├── workspaceState 会话存储
 ├── 3 层记忆 + MCP                   ├── （未来自建）
-├── ~/.thincoder/config.json         ├── VS Code settings.json
 └── npm i -g thincoder               └── VS Code Marketplace
+
+        两端共享（同一磁盘位置，互相读写）
+        ├── ~/.thincoder/config.json      配置（providers + activeProvider）
+        └── ~/.thincoder/sessions/        会话（完整 sha1(cwd) + 槽位）
 ```
 
-同级独立产品。用户只装哪一个都行。
+同级独立产品。用户只装哪一个都行；同时装则共享配置与会话，切换无感。

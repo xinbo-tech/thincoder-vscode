@@ -61,7 +61,7 @@ class ChatPanel {
   }
   ```
 
-**Provider 配置**：存储在 `thincoder.providers` 中，格式 `{ name: key | {key, baseURL, model} }`。内置 6 个 preset（DeepSeek/Kimi/GLM/Qwen/MiniMax/OpenAI），加上 `custom` 支持任意 OpenAI 兼容端点。Provider 逻辑已提取到 `src/extension/presets.mjs`，设置管理到 `src/extension/settings.mjs`，会话 I/O 到 `src/extension/session-io.mjs`。
+**Provider 配置**：与 CLI 共享 `~/.thincoder/config.json`，结构为 `providers[]`（每项 `{ name, baseURL, model, apiKey, chatPath?, maxTokens? }`）+ `activeProvider` 指针；`apiKey` 缺省时回退环境变量。内置 6 个 preset（DeepSeek/Kimi/GLM/Qwen/MiniMax/OpenAI）加 `custom`，preset 表**以 CLI `config.mjs` 的 `PROVIDER_PRESETS` 为唯一权威**，VS Code 不再各自硬编码，避免两端漂移。读写逻辑在 `src/extension/config.mjs`（共享 config.json），设置管理 `src/extension/settings.mjs`，会话 I/O `src/extension/session-io.mjs`。首次启动若检测到旧版 VS Code settings 里的 `thincoder.providers`，一次性迁移进 `~/.thincoder/config.json` 后停用 settings 存储。
 
 **LLM 标题生成**：
 - 触发：会话第一条用户消息后，agent 完成回复
@@ -191,15 +191,15 @@ user input
 
 ## 与 thincoder CLI 的差异
 
-两个产品共享设计理念，但代码独立、安装独立、无运行时依赖。
+两个产品共享设计理念、提示词体系，以及**会话数据与配置数据**（同一磁盘位置、互相读写）。代码各自独立、安装独立、无运行时依赖。
 
 | 方面 | CLI | VS Code |
 |------|-----|---------|
 | 用户界面 | 裸 ANSI TUI (~24 模块) | Webview (iframe) |
-| 会话存储 | 文件系统 (5 槽位轮转) | workspaceState (per-workspace) |
+| 会话存储 | `~/.thincoder/sessions/`（共享，5 槽位轮转） | 同上（共享同一目录） |
 | 工具目录约束 | 工作目录 (`process.cwd()`) | 第一个 workspace 文件夹 |
 | 文件打开 | TUI 内显示 | VS Code 编辑器标签页 |
 | 权限审批 | TUI 内交互式 | autoApprove 默认 false，提示 agent 确认但无工具级拦截 |
-| 配置存储 | `~/.thincoder/config.json` | VS Code settings.json + SecretStorage（密钥） |
+| 配置存储 | `~/.thincoder/config.json`（共享） | 同上（共享同一文件；apiKey 回退环境变量） |
 | 记忆系统 | 3-layer FTS5 + vector | JSON 文件存储（单层） |
 | MCP | ✅ | ✅ stdio + HTTP（`thincoder.mcpServers` 配置） |
