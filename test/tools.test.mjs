@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 
 import { checklistTool, pendingItems } from "../src/tools/checklist.mjs"
 import { lintTool } from "../src/tools/linter.mjs"
+import { timerTool } from "../src/agent-tools/timer.mjs"
 
 let tmp, cwd
 const ctx = () => ({ cwd })
@@ -142,5 +143,35 @@ describe("lint — language-aware cascade (ported from CLI)", () => {
     const f = join(repoCwd, "src", "tools", "linter.mjs")
     const r = await lintTool.execute({ path: f, full: true }, { cwd: repoCwd })
     assert.match(r, /eslint: no issues/)
+  })
+})
+
+describe("timer — thinking-budget timer (ported from CLI)", () => {
+  it("pushes a pending timer onto agent._pendingTimers", () => {
+    const agent = {}
+    const before = Date.now()
+    const r = timerTool.execute({ seconds: 60 }, { agent })
+    assert.match(r, /Timer set for 60 seconds/)
+    assert.equal(agent._pendingTimers.length, 1)
+    const t = agent._pendingTimers[0]
+    assert.ok(t.expiresAt >= before + 60000 && t.expiresAt <= Date.now() + 60000)
+    assert.match(t.message, /Time's up \(60s\)/)
+  })
+
+  it("uses a custom message when provided", () => {
+    const agent = {}
+    timerTool.execute({ seconds: 5, message: "custom reminder" }, { agent })
+    assert.equal(agent._pendingTimers[0].message, "custom reminder")
+  })
+
+  it("initializes _pendingTimers if absent (lazy)", () => {
+    const agent = { _pendingTimers: undefined }
+    timerTool.execute({ seconds: 1 }, { agent })
+    assert.ok(Array.isArray(agent._pendingTimers))
+  })
+
+  it("is readonly and side-effect-exempt (does not trigger verify guard)", () => {
+    assert.equal(timerTool.readonly, true)
+    assert.equal(timerTool.sideEffectExempt, true)
   })
 })

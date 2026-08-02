@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url"
 import { builtinTools, toOpenAISchema, readImageTool } from "./tools.mjs"
 import {
   taskTool, recentChangesTool, subagentTool,
-  planTool, goalTool, skillTool, verifyTool,
+  planTool, goalTool, skillTool, verifyTool, timerTool,
 } from "./agent-tools.mjs"
 import { compactHistory, injectContext } from "./context.mjs"
 import * as os from "node:os"
@@ -90,7 +90,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills } = opts
 
   const agentTools = depth === 0
-    ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool]
+    ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool]
     : [taskTool, recentChangesTool] // subagents get fewer meta-tools
 
   // Subagent role-based tool filtering: explore/plan get read-only tools only
@@ -106,7 +106,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const agent = {
     _tasks: [], _touchedFiles: [], _planMode: false,
     _goal: null, _provider: provider,
-    _verifiedThisRun: false,
+    _verifiedThisRun: false, _pendingTimers: [],
   }
   const platform = { win32: "Windows", darwin: "macOS", linux: "Linux" }[os.platform()] ?? os.platform()
 
@@ -472,6 +472,16 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
             }
           }
         } catch { /* */ }
+      }
+    }
+
+    // Expired timers — inject reminders when the thinking budget is up (ported from CLI post-turn)
+    if (agent._pendingTimers.length > 0) {
+      const now = Date.now()
+      const expired = agent._pendingTimers.filter((t) => t.expiresAt <= now)
+      agent._pendingTimers = agent._pendingTimers.filter((t) => t.expiresAt > now)
+      for (const t of expired) {
+        history.push({ role: "user", content: `[System reminder: ⏰ timer — ${t.message}]` })
       }
     }
 
