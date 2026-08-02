@@ -243,7 +243,7 @@
   background: var(--vscode-dropdown-background, #252526);
   border: 1px solid var(--border);
   border-radius: 6px;
-  overflow: hidden;
+  overflow: visible;
   min-width: 220px;
   z-index: 10;
   box-shadow: var(--shadow);
@@ -269,7 +269,7 @@
 }
 
 /* Two-level model picker: provider row shows its current model as a grey sub-label;
-   the back row is a muted clickable item at the top of Level 2. */
+   hovering the row opens a flyout submenu of that provider's models on its right. */
 .dropdown-item .dropdown-sub {
   color: var(--muted, #888);
   font-size: 11px;
@@ -280,10 +280,31 @@
   max-width: 60%;
 }
 
-.dropdown-item.dropdown-back {
+.dropdown-item.has-submenu { position: relative; }
+
+.dropdown-item .submenu-arrow {
   color: var(--muted, #888);
-  font-style: italic;
+  font-size: 11px;
+  margin-left: 4px;
 }
+
+/* Flyout submenu: hidden until the provider row is hovered/open. Positioned to the right,
+   aligned with the row top. */
+.dropdown.submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: -1px;
+  bottom: auto;
+  margin-bottom: 0;
+  margin-left: 2px;
+  min-width: 180px;
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.dropdown-item.has-submenu.open > .dropdown.submenu { display: block; }
 
 /* ─── Panels area ────────────────────────────── */
 
