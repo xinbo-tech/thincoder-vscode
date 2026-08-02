@@ -1,5 +1,5 @@
 /**
- * more-file.mjs — Additional file tools: insert_after, apply_patch, syntax_check, ls, delete
+ * more-file.mjs — Additional file tools: insert_after, apply_patch, ls, delete
  */
 
 import { readFile, writeFile } from "node:fs/promises"
@@ -165,31 +165,6 @@ export const applyPatchTool = {
     }
 
     return results.join("\n") || "No files patched"
-  },
-}
-
-export const syntaxCheckTool = {
-  name: "syntax_check",
-  readonly: true,
-  description:
-    "Check a JavaScript file for syntax errors using node --check.\n" +
-    "Parameters:\n" +
-    "- path (required): File path (.js/.mjs/.cjs only)",
-  parameters: {
-    type: "object",
-    properties: {
-      path: { type: "string", description: "File path" },
-    },
-    required: ["path"],
-  },
-  async execute({ path }, ctx) {
-    const abs = resolvePath(path, ctx.cwd)
-    try {
-      execSync(`node --check "${abs}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
-      return "Syntax OK"
-    } catch (e) {
-      return e.stderr || e.message || "Syntax error"
-    }
   },
 }
 

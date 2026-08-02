@@ -1,0 +1,174 @@
+/**
+ * linter.mjs — language-aware lint tool (replaces the weaker syntax_check)
+ * Ported from CLI thincoder/src/tools/linter.mjs (DESC file-read replaced with inline description).
+ * Fast path: node --check. Full path: language-aware cascade (eslint → tsc → node --check for JS/TS).
+ */
+
+import { execFileSync } from "node:child_process"
+import { existsSync } from "node:fs"
+import { join, relative, isAbsolute } from "node:path"
+import { resolvePath } from "./shared.mjs"
+
+export const lintTool = {
+  name: "lint",
+  description:
+    "Run the appropriate linter/checker for a file. Auto-detects based on file extension and project config.\n" +
+    "Without 'full', runs a fast node --check (JS/TS syntax only, catches parse errors in milliseconds).\n" +
+    "With 'full', runs the language-aware cascade: eslint → tsc --noEmit → node --check (JS/TS/TSX); ruff (Python); cargo check (Rust); go vet (Go).\n" +
+    "Use the fast default after every write/edit; use 'full' before declaring a task complete.\n" +
+    "Parameters:\n" +
+    "- path: file to check (default: most recently modified file)\n" +
+    "- full: run the full language-aware cascade instead of just node --check (default false)",
+  parameters: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "File to check (default: most recently modified file)" },
+      full: { type: "boolean", description: "Run the full language-aware cascade instead of just node --check (default false)" },
+    },
+    required: [],
+  },
+  readonly: true,
+  async execute(args, ctx) {
+    const abs = args.path
+      ? resolvePath(args.path, ctx.cwd)
+      : (ctx.agent?._touchedFiles?.at(-1) ? resolvePath(ctx.agent._touchedFiles.at(-1), ctx.cwd) : null)
+    if (!abs) return "lint: no file specified and no recently modified file to check"
+
+    if (!args.full) {
+      return nodeCheckResult(abs)
+    }
+
+    const ext = abs.split(".").pop()?.toLowerCase()
+    const checkers = LANG_CHECKERS[ext]
+    if (!checkers) return nodeCheckResult(abs)
+
+    for (const checker of checkers) {
+      const result = await checker(abs, { cwd: ctx.cwd })
+      if (result !== null) return result
+    }
+    return `lint: no linter available for ${abs}. Install one?`
+  },
+}
+
+function nodeCheckResult(abs) {
+  if (!/\.(?:m?js|cjs|m?ts|cts|jsx|tsx)$/.test(abs)) {
+    return `lint (check): only JS/TS-family files supported for fast syntax check; use full=true for other languages. Path: ${abs}`
+  }
+  try {
+    execFileSync(process.execPath, ["--check", abs], {
+      encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"],
+    })
+    return `Syntax OK: ${abs}`
+  } catch (e) {
+    const msg = (e.stderr || e.stdout || e.message || "").trim()
+    return `Syntax error in ${abs}:\n${msg || "(unknown)"}`
+  }
+}
+
+// ─── Full-check cascade checkers ──────────────────────
+
+// Resolve npx's JS entry so we can spawn it via the current Node binary (avoids shell:true and
+// Windows .cmd spawn EINVAL). npx-cli.js lives next to npm-cli.js in the global npm install.
+const NPX_CLI = join(process.execPath.replace(/[\\/][^\\/]+$/, ""), "node_modules", "npm", "bin", "npx-cli.js")
+const npxArgs = (args) => [NPX_CLI, ...args]
+
+async function eslintCheck(file, { cwd }) {
+  // dir may be absolute (file given as absolute path) — resolve against cwd only when relative
+  let dir = file.split(/[\\/]/).slice(0, -1).join("/") || "."
+  const resolveDir = (d) => (isAbsolute(d) ? d : join(cwd, d))
+  while (true) {
+    for (const cfg of [".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yaml", ".eslintrc.yml", "eslint.config.js", "eslint.config.mjs"]) {
+      if (existsSync(join(resolveDir(dir), cfg))) {
+        try {
+          const cfgDir = resolveDir(dir)
+          const relPath = relative(cfgDir, file)
+          execFileSync(process.execPath, npxArgs(["eslint", "--no-color", relPath]), {
+            cwd: cfgDir, encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
+          })
+          return "✓ eslint: no issues"
+        } catch (e) {
+          const stdout = (e.stdout || "").trim()
+          if (stdout) return stdout
+          return `✗ eslint: ${(e.stderr || e.message).slice(0, 500)}`
+        }
+      }
+    }
+    const parent = dir.split("/").slice(0, -1).join("/")
+    if (!parent || parent === dir) break
+    dir = parent
+  }
+  return null
+}
+
+async function tscCheck(file, { cwd }) {
+  if (!existsSync(join(cwd, "tsconfig.json"))) return null
+  if (!/\.(ts|tsx|mts|cts)$/.test(file)) return null
+  try {
+    execFileSync(process.execPath, npxArgs(["tsc", "--noEmit", "--pretty", "false"]), {
+      cwd, encoding: "utf8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"],
+    })
+    return "✓ tsc: no type errors"
+  } catch (e) {
+    const stdout = (e.stdout || "").trim()
+    if (stdout) return stdout
+    return `✗ tsc: ${(e.stderr || e.message).slice(0, 500)}`
+  }
+}
+
+async function ruffCheck(file, { cwd }) {
+  if (!/\.py$/.test(file)) return null
+  try {
+    execFileSync("ruff", ["check", "--output-format", "concise", file], {
+      cwd, encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
+    })
+    return "✓ ruff: no issues"
+  } catch (e) {
+    if (e.code === "ENOENT") return "lint: ruff not installed. Run: pip install ruff"
+    const stdout = (e.stdout || "").trim()
+    if (stdout) return stdout
+    return `✗ ruff: ${(e.stderr || e.message).slice(0, 500)}`
+  }
+}
+
+async function cargoCheck(file, { cwd }) {
+  if (!/\.rs$/.test(file)) return null
+  if (!existsSync(join(cwd, "Cargo.toml"))) return null
+  const fname = file.split(/[\\/]/).pop()
+  try {
+    const out = execFileSync("cargo", ["check", "--message-format", "short"], {
+      cwd, encoding: "utf8", timeout: 120000, stdio: ["ignore", "pipe", "pipe"],
+    })
+    const errors = out.split("\n").filter((l) => l.includes(fname))
+    return errors.length > 0 ? errors.join("\n") : "✓ cargo check: no errors"
+  } catch (e) {
+    const combined = ((e.stdout || "") + "\n" + (e.stderr || "")).trim()
+    const errors = combined.split("\n").filter((l) => l.includes(fname) || l.startsWith("error"))
+    return errors.length > 0 ? errors.join("\n") : `✗ cargo check failed:\n${combined.slice(0, 1000)}`
+  }
+}
+
+async function goVet(file, { cwd }) {
+  if (!/\.go$/.test(file)) return null
+  try {
+    execFileSync("go", ["vet", file], {
+      cwd, encoding: "utf8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"],
+    })
+    return "✓ go vet: no issues"
+  } catch (e) {
+    return `✗ go vet: ${(e.stderr || e.message).slice(0, 500)}`
+  }
+}
+
+const LANG_CHECKERS = {
+  js:  [eslintCheck],
+  mjs: [eslintCheck],
+  cjs: [eslintCheck],
+  jsx: [eslintCheck],
+  ts:  [eslintCheck, tscCheck],
+  tsx: [eslintCheck, tscCheck],
+  mts: [eslintCheck, tscCheck],
+  cts: [eslintCheck, tscCheck],
+  py:  [ruffCheck],
+  rs:  [cargoCheck],
+  go:  [goVet],
+}
