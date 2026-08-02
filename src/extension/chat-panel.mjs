@@ -34,6 +34,22 @@ export class ChatPanel {
     this._abortController = null
     this._permissionQueue = []
     this._statusBar = null
+    // The slot number this panel is bound to. Set once when a session is opened/created,
+    // then used for ALL reads and writes — we never re-read the shared manifest's active
+    // pointer mid-conversation (it can be changed by a concurrently running CLI).
+    this._slot = null
+  }
+
+  /**
+   * The slot number this panel is bound to. On first use, resolve it once from the
+   * persisted active pointer (or create a slot), then keep it fixed for the panel's life.
+   */
+  _ensureSlot() {
+    if (this._slot == null) {
+      const cwd = _cwd()
+      this._slot = activeSlot(cwd)
+    }
+    return this._slot
   }
 
   // ─── WebviewViewProvider ─────────────────────────
@@ -85,7 +101,8 @@ export class ChatPanel {
         }
         case "newSession": this._newSession(); break
         case "switchSession": {
-          switchToSlot(_cwd(), msg.slot)
+          switchToSlot(_cwd(), msg.slot)  // persists the shared active pointer for CLI interop
+          this._slot = msg.slot           // bind this panel to the chosen slot
           await this._loadSession()
           break
         }
@@ -145,9 +162,9 @@ export class ChatPanel {
 
   // ─── Session ───────────────────────────────────
 
-  /** Active slot data (full session object) or null. */
+  /** Current session's slot data (full session object) or null. Uses the bound slot. */
   _activeData() {
-    return loadSlot(_cwd(), activeSlot(_cwd()))
+    return loadSlot(_cwd(), this._ensureSlot())
   }
 
   /** Human line (history) of the active session. */
@@ -166,7 +183,7 @@ export class ChatPanel {
   /** Persist both lines to the active slot + update manifest metadata. */
   _saveLines(fullHistory, contextHistory, extra = {}) {
     const cwd = _cwd()
-    const slot = activeSlot(cwd)
+    const slot = this._ensureSlot()
     const existing = loadSlot(cwd, slot) ?? {}
     saveSessionToSlot(cwd, slot, {
       version: 2, cwd, updatedAt: Date.now(),
@@ -198,7 +215,8 @@ export class ChatPanel {
   }
 
   async _newSession() {
-    newSlot(_cwd())
+    // Allocate a fresh slot, bind this panel to it, then load its (empty) content.
+    this._slot = newSlot(_cwd())
     this._loadSession()
   }
 
@@ -206,14 +224,16 @@ export class ChatPanel {
     if (typeof slot !== "number" || slot < 1) return
     const slots = listSlots(_cwd())
     if (slots.length <= 1) return  // Keep at least one session
-    deleteSlotAndUpdate(_cwd(), slot)
+    const newActive = deleteSlotAndUpdate(_cwd(), slot)
+    // If we deleted the slot this panel was bound to, rebind to the survivor.
+    if (slot === this._slot) this._slot = newActive
     this._loadSession()
   }
 
   async _generateTitle() {
     try {
       const cwd = _cwd()
-      const slot = activeSlot(cwd)
+      const slot = this._ensureSlot()
       const data = loadSlot(cwd, slot)
       if (!data || data.title) return  // Already titled
       const firstUser = (data.history ?? []).find((m) => (m.type ?? m.role) === "user")
@@ -241,7 +261,7 @@ export class ChatPanel {
       updated: s.updatedAt,
       active: s.isActive,
     }))
-    this._panel?.webview.postMessage({ type: "sessions", sessions, active: activeSlot(cwd) })
+    this._panel?.webview.postMessage({ type: "sessions", sessions, active: this._ensureSlot() })
   }
 
   _pushMcpStatus() {
@@ -320,7 +340,8 @@ export class ChatPanel {
     // Ensure at least one session slot exists (shared format with the CLI)
     const cwd = _cwd()
     const slots = listSlots(cwd)
-    if (slots.length === 0) newSlot(cwd)
+    // Resolve this panel's slot once: reuse the persisted active session, or create the first one.
+    this._slot = slots.length === 0 ? newSlot(cwd) : activeSlot(cwd)
     this._pushSessions()
     this._loadSession()
     initProviderKeyStore(this._context.secrets)
