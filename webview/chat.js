@@ -353,10 +353,14 @@ function showAutoConfirm() {
   })
   popover.querySelector(".auto-confirm-no").addEventListener("click", close)
 }
-ctx.modelBtn.addEventListener("click", () => toggleDropdown(ctx.dropdown, () => buildModelDropdown()))
+ctx.modelBtn.addEventListener("click", () => toggleDropdown(ctx.dropdown, () => { ctx._modelLevel = { level: 1 }; buildModelDropdown() }))
 ctx.reasoningBtn.addEventListener("click", () => toggleDropdown(ctx.reasoningDropdown, () => buildReasoningDropdown()))
 
 // ─── Model selector ────────────────────────────
+
+// Two-level picker state: { level: 1 } shows provider list; { level: 2, provider } shows that
+// provider's models. Reset to Level 1 each time the dropdown opens (see toggleDropdown caller).
+ctx._modelLevel = { level: 1 }
 
 function buildModelDropdown() {
   ctx.dropdown.innerHTML = ""
@@ -364,14 +368,48 @@ function buildModelDropdown() {
     ctx.dropdown.appendChild(sectionEl(t("model.loading")))
     return
   }
-  let lastGroup = ""
+  if (ctx._modelLevel.level === 2) buildModelLevel2(ctx._modelLevel.provider)
+  else buildModelLevel1()
+}
+
+// Level 1: provider list. Each row shows the provider group + its current/default model.
+// Clicking a provider drills into Level 2 (its model list).
+function buildModelLevel1() {
+  const byProvider = new Map()
   for (const m of ctx._models) {
-    if (m.group !== lastGroup) { ctx.dropdown.appendChild(sectionEl(m.group)); lastGroup = m.group }
+    const key = m.provider || m.group || ""
+    if (!byProvider.has(key)) byProvider.set(key, { group: m.group || key, models: [] })
+    byProvider.get(key).models.push(m)
+  }
+  for (const [provider, { group, models }] of byProvider) {
+    const current = models.find((m) => m.id === ctx.selectedModel && (m.provider || "") === (ctx.selectedProvider || ""))
+    const shown = current || models[0]
     const item = document.createElement("div")
     item.className = "dropdown-item"
     item.tabIndex = 0
     item.setAttribute("role", "option")
-    item.setAttribute("aria-selected", String(m.id === ctx.selectedModel))
+    item.setAttribute("aria-selected", String(!!current))
+    item.innerHTML = `<span>${group}</span><span class="dropdown-sub">${shown ? shown.label : ""}</span>${current ? '<span class="check">✓</span>' : ""}`
+    item.addEventListener("click", () => { ctx._modelLevel = { level: 2, provider }; buildModelDropdown() })
+    ctx.dropdown.appendChild(item)
+  }
+}
+
+// Level 2: models of one provider, with a "← back" row on top to return to Level 1.
+function buildModelLevel2(provider) {
+  const back = document.createElement("div")
+  back.className = "dropdown-item dropdown-back"
+  back.tabIndex = 0
+  back.innerHTML = `<span>${t("model.back")}</span>`
+  back.addEventListener("click", () => { ctx._modelLevel = { level: 1 }; buildModelDropdown() })
+  ctx.dropdown.appendChild(back)
+  for (const m of ctx._models) {
+    if ((m.provider || m.group || "") !== provider) continue
+    const item = document.createElement("div")
+    item.className = "dropdown-item"
+    item.tabIndex = 0
+    item.setAttribute("role", "option")
+    item.setAttribute("aria-selected", String(m.id === ctx.selectedModel && (m.provider || "") === (ctx.selectedProvider || "")))
     item.innerHTML = `<span>${m.label}</span>${m.id === ctx.selectedModel ? '<span class="check">✓</span>' : ""}`
     item.addEventListener("click", () => selectModel(m))
     ctx.dropdown.appendChild(item)

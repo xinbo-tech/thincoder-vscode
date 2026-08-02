@@ -268,6 +268,23 @@
   font-size: 11px;
 }
 
+/* Two-level model picker: provider row shows its current model as a grey sub-label;
+   the back row is a muted clickable item at the top of Level 2. */
+.dropdown-item .dropdown-sub {
+  color: var(--muted, #888);
+  font-size: 11px;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+.dropdown-item.dropdown-back {
+  color: var(--muted, #888);
+  font-style: italic;
+}
+
 /* ─── Panels area ────────────────────────────── */
 
 #panels {
