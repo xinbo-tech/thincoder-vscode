@@ -12,23 +12,32 @@ export function msgPath(msgDir, name) {
   return join(msgDir, `${safe}.json`)
 }
 
-/** Read messages from a session file */
-export function loadMessages(msgDir, name) {
+/** Read a session file: returns { messages (human line), contextHistory (machine line) } */
+export function loadSessionLines(msgDir, name) {
   try {
     const path = msgPath(msgDir, name)
     const data = readFileSync(path, "utf8")
     const parsed = JSON.parse(data)
-    const result = Array.isArray(parsed) ? parsed : (parsed.messages || [])
-    return result
-  } catch (e) { return [] }
+    if (Array.isArray(parsed)) return { messages: parsed, contextHistory: null } // legacy bare array
+    const messages = parsed.messages || []
+    // Machine line falls back to the human line for old sessions without contextHistory.
+    const contextHistory = Array.isArray(parsed.contextHistory) ? parsed.contextHistory : null
+    return { messages, contextHistory }
+  } catch { return { messages: [], contextHistory: null } }
 }
 
-/** Write messages to a session file */
-export function saveMessages(msgDir, name, messages) {
+/** Read messages from a session file (human line only — for UI rendering) */
+export function loadMessages(msgDir, name) {
+  return loadSessionLines(msgDir, name).messages
+}
+
+/** Write both lines to a session file: messages = human line, contextHistory = machine line */
+export function saveMessages(msgDir, name, messages, contextHistory = null) {
   try {
     mkdirSync(msgDir, { recursive: true })
     const path = msgPath(msgDir, name)
-    writeFileSync(path, JSON.stringify(messages), "utf8")
+    const payload = contextHistory ? { messages, contextHistory } : messages
+    writeFileSync(path, JSON.stringify(payload), "utf8")
   } catch (e) { console.warn("ThinCoder: failed to save messages", e.message) }
 }
 

@@ -71,11 +71,23 @@ function offloadToolResult(cwd, text) {
 export { builtinTools } from "./tools.mjs"
 
 /**
+ * pushReal — the single entry point for REAL conversation messages.
+ * A real message (user input, assistant reply, tool result, multimodal image) is appended to BOTH the
+ * machine line (history) and the human line (fullHistory). Machine-only injections ([System reminder:...],
+ * compaction notes, task/plan reminders) are pushed to history directly and never enter fullHistory.
+ * Mirrors thincoder/src/context.mjs:pushReal — the two lines are written independently at the source.
+ */
+function pushReal(history, fullHistory, msg) {
+  fullHistory.push(msg)
+  history.push(msg)
+}
+
+/**
  * Run the agent loop.
  * @param {object} opts - { depth, role, maxTurns } for subagent context
  */
 export async function runAgent(provider, cwd, input, callbacks = {}, signal, autoApprove = true, opts = {}) {
-  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills, conversationHistory } = opts
+  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills } = opts
 
   const agentTools = depth === 0
     ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool]
@@ -106,10 +118,20 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   }
   const systemPrompt = `${base}${depth === 0 ? `\n\n${MAIN_OVERLAY}` : ""}\n\nOS: ${platform}. Working directory: ${cwd}.`
 
-  const history = []
+  // Dual-line history. Top-level runs use PERSISTENT lines passed in via opts (survive across calls,
+  // written to the session file by chat-panel): history = machine context (compaction shrinks it),
+  // fullHistory = never-compacted human-readable record. Subagents always use throwaway local lines.
+  // Old sessions / first turn: seed the machine line from the human line (correctness over tokens).
+  const fullHistory = depth === 0 ? (opts.fullHistory ?? (opts.fullHistory = [])) : []
+  const history = depth === 0
+    ? (opts.history ?? (opts.history = [...fullHistory]))
+    : []
 
-  // ─── Context injection (top-level only) ────
-  if (depth === 0) {
+  // ─── Context injection (top-level only, fresh machine line only) ────
+  // These machine-only injections are transient context; a persistent machine line already carries
+  // them from prior turns, so only inject when starting a brand-new (empty) machine line.
+  const freshMachineLine = history.length === 0
+  if (depth === 0 && freshMachineLine) {
     injectContext(history, cwd, input)
     // MCP server config
     if (mcpServers && Object.keys(mcpServers).length > 0) {
@@ -125,28 +147,21 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     }
   }
 
-  if (autoApprove) {
-    history.push({
-      role: "user",
-      content: "[System reminder: AUTO mode is active — all tool calls are automatically approved without asking.]",
-    })
-  } else {
-    history.push({
-      role: "user",
-      content: "[System reminder: Permission mode — confirm with the user before making changes. Describe what you plan to modify and wait for approval before executing file-changing tools.]",
-    })
-  }
-
-  // ─── Conversation history (multi-turn) ──────
-  if (depth === 0 && Array.isArray(conversationHistory) && conversationHistory.length > 0) {
-    console.warn("[agent] injecting conversationHistory, length =", conversationHistory.length)
-    for (const m of conversationHistory) {
-      if (m.type === "user") history.push({ role: "user", content: m.content })
-      else if (m.type === "assistant") history.push({ role: "assistant", content: m.content })
+  if (depth === 0 && freshMachineLine) {
+    if (autoApprove) {
+      history.push({
+        role: "user",
+        content: "[System reminder: AUTO mode is active — all tool calls are automatically approved without asking.]",
+      })
+    } else {
+      history.push({
+        role: "user",
+        content: "[System reminder: Permission mode — confirm with the user before making changes. Describe what you plan to modify and wait for approval before executing file-changing tools.]",
+      })
     }
   }
 
-  history.push({ role: "user", content: input })
+  pushReal(history, fullHistory, { role: "user", content: input })
 
   // Inject pasted images as multimodal content on the first user message
   if (depth === 0 && Array.isArray(opts.images) && opts.images.length > 0) {
@@ -242,7 +257,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       if (depth === 0) {
         const pending = agent._tasks?.filter((t) => t.status === "pending")
         if (pending?.length) {
-          history.push({ role: "assistant", content: response.content })
+          pushReal(history, fullHistory, { role: "assistant", content: response.content })
           history.push({
             role: "user",
             content: `[System reminder: you still have pending tasks: ${pending.map((t) => t.title).join(", ")}. Update their status before finishing — if done, mark done; if not applicable, remove them.]`,
@@ -253,7 +268,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         // Verify guard — push model to verify mutated files before completion
         if (agent._touchedFiles.length > 0 && !agent._verifiedThisRun && guardPushbacks < MAX_VERIFY_PUSHBACKS) {
           guardPushbacks++
-          history.push({ role: "assistant", content: response.content })
+          pushReal(history, fullHistory, { role: "assistant", content: response.content })
           history.push({
             role: "user",
             content: "[System reminder: you modified files in this run but have not verified the changes. Before finishing: call the verify tool to run syntax checks and tests. If verify reports failures, fix them and run verify again. If verification is genuinely impossible here, say so explicitly in your reply.]",
@@ -265,7 +280,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           agent._verifyRetries = retries
           if (retries < MAX_VERIFY_RETRIES) {
             agent._verifyPassed = undefined // reset for next attempt
-            history.push({ role: "assistant", content: response.content })
+            pushReal(history, fullHistory, { role: "assistant", content: response.content })
             history.push({
               role: "user",
               content: `[System reminder: verify reported failures (retry ${retries}/${MAX_VERIFY_RETRIES}). Review the failures, fix the issues, then run verify again. If you cannot fix after ${MAX_VERIFY_RETRIES} attempts, explain honestly what's blocking you.]`,
@@ -275,7 +290,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           // Exhausted retries — inject honest-declaration reminder
           if (!agent._honestReminderInjected) {
             agent._honestReminderInjected = true
-            history.push({ role: "assistant", content: response.content })
+            pushReal(history, fullHistory, { role: "assistant", content: response.content })
             history.push({
               role: "user",
               content: `[System reminder: ${MAX_VERIFY_RETRIES} verify attempts exhausted and tests are still failing. In your response to the user, you MUST state explicitly: (1) what tests are still failing, (2) what you tried, (3) what you believe the root cause is. Do not present this as complete — the user needs to know the work is unfinished.]`,
@@ -285,13 +300,13 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         }
       }
 
-      history.push({ role: "assistant", content: response.content })
+      pushReal(history, fullHistory, { role: "assistant", content: response.content })
       if (depth === 0) callbacks.onComplete?.(response.content)
       return response.content
     }
 
     // ─── Tool calls ─────────────────────────
-    history.push({
+    pushReal(history, fullHistory, {
       role: "assistant",
       content: response.content || null,
       tool_calls: response.toolCalls.map((tc) => ({
@@ -424,11 +439,11 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         const { tool_call_id, toolName, content, multimodal, meta } = r
 
         if (multimodal) {
-          history.push({ role: "tool", tool_call_id, content: multimodal.text })
-          history.push({ role: "user", content: [{ type: "text", text: multimodal.text }, ...multimodal.images] })
+          pushReal(history, fullHistory, { role: "tool", tool_call_id, content: multimodal.text })
+          pushReal(history, fullHistory, { role: "user", content: [{ type: "text", text: multimodal.text }, ...multimodal.images] })
           if (depth === 0) callbacks.onToolResult?.(toolName, multimodal.text, tool_call_id)
         } else {
-          history.push({ role: "tool", tool_call_id, content })
+          pushReal(history, fullHistory, { role: "tool", tool_call_id, content })
           if (depth === 0) callbacks.onToolResult?.(toolName, content, tool_call_id)
         }
 

@@ -98,7 +98,7 @@
   },
   "scripts": {
     "package": "npx @vscode/vsce package",
-    "test": "node --test test/unit.test.mjs",
+    "test": "node --test test/unit.test.mjs test/dual-history.test.mjs",
     "lint": "eslint ."
   },
   "devDependencies": {

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url"
 import { runAgent } from "../agent.mjs"
 import { closeAllMcp } from "../mcp.mjs"
 import { providerNames, getKey, buildProvider, initProviderKeyStore, loadProviderKeyCache } from "./presets.mjs"
-import { loadMessages, saveMessages, deleteMessages, renameMessages, loadIndex, saveIndex, sessionsKey, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
+import { loadMessages, saveMessages, loadSessionLines, deleteMessages, renameMessages, loadIndex, saveIndex, sessionsKey, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
 import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer } from "./settings.mjs"
 import { generateTitle } from "./generate-title.mjs"
 import { injectEditorContext } from "./editor-context.mjs"
@@ -164,6 +164,16 @@ export class ChatPanel {
     return loadMessages(this._msgDir, this._activeName())
   }
 
+  /** Load both persisted lines for the active session: human (fullHistory) + machine (contextHistory). */
+  _activeLines() {
+    return loadSessionLines(this._msgDir, this._activeName())
+  }
+
+  /** Persist both lines. contextHistory omitted (null) for legacy single-line writes. */
+  _saveLines(messages, contextHistory = null) {
+    saveMessages(this._msgDir, this._activeName(), messages, contextHistory)
+  }
+
   _saveHistory(history) {
     saveMessages(this._msgDir, this._activeName(), history)
   }
@@ -176,8 +186,11 @@ export class ChatPanel {
     const history = this._activeHistory()
     this._panel?.webview.postMessage({ type: "clearMessages" })
     for (const m of history) {
-      if (m.type === "user") this._panel?.webview.postMessage({ type: "userMessage", text: m.content, timestamp: m.timestamp })
-      else if (m.type === "assistant") this._panel?.webview.postMessage({ type: "assistantMessage", text: m.content, timestamp: m.timestamp })
+      // Real messages carry role (LLM line); UI-only ones may carry type. Derive the UI kind from either.
+      const kind = m.type ?? m.role
+      if (kind === "user" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "userMessage", text: m.content, timestamp: m.timestamp })
+      else if (kind === "assistant" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "assistantMessage", text: m.content, timestamp: m.timestamp })
+      // tool calls/results and multimodal parts are not re-rendered from history (they stream live via callbacks)
     }
     this._pushSessions()
   }
@@ -474,17 +487,18 @@ export class ChatPanel {
 
     const c = vscode.workspace.getConfiguration("thincoder")
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
-    const ts = new Date().toISOString()
 
     text = injectEditorContext(text, cwd)
     text = injectAtRefs(text, cwd)
 
-    // Capture EXISTING history for multi-turn context (before appending this message)
-    const conversationHistory = this._activeHistory()
-    const history = [...conversationHistory]
-    history.push({ type: "user", content: text, provider: providerName || "", model: modelOverride || p.model, timestamp: ts })
-    const isFirstMessage = history.filter((m) => m.type === "user").length === 1
-    this._saveHistory(history)
+    // Load BOTH persisted lines. fullHistory = human line (never-compacted, all real messages —
+    // user/assistant text carries BOTH role+type so it feeds the LLM via role AND the UI via type).
+    // history = machine line (compaction shrinks it); old sessions fall back to the human line.
+    // runAgent appends this turn's real messages (user input, assistant replies, tool results) to
+    // both lines via its internal pushReal — chat-panel only supplies the lines and persists them.
+    const { messages: fullHistory, contextHistory } = this._activeLines()
+    const history = Array.isArray(contextHistory) ? contextHistory : [...fullHistory]
+    const isFirstMessage = fullHistory.filter((m) => m.type === "user").length === 0
 
     // Persist model selection
     const prefs = { model: modelOverride || p.model, provider: providerName, reasoning: reasoning || "" }
@@ -494,12 +508,13 @@ export class ChatPanel {
     this._abortController?.abort()
     this._abortController = new AbortController()
 
-    let out = ""
+    // Token stream is forwarded live to the webview; the assistant reply is persisted by runAgent's
+    // pushReal into fullHistory (no separate accumulation needed here).
     // Accumulate token usage across all LLM calls in this turn (matches CLI)
     const totalUsage = { prompt_tokens: 0, completion_tokens: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 }
     try {
       await runAgent(p, cwd, text, {
-        onToken: (t) => { out += t; this._panel?.webview.postMessage({ type: "token", text: t }) },
+        onToken: (t) => { this._panel?.webview.postMessage({ type: "token", text: t }) },
         onReasoning: (r) => { this._panel?.webview.postMessage({ type: "reasoning", text: r }) },
         onTaskUpdate: (tasks) => {
           const done = tasks.filter((t) => t.status === "done").length
@@ -523,10 +538,8 @@ export class ChatPanel {
         onToolResult: (n, r, id) => this._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 2000), id }),
         onToolPanel: (name, text) => this._panel?.webview.postMessage({ type: "toolPanel", name, text }),
         onComplete: () => {
-          if (out) {
-            history.push({ type: "assistant", content: out, timestamp: new Date().toISOString() })
-            this._saveHistory(history)
-          }
+          // runAgent already appended the real messages to both lines via pushReal; just persist them.
+          this._saveLines(fullHistory, history)
           this._panel?.webview.postMessage({ type: "complete" })
           this._pushSessions()
         },
@@ -535,7 +548,7 @@ export class ChatPanel {
             this._permissionQueue.push({ resolve, toolName })
             this._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
           }),
-      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}), images, skills: loadSkills(cwd), conversationHistory })
+      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}), images, skills: loadSkills(cwd), history, fullHistory })
     } catch (e) {
       if (e.name === "AbortError") {
         this._panel.webview.postMessage({ type: "aborted" })
