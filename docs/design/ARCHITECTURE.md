@@ -61,7 +61,13 @@ class ChatPanel {
   }
   ```
 
-**Provider 配置**：与 CLI 共享 `~/.thincoder/config.json`，结构为 `providers[]`（每项 `{ name, baseURL, model, apiKey, chatPath?, maxTokens? }`）+ `activeProvider` 指针；`apiKey` 缺省时回退环境变量。内置 6 个 preset（DeepSeek/Kimi/GLM/Qwen/MiniMax/OpenAI）加 `custom`，preset 表**以 CLI `config.mjs` 的 `PROVIDER_PRESETS` 为唯一权威**，VS Code 不再各自硬编码，避免两端漂移。读写逻辑在 `src/extension/config.mjs`（共享 config.json），设置管理 `src/extension/settings.mjs`，会话 I/O `src/extension/session-io.mjs`。首次启动若检测到旧版 VS Code settings 里的 `thincoder.providers`，一次性迁移进 `~/.thincoder/config.json` 后停用 settings 存储。
+**Provider 配置**：与 CLI 共享 `~/.thincoder/config.json`，结构为 `providers[]`（每项 `{ name, baseURL, model, apiKey, chatPath?, maxTokens?, format? }`）+ `activeProvider` 指针；`apiKey` 缺省时回退环境变量。preset 表**以 CLI `config.mjs` 的 `PROVIDER_PRESETS` 为唯一权威**（16 个，含 claude/gemini），VS Code 不再各自硬编码，避免两端漂移。读写逻辑在 `src/extension/config.mjs`（共享 config.json），设置管理 `src/extension/settings.mjs`，会话 I/O `src/extension/session-io.mjs`。首次启动若检测到旧版 VS Code settings 里的 `thincoder.providers`，一次性迁移进 `~/.thincoder/config.json` 后停用 settings 存储。
+
+**模型选择 UI（对齐 CLI 二级菜单）**：主下拉列 provider 行（provider 名 + 右侧当前模型 + `›`），hover 弹出该 provider 的模型 flyout 子菜单，点击模型选中——两级语义对应 CLI `openModelPicker → openModelListForProvider`，因 Webview 无键盘导航改用 hover flyout 实现。主下拉底部含 add / remove / key 管理入口。
+
+**Provider 增删（对齐 CLI）**：`addProviderFlow`（选 preset[过滤已添加] → 自动填 baseURL/model → 输 key；custom 手动输 name/baseURL/model + 选 format）、`removeProviderFlow`（列非 active provider 供删）、`setKeyFlow`（设/改 key）。
+
+**协议 transport**：三种 `provider.format` —— `openai`（默认，SSE chat completions）、`anthropic`（Messages API）、`google`（streamGenerateContent）。**缺口（待补）**：VS Code 当前仅有 openai transport，需补齐 anthropic / google 两个 transport 才能承接 custom 的协议选择及 claude/gemini preset。
 
 **LLM 标题生成**：
 - 触发：会话第一条用户消息后，agent 完成回复
@@ -203,3 +209,5 @@ user input
 | 配置存储 | `~/.thincoder/config.json`（共享） | 同上（共享同一文件；apiKey 回退环境变量） |
 | 记忆系统 | 3-layer FTS5 + vector | JSON 文件存储（单层） |
 | MCP | ✅ | ✅ stdio + HTTP（`thincoder.mcpServers` 配置） |
+
+> **字段往返完整（待补缺口）**：共享槽位文件是全量覆盖写。当前 `chat-panel._saveLines` 逐字段重建 data，漏掉了 CLI 写入的 `activeModel` 与 `engineering`——同一会话经 CLI 设置模型后再到 VS Code 发消息，这两个字段会被抹掉，CLI resume 丢失模型覆盖。修法：`_saveLines` 改为 `...existing` 展开式透传（不认识的字段原样保留），而非逐字段重建子集。契约详见 CLI `docs/design/ARCHITECTURE.md`「会话存储统一 → 字段往返完整」。

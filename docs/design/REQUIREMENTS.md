@@ -12,35 +12,42 @@
 | 界面 | VS Code Webview (iframe) | HTML/CSS/JS，`postMessage` 通信 |
 | 入口 | `extension.mjs` → `activate()` | 标准 VS Code 扩展激活模式 |
 | LLM 调用 | 原生 `fetch` + SSE 流式 | OpenAI 兼容协议，支持 reasoning / thinking |
-| 支持的 Provider | 6 个内置 preset + 自定义开放端点 | 见下表 |
+| 支持的 Provider | 16 个 preset（含 Claude/Gemini）+ 自定义端点（三协议） | 见下表 |
 | 模型配置 | `~/.thincoder/config.json`（与 CLI 共享） | providers[] + activeProvider，见「与 CLI 的关系」 |
 | 会话存储 | `~/.thincoder/sessions/`（与 CLI 共享） | 完整 sha1(cwd) + 槽位，两端互读 |
 | 工具审批 | `autoApprove` 默认 `false` | 用户显式开启才自动执行 |
 | 模型能力 | 自包含 `src/config.mjs` | MODEL_SPECS 表独立维护 |
 | Session 标题 | LLM 自动生成（首条消息后触发） | 失败静默降级为截断消息 |
 
-### 内置 Provider 预设（✅ 已定）
+### Provider 预设（以 CLI 为唯一权威）
 
-选型原则：**只跟顶流、只跟最新**。不兼容老旧模型、不做本地模型适配。预设表随模型换代增删，不留历史包袱。
+**权威来源**：preset 表以 CLI `src/config.mjs` 的 `PROVIDER_PRESETS` 为唯一权威，VS Code 不再各自硬编码（避免漂移）。当前全集 16 个，含 `claude`（format: anthropic）与 `gemini`（format: google）：
 
-| Provider | 默认模型 | Endpoint | 特殊适配 |
-|----------|---------|----------|---------|
-| DeepSeek | `deepseek-v4-pro` | `api.deepseek.com/v1` | thinking.type + reasoning_effort（high/max） |
-| Kimi | `kimi-k3` | `api.moonshot.cn/v1` | thinking.effort（low/high/max），chatcompletion_v2 |
-| GLM | `glm-5.2` | `open.bigmodel.cn/api/paas/v4` | thinking.type + reasoning_effort（7 级） |
-| Qwen | `qwen3.7-max` | `dashscope.aliyuncs.com/compatible-mode/v1` | reasoning_effort |
-| MiniMax | `MiniMax-M3` | `api.minimax.chat/v1` | chatPath: `/text/chatcompletion_v2` |
-| OpenAI | `gpt-4o` | `api.openai.com/v1` | 标准协议，无额外适配 |
-| Custom | 用户指定 | 用户指定 | OpenAI 兼容端点即可，适配仅做温度/输出钳位 |
+| 类别 | Provider |
+|------|----------|
+| OpenAI 兼容 | deepseek, kimi, glm, qwen, qwenplan, minimax, openai, grok, mistral, volcengine, hunyuan, siliconflow, openrouter, groq |
+| Anthropic 协议 | claude（`format: "anthropic"`，Messages API） |
+| Google 协议 | gemini（`format: "google"`，streamGenerateContent） |
 
 每个 Provider 的能力参数（context window、maxOutput、thinking API 类型、温度范围）存在 `src/config.mjs` 的 MODEL_SPECS 表里，`specForModel(model)` 按模型名前缀匹配。
+
+### Provider 与模型选择（对齐 CLI，✅ 已定）
+
+四条契约，全部对齐 CLI 现有行为：
+
+1. **配置共享**：读写 `~/.thincoder/config.json`（`providers[]` + `activeProvider`），与 CLI 同一份文件；`apiKey` 缺省回退环境变量。旧 VS Code settings 一次性迁移后停用（见「与 CLI 的关系」）。
+2. **模型选择 = 二级菜单**：对齐 CLI `openModelPicker → openModelListForProvider` 两级结构 + add/remove/key 管理项。Webview 无键盘导航，用 **hover flyout 子菜单**实现两级语义：主下拉列 provider 行（provider 名 + 右侧当前模型 + `›`），hover 弹出该 provider 的模型子菜单，点击模型选中。
+3. **模型添加 = 添加/删除 provider 模式**：对齐 CLI `addProviderFlow` / `removeProviderFlow` / `setKeyFlow`。添加流程：选 preset（过滤已添加的）→ 自动填 baseURL/model → 输入 API key；custom 走手动流程（下条）。删除：列出非 active 的 provider 供移除。key 管理：单独入口设/改 key。
+4. **custom 支持三种协议**：对齐 CLI `addProviderFlow` 的 custom 分支——手动输入 name / baseURL / model，并选 **API format: `openai`（默认）/ `anthropic` / `google`**，写入 `provider.format`。三种协议都有 transport（见下）。
+
+**协议 transport**：`openai`（默认，SSE chat completions）、`anthropic`（Messages API，CLI `provider/anthropic.mjs`）、`google`（streamGenerateContent，CLI `provider/google.mjs`）。VS Code 需补齐 anthropic / google 两个 transport 才能承接 custom 的协议选择——当前仅有 openai transport。
 
 ## v1 功能范围（已实现）
 
 - Agent 主循环：多轮工具调用，上下文压缩，子 agent 派生
 - 工具系统：20+ 工具（文件/搜索/Git/系统/网络/交互/补丁）
 - Agent 自律工具链：`task` / `plan` / `goal` / `verify` / `recent_changes` / `subagent` / `skill`
-- 多 Provider：DeepSeek / Kimi / GLM / Qwen / MiniMax / OpenAI + 自定义 endpoint
+- 多 Provider：16 个 preset（含 Claude/Gemini）+ 自定义 endpoint（openai/anthropic/google 三协议），与 CLI 共享 `~/.thincoder/config.json`
 - 多会话 + 模型选择器 + 设置面板 + 快捷键
 - `autoApprove` 配置项，默认 `false`
 - repo_outline + context compaction
