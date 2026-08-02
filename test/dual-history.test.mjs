@@ -124,17 +124,45 @@ describe("session-io — shared slot format (CLI-compatible)", () => {
     assert.ok(m2.slotSessions[1], "ownership was claimed by the earlier activeSlot call")
   })
 
-  it("activeSlot returns the existing active pointer without re-scanning (CLI parity)", () => {
+  it("activeSlot claims the existing active slot when it is unowned (avoid-collision semantics)", () => {
     newSlot(cwd)
     newSlot(cwd) // active=2, but no ownership claimed (newSlot doesn't claim, same as CLI)
-    // Manifest has no slotSessions — ownership is only claimed when m.active is falsy
     const before = loadManifest(cwd)
     assert.equal(before.slotSessions, undefined)
-    // m.active is set → returned as-is; ensureActive is NOT called, no claim written
+    // active=2 is unowned → activeSlot reuses it AND records our claim in slotSessions
     assert.equal(activeSlot(cwd), 2)
     const m = loadManifest(cwd)
     assert.equal(m.active, 2)
-    assert.equal(m.slotSessions, undefined, "no claim written when active pointer already set (CLI parity)")
+    assert.ok(m.slotSessions[2], "claim written for the reused active slot")
+  })
+
+  it("activeSlot avoids a slot owned by another LIVE process and allocates a new one", () => {
+    newSlot(cwd) // slot 1, active=1
+    // Simulate another live process owning slot 1: ppid is alive and != our pid
+    const m = loadManifest(cwd)
+    m.slotSessions = { 1: `${process.ppid}-999999-other` }
+    saveManifest(cwd, m)
+    // Our activeSlot must NOT take slot 1 (owned by a live foreign process) → allocates slot 2
+    const n = activeSlot(cwd)
+    assert.equal(n, 2)
+    const m2 = loadManifest(cwd)
+    assert.equal(m2.active, 2)
+    assert.equal(m2.slotSessions[1], `${process.ppid}-999999-other`, "foreign claim left intact")
+    assert.ok(m2.slotSessions[2], "our claim recorded on the new slot")
+    assert.notEqual(m2.slotSessions[2].split("-")[0], String(process.ppid))
+  })
+
+  it("activeSlot reclaims a slot whose owner process is DEAD", () => {
+    newSlot(cwd) // slot 1, active=1
+    const m = loadManifest(cwd)
+    // A pid that is almost certainly not running
+    m.slotSessions = { 1: "99999999-999999-dead" }
+    saveManifest(cwd, m)
+    // Dead owner → reclaim slot 1 rather than allocating a new one
+    assert.equal(activeSlot(cwd), 1)
+    const m2 = loadManifest(cwd)
+    assert.equal(m2.active, 1)
+    assert.notEqual(m2.slotSessions[1], "99999999-999999-dead", "dead claim replaced by ours")
   })
 
   it("extractSlotMeta counts real user messages, skips system reminders", () => {

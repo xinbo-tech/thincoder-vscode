@@ -247,45 +247,54 @@ function isProcessAlive(pid) {
 }
 
 /**
- * Ensure an active slot exists in the manifest, claiming ownership for this process.
- * Mirrors CLI ensureActive: reuses our own slot, claims empty slots, reclaims slots
- * owned by dead processes, allocates a new slot when all are busy. Idempotent.
+ * Claim a slot for this process and set it as active. Idempotent. Mirrors CLI ensureActive.
+ * Preference order:
+ *  1. The current active slot, if it is unowned / ours / its owner is dead — reuse it.
+ *  2. Any slot that is unowned or owned by a dead process (reclaim).
+ *  3. A brand-new slot when all are owned by live processes.
+ * The owner is recorded in m.slotSessions so other processes (CLI ↔ VS Code) can
+ * see which slots are taken and avoid them.
  */
 function ensureActive(cwd, m) {
   const mySessionId = getSessionId()
   if (!m.slotSessions) m.slotSessions = {}
   if (m.active && m.slotSessions[m.active] === mySessionId) return
 
+  const isFree = (slot) => {
+    const owner = m.slotSessions[slot]
+    if (!owner || owner === mySessionId) return true
+    return !isProcessAlive(parseInt(owner.split("-")[0]))
+  }
+
+  // 1. Prefer the current active slot if we can take it (preserves "resume where you left off").
+  if (m.active && m.slots[m.active] && isFree(m.active)) {
+    m.slotSessions[m.active] = mySessionId
+    saveManifest(cwd, m)
+    return
+  }
+
+  // 2. Otherwise claim the first slot that is free.
   const allSlots = Object.keys(m.slots).filter((n) => /^\d+$/.test(n)).map(Number).sort((a, b) => a - b)
   for (const slot of allSlots) {
-    const ownerSessionId = m.slotSessions[slot]
-    if (!ownerSessionId) {
+    if (isFree(slot)) {
       m.active = slot
       m.slotSessions[slot] = mySessionId
       saveManifest(cwd, m)
       return
     }
-    if (ownerSessionId !== mySessionId) {
-      const ownerPid = parseInt(ownerSessionId.split("-")[0])
-      if (!isProcessAlive(ownerPid)) {
-        m.active = slot
-        m.slotSessions[slot] = mySessionId
-        saveManifest(cwd, m)
-        return
-      }
-    }
   }
-  // All slots busy with live processes — allocate a new one (no limit)
+
+  // 3. All slots owned by live processes — allocate a new one (no limit).
   const newSlot = allSlots.length > 0 ? Math.max(...allSlots) + 1 : 1
   m.active = newSlot
   m.slotSessions[newSlot] = mySessionId
   saveManifest(cwd, m)
 }
 
-/** Get the active slot number, claiming one for this process if needed (same as CLI activeSlot). */
+/** Get this process's active slot number, claiming one if needed (same as CLI activeSlot). */
 export function activeSlot(cwd) {
   const m = loadManifest(cwd)
-  if (!m.active) ensureActive(cwd, m)
+  ensureActive(cwd, m)
   return m.active
 }
 
