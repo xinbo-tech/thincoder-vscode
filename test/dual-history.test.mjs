@@ -202,4 +202,28 @@ describe("session-io — shared slot format (CLI-compatible)", () => {
     saveSlot(cwd, 5, { version: 99, history: [] })
     assert.equal(loadSlot(cwd, 5), null)
   })
+
+  it("field round-trip: CLI-owned fields (activeModel/engineering) survive a re-save", () => {
+    // Contract (CLI docs/design/ARCHITECTURE.md): slot files are full-overwrite writes — any
+    // field a writer drops is lost. saveSessionToSlot must persist the object it is given
+    // verbatim, so a caller that spreads ...existing keeps CLI-owned fields it doesn't know
+    // about. This locks the contract at the I/O boundary regardless of caller.
+    newSlot(cwd)
+    const cliWritten = {
+      version: 2, cwd, title: "CLI session", activeProvider: "deepseek", activeModel: "deepseek-chat",
+      engineering: true, engDesignToken: "tok-123",
+      history: [{ role: "user", content: "hi" }], contextHistory: [{ role: "user", content: "hi" }],
+      display: [], tasks: [], planMode: false, goal: null, autoApprove: false, advisor: null,
+      pendingReminders: [], sessionStart: null,
+    }
+    saveSessionToSlot(cwd, 1, cliWritten)
+    // Re-save simulating the extension overwriting the two lines it owns (spread ...existing first)
+    const existing = loadSlot(cwd, 1)
+    saveSessionToSlot(cwd, 1, { ...existing, history: [...existing.history, { role: "assistant", content: "hello" }] })
+    const after = loadSlot(cwd, 1)
+    assert.equal(after.activeModel, "deepseek-chat", "activeModel survived re-save")
+    assert.equal(after.engineering, true, "engineering survived re-save")
+    assert.equal(after.engDesignToken, "tok-123", "engDesignToken survived re-save")
+    assert.equal(after.history.length, 2, "history line was updated")
+  })
 })

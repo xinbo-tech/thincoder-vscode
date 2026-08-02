@@ -185,7 +185,12 @@ export class ChatPanel {
     const cwd = _cwd()
     const slot = this._ensureSlot()
     const existing = loadSlot(cwd, slot) ?? {}
+    // Field-roundtrip contract (CLI docs/design/ARCHITECTURE.md): slot files are full-overwrite
+    // writes, so any field we drop here is lost permanently. Spread ...existing so fields the
+    // extension doesn't know about (activeModel, engineering, engDesignToken, ...) round-trip
+    // intact, then override only what the extension actually owns.
     saveSessionToSlot(cwd, slot, {
+      ...existing,
       version: 2, cwd, updatedAt: Date.now(),
       title: existing.title ?? "",
       activeProvider: extra.activeProvider ?? existing.activeProvider ?? "",
