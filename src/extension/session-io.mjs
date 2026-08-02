@@ -8,15 +8,50 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync, existsS
 import { createHash } from "node:crypto"
 import { homedir } from "node:os"
 import { join, dirname } from "node:path"
+import { execSync } from "node:child_process"
 
-const CWD_HASH_LEN = 16
+let currentSessionId = null
+
+/** Unique session ID for this extension-host process (same format as CLI: pid-ts-rand). */
+export function getSessionId() {
+  if (!currentSessionId) {
+    currentSessionId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  }
+  return currentSessionId
+}
 
 function sessionsDir() {
   return join(homedir(), ".thincoder", "sessions")
 }
 
+/** Normalize cwd for hashing: uppercase Windows drive letter so the extension's
+ *  uri.fsPath (lowercased) matches the CLI's process.cwd() hash. */
+export function normalizeCwd(cwd) {
+  return cwd.replace(/^([a-z]):/, (_, d) => d.toUpperCase() + ":")
+}
+
+/** Full sha1 hex (40 chars), not truncated. Shared contract with the CLI. */
+function cwdHash(cwd) {
+  return createHash("sha1").update(normalizeCwd(cwd)).digest("hex")
+}
+
+/** One-time migration: rename legacy 12-char-hash session files to the full 40-char hash. */
+function migrateHashLength(cwd, fullHash) {
+  const dir = sessionsDir()
+  const legacyBase = join(dir, `${fullHash.slice(0, 12)}.json`)
+  if (!existsSync(legacyBase) && !existsSync(`${legacyBase}.manifest`) && !existsSync(`${legacyBase}.1`)) return
+  const newBase = join(dir, `${fullHash}.json`)
+  try {
+    for (const suffix of ["", ".manifest", ...Array.from({ length: 64 }, (_, i) => `.${i + 1}`)]) {
+      const from = legacyBase + suffix
+      if (existsSync(from) && !existsSync(newBase + suffix)) renameSync(from, newBase + suffix)
+    }
+  } catch { /* best-effort */ }
+}
+
 function basePath(cwd) {
-  const hash = createHash("sha1").update(cwd).digest("hex").slice(0, CWD_HASH_LEN)
+  const hash = cwdHash(cwd)
+  migrateHashLength(cwd, hash)
   return join(sessionsDir(), `${hash}.json`)
 }
 
@@ -44,11 +79,13 @@ export function loadManifest(cwd) {
     if (!existsSync(p)) return { slots: {}, active: null, sessionId: null }
     const m = JSON.parse(readFileSync(p, "utf8"))
     if (!m.slots) m.slots = {}
+    if (!m.sessionId) m.sessionId = null
     return m
   } catch { return { slots: {}, active: null, sessionId: null } }
 }
 
 export function saveManifest(cwd, m) {
+  m.sessionId = getSessionId()
   writeFile(manifestPath(cwd), m)
 }
 
@@ -115,13 +152,16 @@ export function listSlots(cwd) {
         messageCount: meta.messageCount ?? 0,
         firstMessage: meta.firstMessage ?? "",
         activeProvider: meta.activeProvider ?? "",
+        timestamp: meta.ts,
+        date: new Date(meta.ts).toLocaleString(),
         updatedAt: meta.updatedAt ?? meta.ts,
+        updatedDate: new Date(meta.updatedAt ?? meta.ts).toLocaleString(),
       }
     })
     .sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
-/** Switch active slot. Returns the loaded session data (null if slot doesn't exist). */
+/** Switch active slot. Returns the loaded session data (null if slot doesn't exist). Same as CLI switchToSlot. */
 export function switchToSlot(cwd, slot) {
   const m = loadManifest(cwd)
   if (!m.slots[slot]) return null
@@ -138,7 +178,7 @@ export function newSlot(cwd) {
   const data = {
     version: 2, cwd, title: "", updatedAt: Date.now(),
     history: [], contextHistory: [], display: [], tasks: [],
-    goal: null, autoApprove: false, advisor: null, pendingReminders: [], sessionStart: null,
+    planMode: false, goal: null, autoApprove: false, advisor: null, pendingReminders: [], sessionStart: null,
   }
   saveSlot(cwd, slot, data)
   m.slots[slot] = { ts: Date.now(), ...extractSlotMeta([], "", data.updatedAt, "") }
@@ -163,6 +203,7 @@ export function deleteSlotAndUpdate(cwd, slot) {
   deleteSlot(cwd, slot)
   const m = loadManifest(cwd)
   delete m.slots[slot]
+  if (m.slotSessions) delete m.slotSessions[slot]
   if (m.active === slot) {
     const remaining = Object.keys(m.slots).filter((n) => /^\d+$/.test(n)).map(Number).sort((a, b) => a - b)
     m.active = remaining[0] ?? null
@@ -187,12 +228,65 @@ export function setSlotTitle(cwd, slot, title) {
   }
 }
 
-/** Get the active slot number (fall back to first available, or 1 if none). */
+/**
+ * Check if a process with given PID is still alive (same as CLI session.mjs).
+ * Returns false if process doesn't exist or we can't determine.
+ */
+function isProcessAlive(pid) {
+  if (!pid || isNaN(pid)) return false
+  try {
+    if (process.platform === "win32") {
+      const output = execSync(`tasklist /FI "PID eq ${pid}" /NH`, { encoding: "utf8", stdio: "pipe" })
+      return output.includes(String(pid))
+    }
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Ensure an active slot exists in the manifest, claiming ownership for this process.
+ * Mirrors CLI ensureActive: reuses our own slot, claims empty slots, reclaims slots
+ * owned by dead processes, allocates a new slot when all are busy. Idempotent.
+ */
+function ensureActive(cwd, m) {
+  const mySessionId = getSessionId()
+  if (!m.slotSessions) m.slotSessions = {}
+  if (m.active && m.slotSessions[m.active] === mySessionId) return
+
+  const allSlots = Object.keys(m.slots).filter((n) => /^\d+$/.test(n)).map(Number).sort((a, b) => a - b)
+  for (const slot of allSlots) {
+    const ownerSessionId = m.slotSessions[slot]
+    if (!ownerSessionId) {
+      m.active = slot
+      m.slotSessions[slot] = mySessionId
+      saveManifest(cwd, m)
+      return
+    }
+    if (ownerSessionId !== mySessionId) {
+      const ownerPid = parseInt(ownerSessionId.split("-")[0])
+      if (!isProcessAlive(ownerPid)) {
+        m.active = slot
+        m.slotSessions[slot] = mySessionId
+        saveManifest(cwd, m)
+        return
+      }
+    }
+  }
+  // All slots busy with live processes — allocate a new one (no limit)
+  const newSlot = allSlots.length > 0 ? Math.max(...allSlots) + 1 : 1
+  m.active = newSlot
+  m.slotSessions[newSlot] = mySessionId
+  saveManifest(cwd, m)
+}
+
+/** Get the active slot number, claiming one for this process if needed (same as CLI activeSlot). */
 export function activeSlot(cwd) {
   const m = loadManifest(cwd)
-  if (m.active && m.slots[m.active]) return m.active
-  const slots = Object.keys(m.slots).filter((n) => /^\d+$/.test(n)).map(Number).sort((a, b) => a - b)
-  return slots[0] ?? 1
+  if (!m.active) ensureActive(cwd, m)
+  return m.active
 }
 
 // ─── Model prefs (workspaceState, unrelated to session files) ──

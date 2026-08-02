@@ -174,6 +174,9 @@ export class ChatPanel {
       activeProvider: extra.activeProvider ?? existing.activeProvider ?? "",
       history: fullHistory, contextHistory,
       display: existing.display ?? [], tasks: extra.tasks ?? existing.tasks ?? [],
+      planMode: existing.planMode ?? false, goal: existing.goal ?? null,
+      autoApprove: existing.autoApprove ?? false, advisor: existing.advisor ?? null,
+      pendingReminders: existing.pendingReminders ?? [], sessionStart: existing.sessionStart ?? null,
     })
   }
 
@@ -215,7 +218,9 @@ export class ChatPanel {
       if (!data || data.title) return  // Already titled
       const firstUser = (data.history ?? []).find((m) => (m.type ?? m.role) === "user")
       if (!firstUser) return
-      const title = await generateTitle(firstUser.content, firstUser.provider, firstUser.model)
+      // Provider comes from persisted session data (written by _saveLines on each turn),
+      // not the message (runAgent never stamps provider/model onto history entries).
+      const title = await generateTitle(firstUser.content, data.activeProvider || undefined)
       if (title) {
         setSlotTitle(cwd, slot, title)
         this._pushSessions()
@@ -227,9 +232,11 @@ export class ChatPanel {
 
   _pushSessions() {
     const cwd = _cwd()
+    // Same label fallback chain as CLI /session: title → firstMessage quote → "(empty)"
+    const truncate = (s, n) => s.length <= n ? s : s.slice(0, n - 1) + "…"
     const sessions = listSlots(cwd).map((s) => ({
       slot: s.slot,
-      title: s.title || `Session ${s.slot}`,
+      title: s.title || (s.firstMessage ? `"${truncate(s.firstMessage, 40)}"` : "(empty)"),
       count: s.messageCount,
       updated: s.updatedAt,
       active: s.isActive,

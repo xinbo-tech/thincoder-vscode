@@ -108,14 +108,33 @@ describe("session-io — shared slot format (CLI-compatible)", () => {
     assert.equal(m.slots[1].title, "My Title")
   })
 
-  it("activeSlot falls back to first slot, then 1", () => {
-    assert.equal(activeSlot(cwd), 1) // No manifest → 1
-    newSlot(cwd)
-    newSlot(cwd)
+  it("activeSlot claims a slot for this process (ensureActive semantics, same as CLI)", () => {
+    assert.equal(activeSlot(cwd), 1) // No manifest → claims slot 1
+    // Claim recorded in slotSessions
     const m = loadManifest(cwd)
-    m.active = 99 // Invalid
-    saveManifest(cwd, m)
-    assert.equal(activeSlot(cwd), 1) // Falls back to first
+    assert.equal(m.active, 1)
+    assert.ok(m.slotSessions[1], "ownership recorded in slotSessions")
+    // newSlot sets active but does NOT claim ownership (same as CLI).
+    // Slot 1 is still free (ensureActive only set m.active, not m.slots[1]), so it allocates slot 1.
+    const n = newSlot(cwd)
+    assert.equal(n, 1)
+    const m2 = loadManifest(cwd)
+    assert.equal(m2.active, 1)
+    // Ownership stays with the earlier ensureActive claim — newSlot didn't touch it
+    assert.ok(m2.slotSessions[1], "ownership was claimed by the earlier activeSlot call")
+  })
+
+  it("activeSlot returns the existing active pointer without re-scanning (CLI parity)", () => {
+    newSlot(cwd)
+    newSlot(cwd) // active=2, but no ownership claimed (newSlot doesn't claim, same as CLI)
+    // Manifest has no slotSessions — ownership is only claimed when m.active is falsy
+    const before = loadManifest(cwd)
+    assert.equal(before.slotSessions, undefined)
+    // m.active is set → returned as-is; ensureActive is NOT called, no claim written
+    assert.equal(activeSlot(cwd), 2)
+    const m = loadManifest(cwd)
+    assert.equal(m.active, 2)
+    assert.equal(m.slotSessions, undefined, "no claim written when active pointer already set (CLI parity)")
   })
 
   it("extractSlotMeta counts real user messages, skips system reminders", () => {
