@@ -33,7 +33,7 @@ const ctx = {
   _toolRefs: {}, // tool id → ref, for O(1) finishTool lookup
   _models: [],
   selectedModel: "", selectedProvider: "", selectedReasoning: "max",
-  _sessions: [], activeSession: "",
+  _sessions: [], activeSession: 0,
   _pastedImages: [],
 }
 
@@ -123,15 +123,13 @@ function buildSessionDropdown() {
     }
     item.addEventListener("click", (e) => {
       if (e.target.closest(".session-delete")) return
-      const inputText = ctx.inputEl.value.trim()
-      if (inputText && !confirm(t("session.switchConfirm") || "Switch session? Unsent message will be lost.")) return
-      vscode.postMessage({ type: "switchSession", name: s.name })
+      vscode.postMessage({ type: "switchSession", slot: s.slot })
       ctx.sessionDropdown.style.display = "none"
     })
-    item.querySelector(".session-delete").addEventListener("click", (e) => {
+    const delBtn = item.querySelector(".session-delete")
+    if (delBtn) delBtn.addEventListener("click", (e) => {
       e.stopPropagation()
-      if (!confirm(t("session.deleteConfirm") || "Delete session \"" + s.title + "\"? This cannot be undone.")) return
-      vscode.postMessage({ type: "deleteSession", name: s.name })
+      vscode.postMessage({ type: "deleteSession", slot: s.slot })
     })
     ctx.sessionDropdown.appendChild(item)
   }
@@ -514,7 +512,7 @@ window.addEventListener("message", (e) => {
       break
     case "sessions":
       ctx._sessions = m.sessions || []
-      ctx.activeSession = m.active || ""
+      ctx.activeSession = m.active || 0
       updateSessionTitle()
       break
     case "models":

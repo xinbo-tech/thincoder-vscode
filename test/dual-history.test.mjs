@@ -1,129 +1,158 @@
-/**
- * dual-history.test.mjs — Dual-structure session persistence (human line + machine line).
- * Verifies the VS Code extension's session-io aligns with the CLI's dual-line model:
- *   saveMessages writes both `messages` (human/fullHistory) and `contextHistory` (machine);
- *   loadSessionLines restores both, seeding the machine line from the human line for legacy files.
- * Pure Node.js, local temp dirs only — no global home dir, no VS Code, no API keys.
- * Run: node --test test/dual-history.test.mjs
- */
-import { describe, it, after } from "node:test"
+import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, utimesSync } from "node:fs"
+import { mkdtempSync, rmSync, existsSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
-import { loadSessionLines, loadMessages, saveMessages, msgPath, listSessions } from "../src/extension/session-io.mjs"
+import {
+  slotPath, manifestPath, loadManifest, saveManifest,
+  loadSlot, saveSlot, deleteSlot, extractSlotMeta,
+  listSlots, switchToSlot, newSlot, saveSessionToSlot,
+  deleteSlotAndUpdate, setSlotTitle, activeSlot,
+} from "../src/extension/session-io.mjs"
 
-const TOOL_CALL = { id: "call_1", type: "function", function: { name: "noop", arguments: "{}" } }
+let tmp, cwd
 
-const dirs = []
-function tmp() {
-  const d = mkdtempSync(join(tmpdir(), "thincoder-vscode-dual-"))
-  dirs.push(d)
-  return d
+function setup() {
+  tmp = mkdtempSync(join(tmpdir(), "thincoder-vscode-test-"))
+  cwd = tmp // Use the tmp dir as cwd so sessions land in a test-specific hash
 }
-after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }) })
 
-describe("session-io — dual-field persistence", () => {
-  it("saveMessages writes both messages + contextHistory; loadSessionLines restores both lines", () => {
-    const dir = tmp()
-    const human = [
-      { role: "user", type: "user", content: "q1", timestamp: "2026-01-01T00:00:00.000Z" },
-      { role: "assistant", content: "a1", tool_calls: [TOOL_CALL] },
-      { role: "tool", tool_call_id: "call_1", content: "tool out" },
-      { role: "assistant", type: "assistant", content: "done", timestamp: "2026-01-01T00:00:01.000Z" },
+function cleanup() {
+  rmSync(tmp, { recursive: true, force: true })
+}
+
+describe("session-io — shared slot format (CLI-compatible)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("newSlot creates slot 1 with empty session and sets active", () => {
+    const n = newSlot(cwd)
+    assert.equal(n, 1)
+    const data = loadSlot(cwd, 1)
+    assert.equal(data.version, 2)
+    assert.deepEqual(data.history, [])
+    assert.equal(data.title, "")
+    const m = loadManifest(cwd)
+    assert.equal(m.active, 1)
+    assert.ok(m.slots[1])
+  })
+
+  it("newSlot allocates sequential slot numbers", () => {
+    newSlot(cwd)
+    const n2 = newSlot(cwd)
+    assert.equal(n2, 2)
+    const m = loadManifest(cwd)
+    assert.equal(m.active, 2)
+  })
+
+  it("saveSessionToSlot persists data + updates manifest metadata", () => {
+    newSlot(cwd)
+    const history = [
+      { role: "user", content: "fix the login bug" },
+      { role: "assistant", content: "I'll fix it." },
     ]
-    const machine = [{ role: "user", content: "[System reminder: AUTO mode is active]" }, ...human]
-    saveMessages(dir, "S", human, machine)
-
-    // Raw file is the dual-field object shape
-    const raw = JSON.parse(readFileSync(msgPath(dir, "S"), "utf8"))
-    assert.ok(Array.isArray(raw.messages), "messages field persisted")
-    assert.ok(Array.isArray(raw.contextHistory), "contextHistory field persisted")
-    assert.equal(raw.messages.length, human.length)
-    assert.equal(raw.contextHistory.length, machine.length)
-
-    const lines = loadSessionLines(dir, "S")
-    assert.equal(lines.messages.length, human.length)
-    assert.equal(lines.contextHistory.length, machine.length)
-    assert.ok(lines.contextHistory[0].content.startsWith("[System reminder:"), "machine line keeps injections")
-    assert.ok(!lines.messages.some((m) => String(m.content).startsWith("[System reminder:")), "human line has no injections")
-    // tool_calls / tool_call_id / timestamp survive the round-trip
-    assert.deepEqual(lines.messages[1].tool_calls, human[1].tool_calls)
-    assert.equal(lines.messages[2].tool_call_id, "call_1")
-    assert.equal(lines.messages[0].timestamp, "2026-01-01T00:00:00.000Z")
+    saveSessionToSlot(cwd, 1, { version: 2, cwd, title: "Login fix", history, contextHistory: history, activeProvider: "deepseek" })
+    const m = loadManifest(cwd)
+    assert.equal(m.slots[1].title, "Login fix")
+    assert.equal(m.slots[1].turnCount, 1)
+    assert.equal(m.slots[1].messageCount, 2)
+    assert.equal(m.slots[1].firstMessage, "fix the login bug")
+    assert.equal(m.slots[1].activeProvider, "deepseek")
   })
 
-  it("legacy bare-array file seeds the machine line from the human line (null contextHistory)", () => {
-    const dir = tmp()
-    const human = [{ role: "user", type: "user", content: "legacy msg" }]
-    saveMessages(dir, "S", human) // no contextHistory → legacy single-field write
-    const raw = JSON.parse(readFileSync(msgPath(dir, "S"), "utf8"))
-    assert.ok(Array.isArray(raw), "legacy file is a bare array")
-
-    const lines = loadSessionLines(dir, "S")
-    assert.equal(lines.messages.length, 1)
-    assert.equal(lines.contextHistory, null, "legacy file reports null machine line (caller seeds from human)")
+  it("listSlots returns slots sorted by updatedAt desc (newest first)", () => {
+    newSlot(cwd)
+    newSlot(cwd)
+    // Manually set different updatedAt
+    const m = loadManifest(cwd)
+    m.slots[1].updatedAt = 1000
+    m.slots[2].updatedAt = 2000
+    saveManifest(cwd, m)
+    const slots = listSlots(cwd)
+    assert.equal(slots[0].slot, 2)
+    assert.equal(slots[1].slot, 1)
+    assert.equal(slots[0].isActive, true)
   })
 
-  it("legacy object file with only messages yields null contextHistory", () => {
-    const dir = tmp()
-    saveMessages(dir, "S", [{ role: "user", content: "only human" }])
-    const lines = loadSessionLines(dir, "S")
-    assert.equal(lines.contextHistory, null)
-    assert.deepEqual(lines.messages, [{ role: "user", content: "only human" }])
+  it("switchToSlot changes active pointer and returns data", () => {
+    newSlot(cwd)
+    newSlot(cwd)
+    const data = switchToSlot(cwd, 1)
+    assert.ok(data)
+    const m = loadManifest(cwd)
+    assert.equal(m.active, 1)
   })
 
-  it("multimodal content (image parts) is kept verbatim through save/load", () => {
-    const dir = tmp()
-    const img = { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }
-    const human = [{ role: "user", content: [{ type: "text", text: "look" }, img] }]
-    saveMessages(dir, "S", human, human)
-    const lines = loadSessionLines(dir, "S")
-    assert.ok(Array.isArray(lines.messages[0].content), "multimodal array preserved")
-    assert.deepEqual(lines.messages[0].content[1], img)
+  it("switchToSlot returns null for non-existent slot", () => {
+    newSlot(cwd)
+    assert.equal(switchToSlot(cwd, 99), null)
   })
 
-  it("loadMessages (UI) returns only the human line", () => {
-    const dir = tmp()
-    const human = [{ role: "user", type: "user", content: "hi" }]
-    const machine = [{ role: "user", content: "[System reminder: x]" }, ...human]
-    saveMessages(dir, "S", human, machine)
-    const msgs = loadMessages(dir, "S")
-    assert.equal(msgs.length, human.length, "UI line excludes machine injections")
-    assert.ok(!msgs.some((m) => String(m.content).startsWith("[System reminder:")))
+  it("deleteSlotAndUpdate removes slot and picks new active", () => {
+    newSlot(cwd)
+    newSlot(cwd)
+    const newActive = deleteSlotAndUpdate(cwd, 2)
+    assert.equal(newActive, 1)
+    assert.equal(existsSync(slotPath(cwd, 2)), false)
+    const m = loadManifest(cwd)
+    assert.equal(m.slots[2], undefined)
   })
 
-  it("missing session file returns empty lines", () => {
-    const dir = tmp()
-    const lines = loadSessionLines(dir, "nonexistent")
-    assert.deepEqual(lines.messages, [])
-    assert.equal(lines.contextHistory, null)
-  })
-})
-
-describe("session-io — listSessions (filesystem as source of truth)", () => {
-  it("decodes base64url filenames to session names, ordered by mtime (creation order)", () => {
-    const dir = tmp()
-    saveMessages(dir, "Session 2", [{ role: "user", content: "b" }])
-    saveMessages(dir, "Session 1", [{ role: "user", content: "a" }])
-    // Force deterministic mtimes: Session 1 older than Session 2
-    utimesSync(msgPath(dir, "Session 1"), new Date(1000), new Date(1000))
-    utimesSync(msgPath(dir, "Session 2"), new Date(2000), new Date(2000))
-    assert.deepEqual(listSessions(dir), ["Session 1", "Session 2"])
+  it("setSlotTitle updates both slot file and manifest", () => {
+    newSlot(cwd)
+    setSlotTitle(cwd, 1, "My Title")
+    const data = loadSlot(cwd, 1)
+    assert.equal(data.title, "My Title")
+    const m = loadManifest(cwd)
+    assert.equal(m.slots[1].title, "My Title")
   })
 
-  it("decodes non-ASCII (e.g. Chinese) session titles", () => {
-    const dir = tmp()
-    saveMessages(dir, "修复登录bug", [{ role: "user", content: "x" }])
-    assert.deepEqual(listSessions(dir), ["修复登录bug"])
+  it("activeSlot falls back to first slot, then 1", () => {
+    assert.equal(activeSlot(cwd), 1) // No manifest → 1
+    newSlot(cwd)
+    newSlot(cwd)
+    const m = loadManifest(cwd)
+    m.active = 99 // Invalid
+    saveManifest(cwd, m)
+    assert.equal(activeSlot(cwd), 1) // Falls back to first
   })
 
-  it("ignores non-.json files and returns [] for empty/missing directory", () => {
-    const dir = tmp()
-    writeFileSync(join(dir, "stray.txt"), "not a session")
-    saveMessages(dir, "S", [{ role: "user", content: "x" }])
-    assert.deepEqual(listSessions(dir), ["S"])
-    assert.deepEqual(listSessions(join(dir, "does-not-exist")), [])
+  it("extractSlotMeta counts real user messages, skips system reminders", () => {
+    const history = [
+      { role: "user", content: "hello" },
+      { role: "user", content: "[System reminder: foo]" },
+      { role: "assistant", content: "hi" },
+      { role: "user", content: "world" },
+    ]
+    const meta = extractSlotMeta(history, "test", 5000, "T")
+    assert.equal(meta.turnCount, 2)
+    assert.equal(meta.messageCount, 4)
+    assert.equal(meta.firstMessage, "hello")
+    assert.equal(meta.title, "T")
+  })
+
+  it("slotPath and manifestPath use sha1(cwd) hash", () => {
+    const sp = slotPath("/some/dir", 3)
+    const mp = manifestPath("/some/dir")
+    assert.ok(sp.endsWith(".3"))
+    assert.ok(mp.endsWith(".manifest"))
+    assert.ok(sp.includes(".thincoder"))
+    assert.ok(mp.includes(".thincoder"))
+  })
+
+  it("deleteSlot removes the file without touching manifest", () => {
+    newSlot(cwd)
+    deleteSlot(cwd, 1)
+    assert.equal(existsSync(slotPath(cwd, 1)), false)
+    const m = loadManifest(cwd)
+    assert.ok(m.slots[1]) // Manifest still has it (deleteSlot is low-level)
+  })
+
+  it("loadSlot returns null for missing/corrupted/version-mismatch", () => {
+    assert.equal(loadSlot(cwd, 99), null)
+    // Write a bad file
+    saveSlot(cwd, 5, { version: 99, history: [] })
+    assert.equal(loadSlot(cwd, 5), null)
   })
 })

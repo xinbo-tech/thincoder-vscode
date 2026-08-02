@@ -5,12 +5,11 @@
 import * as vscode from "vscode"
 import { readFileSync, existsSync } from "node:fs"
 import { join, dirname } from "node:path"
-import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { runAgent } from "../agent.mjs"
 import { closeAllMcp } from "../mcp.mjs"
 import { providerNames, getKey, buildProvider, initProviderKeyStore, loadProviderKeyCache } from "./presets.mjs"
-import { loadMessages, saveMessages, loadSessionLines, deleteMessages, renameMessages, listSessions, sessionsKey, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
+import { listSlots, loadSlot, saveSessionToSlot, newSlot, switchToSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
 import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer } from "./settings.mjs"
 import { generateTitle } from "./generate-title.mjs"
 import { injectEditorContext } from "./editor-context.mjs"
@@ -23,18 +22,14 @@ import { getEmbedder, setVSCodeEmbedder, resetEmbedder } from "../embed-config.m
 import { buildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../indexer.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const _sessionKey = () => sessionsKey(vscode.workspace.workspaceFolders)
+
+/** Workspace cwd used to key sessions (shared with the CLI — same cwd hash → same session files). */
+const _cwd = () => vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
 
 export class ChatPanel {
   /** @param {vscode.ExtensionContext} context */
   constructor(context) {
     this._context = context
-    try {
-      this._msgDir = join(context.globalStorageUri.fsPath, "messages")
-    } catch (e) {
-      console.error("[chat-panel] failed to init msgDir:", e.message)
-      this._msgDir = join(context.extensionUri.fsPath, "messages")
-    }
     this._panel = null
     this._abortController = null
     this._permissionQueue = []
@@ -90,14 +85,14 @@ export class ChatPanel {
         }
         case "newSession": this._newSession(); break
         case "switchSession": {
-          this._context.workspaceState.update(_sessionKey(), msg.name)
+          switchToSlot(_cwd(), msg.slot)
           await this._loadSession()
           break
         }
-        case "deleteSession": await this._deleteSession(msg.name); break
+        case "deleteSession": await this._deleteSession(msg.slot); break
         case "retry": {
           const history = this._activeHistory()
-          const lastUser = [...history].reverse().find((m) => m.type === "user")
+          const lastUser = [...history].reverse().find((m) => (m.type ?? m.role) === "user")
           if (lastUser) this._chat(lastUser.content, lastUser.provider, undefined, lastUser.provider)
           break
         }
@@ -150,31 +145,36 @@ export class ChatPanel {
 
   // ─── Session ───────────────────────────────────
 
-  _activeName() {
-    const key = _sessionKey()
-    const result = this._context.workspaceState.get(key, "default")
-    if (typeof result !== "string") {
-      return "default"
-    }
-    return result
+  /** Active slot data (full session object) or null. */
+  _activeData() {
+    return loadSlot(_cwd(), activeSlot(_cwd()))
   }
 
+  /** Human line (history) of the active session. */
   _activeHistory() {
-    return loadMessages(this._msgDir, this._activeName())
+    return this._activeData()?.history ?? []
   }
 
-  /** Load both persisted lines for the active session: human (fullHistory) + machine (contextHistory). */
+  /** Load both persisted lines for the active session: human (history) + machine (contextHistory). */
   _activeLines() {
-    return loadSessionLines(this._msgDir, this._activeName())
+    const data = this._activeData()
+    const history = data?.history ?? []
+    const contextHistory = Array.isArray(data?.contextHistory) ? data.contextHistory : [...history]
+    return { fullHistory: history, contextHistory }
   }
 
-  /** Persist both lines. contextHistory omitted (null) for legacy single-line writes. */
-  _saveLines(messages, contextHistory = null) {
-    saveMessages(this._msgDir, this._activeName(), messages, contextHistory)
-  }
-
-  _saveHistory(history) {
-    saveMessages(this._msgDir, this._activeName(), history)
+  /** Persist both lines to the active slot + update manifest metadata. */
+  _saveLines(fullHistory, contextHistory, extra = {}) {
+    const cwd = _cwd()
+    const slot = activeSlot(cwd)
+    const existing = loadSlot(cwd, slot) ?? {}
+    saveSessionToSlot(cwd, slot, {
+      version: 2, cwd, updatedAt: Date.now(),
+      title: existing.title ?? "",
+      activeProvider: extra.activeProvider ?? existing.activeProvider ?? "",
+      history: fullHistory, contextHistory,
+      display: existing.display ?? [], tasks: extra.tasks ?? existing.tasks ?? [],
+    })
   }
 
   _loadModelPrefs() {
@@ -195,46 +195,30 @@ export class ChatPanel {
   }
 
   async _newSession() {
-    const names = listSessions(this._msgDir)
-    // Generate next session number: "Session 2", "Session 3", ...
-    let n = names.length + 1
-    while (names.includes(`Session ${n}`)) n++
-    const newName = `Session ${n}`
-    // Set as active; the session file is created on first save (filesystem is the source of truth)
-    this._context.workspaceState.update(_sessionKey(), newName)
+    newSlot(_cwd())
     this._loadSession()
   }
 
-  async _deleteSession(name) {
-    if (typeof name !== "string" || !name) return
-    const names = listSessions(this._msgDir)
-    if (names.length <= 1) return  // Keep at least one session
-    // Delete the file (the source of truth)
-    deleteMessages(this._msgDir, name)
-    const updated = names.filter((n) => n !== name)
-    // If deleting the active session, switch to another
-    if (this._activeName() === name) {
-      const next = updated[0] || "Session 1"
-      this._context.workspaceState.update(_sessionKey(), next)
-    }
+  async _deleteSession(slot) {
+    if (typeof slot !== "number" || slot < 1) return
+    const slots = listSlots(_cwd())
+    if (slots.length <= 1) return  // Keep at least one session
+    deleteSlotAndUpdate(_cwd(), slot)
     this._loadSession()
   }
 
   async _generateTitle() {
     try {
-      const history = this._activeHistory()
-      const firstUser = history.find((m) => m.type === "user")
+      const cwd = _cwd()
+      const slot = activeSlot(cwd)
+      const data = loadSlot(cwd, slot)
+      if (!data || data.title) return  // Already titled
+      const firstUser = (data.history ?? []).find((m) => (m.type ?? m.role) === "user")
       if (!firstUser) return
       const title = await generateTitle(firstUser.content, firstUser.provider, firstUser.model)
       if (title) {
-        const oldName = this._activeName()
-        const names = listSessions(this._msgDir)
-        if (names.includes(oldName)) {
-          // Rename the file on disk (the source of truth) and follow the active pointer
-          renameMessages(this._msgDir, oldName, title)
-          this._context.workspaceState.update(_sessionKey(), title)
-          this._pushSessions()
-        }
+        setSlotTitle(cwd, slot, title)
+        this._pushSessions()
       }
     } catch (e) {
       console.error("[chat-panel] generateTitle failed:", e.message)
@@ -242,19 +226,15 @@ export class ChatPanel {
   }
 
   _pushSessions() {
-    const names = listSessions(this._msgDir)
-    const sessions = names.map((n) => {
-      const msgs = loadMessages(this._msgDir, n)
-      const last = msgs.at(-1)
-      return {
-        name: n,
-        title: n,
-        count: msgs.length,
-        updated: last?.timestamp,
-        active: n === this._activeName(),
-      }
-    })
-    this._panel?.webview.postMessage({ type: "sessions", sessions, active: this._activeName() })
+    const cwd = _cwd()
+    const sessions = listSlots(cwd).map((s) => ({
+      slot: s.slot,
+      title: s.title || `Session ${s.slot}`,
+      count: s.messageCount,
+      updated: s.updatedAt,
+      active: s.isActive,
+    }))
+    this._panel?.webview.postMessage({ type: "sessions", sessions, active: activeSlot(cwd) })
   }
 
   _pushMcpStatus() {
@@ -330,14 +310,10 @@ export class ChatPanel {
   }
 
   async _status() {
-    // Filesystem is the source of truth: point the active name at a real session on disk.
-    // If the stored active name is missing/unset, fall back to the first session on disk,
-    // or "Session 1" when the directory is empty (created on first save).
-    const names = listSessions(this._msgDir)
-    const active = this._activeName()
-    if (active === "default" || !names.includes(active)) {
-      this._context.workspaceState.update(_sessionKey(), names[0] || "Session 1")
-    }
+    // Ensure at least one session slot exists (shared format with the CLI)
+    const cwd = _cwd()
+    const slots = listSlots(cwd)
+    if (slots.length === 0) newSlot(cwd)
     this._pushSessions()
     this._loadSession()
     initProviderKeyStore(this._context.secrets)
@@ -484,9 +460,9 @@ export class ChatPanel {
     // history = machine line (compaction shrinks it); old sessions fall back to the human line.
     // runAgent appends this turn's real messages (user input, assistant replies, tool results) to
     // both lines via its internal pushReal — chat-panel only supplies the lines and persists them.
-    const { messages: fullHistory, contextHistory } = this._activeLines()
+    const { fullHistory, contextHistory } = this._activeLines()
     const history = Array.isArray(contextHistory) ? contextHistory : [...fullHistory]
-    const isFirstMessage = fullHistory.filter((m) => m.type === "user").length === 0
+    const isFirstMessage = fullHistory.filter((m) => (m.type ?? m.role) === "user").length === 0
 
     // Persist model selection
     const prefs = { model: modelOverride || p.model, provider: providerName, reasoning: reasoning || "" }
@@ -527,7 +503,7 @@ export class ChatPanel {
         onToolPanel: (name, text) => this._panel?.webview.postMessage({ type: "toolPanel", name, text }),
         onComplete: () => {
           // runAgent already appended the real messages to both lines via pushReal; just persist them.
-          this._saveLines(fullHistory, history)
+          this._saveLines(fullHistory, history, { activeProvider: providerName })
           this._panel?.webview.postMessage({ type: "complete" })
           this._pushSessions()
         },
