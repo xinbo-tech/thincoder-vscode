@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url"
 import { runAgent } from "../agent.mjs"
 import { closeAllMcp } from "../mcp.mjs"
 import { providerNames, getKey, buildProvider, initProviderKeyStore, loadProviderKeyCache } from "./presets.mjs"
-import { loadMessages, saveMessages, loadSessionLines, deleteMessages, renameMessages, loadIndex, saveIndex, sessionsKey, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
+import { loadMessages, saveMessages, loadSessionLines, deleteMessages, renameMessages, listSessions, sessionsKey, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
 import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer } from "./settings.mjs"
 import { generateTitle } from "./generate-title.mjs"
 import { injectEditorContext } from "./editor-context.mjs"
@@ -24,7 +24,6 @@ import { buildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../index
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const _sessionKey = () => sessionsKey(vscode.workspace.workspaceFolders)
-const _indexKey = () => _sessionKey() + ".index"
 
 export class ChatPanel {
   /** @param {vscode.ExtensionContext} context */
@@ -196,27 +195,23 @@ export class ChatPanel {
   }
 
   async _newSession() {
-    const names = loadIndex(this._context.workspaceState, _indexKey())
+    const names = listSessions(this._msgDir)
     // Generate next session number: "Session 2", "Session 3", ...
     let n = names.length + 1
     while (names.includes(`Session ${n}`)) n++
     const newName = `Session ${n}`
-    // Add to index and save
-    const updated = [...names, newName]
-    saveIndex(this._context.workspaceState, _indexKey(), updated)
-    // Set as active
+    // Set as active; the session file is created on first save (filesystem is the source of truth)
     this._context.workspaceState.update(_sessionKey(), newName)
     this._loadSession()
   }
 
   async _deleteSession(name) {
     if (typeof name !== "string" || !name) return
-    const names = loadIndex(this._context.workspaceState, _indexKey())
+    const names = listSessions(this._msgDir)
     if (names.length <= 1) return  // Keep at least one session
-    // Delete file and remove from index
+    // Delete the file (the source of truth)
     deleteMessages(this._msgDir, name)
     const updated = names.filter((n) => n !== name)
-    saveIndex(this._context.workspaceState, _indexKey(), updated)
     // If deleting the active session, switch to another
     if (this._activeName() === name) {
       const next = updated[0] || "Session 1"
@@ -232,14 +227,11 @@ export class ChatPanel {
       if (!firstUser) return
       const title = await generateTitle(firstUser.content, firstUser.provider, firstUser.model)
       if (title) {
-        const names = loadIndex(this._context.workspaceState, _indexKey())
         const oldName = this._activeName()
-        const idx = names.indexOf(oldName)
-        if (idx >= 0) {
-          // Rename file on disk and update index
+        const names = listSessions(this._msgDir)
+        if (names.includes(oldName)) {
+          // Rename the file on disk (the source of truth) and follow the active pointer
           renameMessages(this._msgDir, oldName, title)
-          names[idx] = title
-          saveIndex(this._context.workspaceState, _indexKey(), names)
           this._context.workspaceState.update(_sessionKey(), title)
           this._pushSessions()
         }
@@ -250,7 +242,7 @@ export class ChatPanel {
   }
 
   _pushSessions() {
-    const names = loadIndex(this._context.workspaceState, _indexKey())
+    const names = listSessions(this._msgDir)
     const sessions = names.map((n) => {
       const msgs = loadMessages(this._msgDir, n)
       const last = msgs.at(-1)
@@ -338,17 +330,13 @@ export class ChatPanel {
   }
 
   async _status() {
-    // Auto-initialize: if no active session stored, default to first session
-    if (this._activeName() === "default") {
-      this._context.workspaceState.update(_sessionKey(), "Session 1")
-      saveIndex(this._context.workspaceState, _indexKey(), ["Session 1"])
-    }
-    // Migration: ensure active session exists in the index (fixes old data where
-    // active session and index shared the same key, so they clobbered each other)
+    // Filesystem is the source of truth: point the active name at a real session on disk.
+    // If the stored active name is missing/unset, fall back to the first session on disk,
+    // or "Session 1" when the directory is empty (created on first save).
+    const names = listSessions(this._msgDir)
     const active = this._activeName()
-    const names = loadIndex(this._context.workspaceState, _indexKey())
-    if (active !== "default" && !names.includes(active)) {
-      saveIndex(this._context.workspaceState, _indexKey(), [...names, active])
+    if (active === "default" || !names.includes(active)) {
+      this._context.workspaceState.update(_sessionKey(), names[0] || "Session 1")
     }
     this._pushSessions()
     this._loadSession()

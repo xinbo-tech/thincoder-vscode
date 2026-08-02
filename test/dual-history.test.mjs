@@ -8,11 +8,11 @@
  */
 import { describe, it, after } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync, readFileSync } from "node:fs"
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, utimesSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
-import { loadSessionLines, loadMessages, saveMessages, msgPath } from "../src/extension/session-io.mjs"
+import { loadSessionLines, loadMessages, saveMessages, msgPath, listSessions } from "../src/extension/session-io.mjs"
 
 const TOOL_CALL = { id: "call_1", type: "function", function: { name: "noop", arguments: "{}" } }
 
@@ -99,5 +99,31 @@ describe("session-io — dual-field persistence", () => {
     const lines = loadSessionLines(dir, "nonexistent")
     assert.deepEqual(lines.messages, [])
     assert.equal(lines.contextHistory, null)
+  })
+})
+
+describe("session-io — listSessions (filesystem as source of truth)", () => {
+  it("decodes base64url filenames to session names, ordered by mtime (creation order)", () => {
+    const dir = tmp()
+    saveMessages(dir, "Session 2", [{ role: "user", content: "b" }])
+    saveMessages(dir, "Session 1", [{ role: "user", content: "a" }])
+    // Force deterministic mtimes: Session 1 older than Session 2
+    utimesSync(msgPath(dir, "Session 1"), new Date(1000), new Date(1000))
+    utimesSync(msgPath(dir, "Session 2"), new Date(2000), new Date(2000))
+    assert.deepEqual(listSessions(dir), ["Session 1", "Session 2"])
+  })
+
+  it("decodes non-ASCII (e.g. Chinese) session titles", () => {
+    const dir = tmp()
+    saveMessages(dir, "修复登录bug", [{ role: "user", content: "x" }])
+    assert.deepEqual(listSessions(dir), ["修复登录bug"])
+  })
+
+  it("ignores non-.json files and returns [] for empty/missing directory", () => {
+    const dir = tmp()
+    writeFileSync(join(dir, "stray.txt"), "not a session")
+    saveMessages(dir, "S", [{ role: "user", content: "x" }])
+    assert.deepEqual(listSessions(dir), ["S"])
+    assert.deepEqual(listSessions(join(dir, "does-not-exist")), [])
   })
 })

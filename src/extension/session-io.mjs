@@ -3,13 +3,30 @@
  * Extracted from extension.mjs ChatPanel class.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from "node:fs"
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 
 /** Encode a session name to a safe filename */
 export function msgPath(msgDir, name) {
   const safe = Buffer.from(String(name)).toString("base64url")
   return join(msgDir, `${safe}.json`)
+}
+
+/** List session names from the messages directory (filesystem is the source of truth).
+ *  Name = base64url-decoded filename; order = file mtime ascending (creation order). */
+export function listSessions(msgDir) {
+  try {
+    return readdirSync(msgDir)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        let mtime = 0
+        try { mtime = statSync(join(msgDir, f)).mtimeMs } catch {}
+        return { name: Buffer.from(f.slice(0, -5), "base64url").toString("utf8"), mtime }
+      })
+      .filter((s) => s.name)
+      .sort((a, b) => a.mtime - b.mtime)
+      .map((s) => s.name)
+  } catch { return [] }
 }
 
 /** Read a session file: returns { messages (human line), contextHistory (machine line) } */
@@ -44,24 +61,6 @@ export function saveMessages(msgDir, name, messages, contextHistory = null) {
 /** Delete a session file */
 export function deleteMessages(msgDir, name) {
   try { unlinkSync(msgPath(msgDir, name)) } catch {}
-}
-
-/** Load the session index from workspaceState */
-export function loadIndex(workspaceState, key) {
-  try {
-    const saved = workspaceState.get(key)
-    if (Array.isArray(saved)) return saved
-    if (saved && typeof saved === "object" && saved.active && saved.sessions) {
-      // Legacy format: { active, sessions: { name: {...} } }
-      return Object.keys(saved.sessions)
-    }
-  } catch {}
-  return ["Session 1"]
-}
-
-/** Save the session index to workspaceState */
-export function saveIndex(workspaceState, sessionsKey, s) {
-  try { workspaceState.update(sessionsKey, s) } catch {}
 }
 
 /** Load or create sessions key from workspace folders */

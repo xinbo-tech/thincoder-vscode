@@ -17,7 +17,7 @@ Design docs in `docs/design/`. Independent product — no dependency on thincode
 
 - **Entry point**: `extension.mjs` — `activate()` registers commands and sets up the ChatPanel.
 - **Webview separation**: the chat UI (`webview/`) runs in an isolated iframe, communicating with the extension host via `postMessage`. No shared state between extension and webview beyond the message protocol.
-- **Session persistence**: workspaceState holds lightweight index `{ active, sessions: { name: { title, count, updated } } }`. Full message arrays stored as JSON files under `context.storageUri/sessions/` to avoid VS Code's ~10MB workspaceState limit. Index stays < 1KB regardless of usage volume.
+- **Session persistence**: the filesystem is the source of truth. Each session is a JSON file under `globalStorage/messages/<base64url(name)>.json`; the session list is derived by scanning that directory (`listSessions`, name = base64url-decoded filename, order = file mtime). workspaceState holds ONLY the active session name — there is no parallel index to drift out of sync.
 - **Provider config**: stored in VS Code `configuration.get("thincoder.providers")`. Keys are plaintext in VS Code settings — a known trade-off (migration to `SecretStorage` planned).
 - **Tool approval**: `thincoder.autoApprove` defaults to `false`. When off, the model runs in permission mode — it describes planned changes and waits for confirmation before executing file-modifying tools. When on, all tools execute automatically.
 - **No legacy migration code**: project is pre-release — breaking changes are expected. When storage format changes, just change it. Migration boilerplate becomes dead code instantly.
