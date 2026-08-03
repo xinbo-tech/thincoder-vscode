@@ -121,20 +121,18 @@ async function checkpointExecute({ checkpointAction: sub, checkpointId: id, path
   }
   if (sub === "rewind") {
     if (id === undefined) throw new Error("checkpointId is required for rewind — use checkpointAction=list to see snapshot ids")
+    // Full restore is disabled (CLI parity): as dangerous as `git checkout -- .`.
+    if (!path) throw new Error("path is required for rewind — full restore is disabled (as dangerous as `git checkout -- .`). Restore files individually.")
     // Auto-snapshot current state first so rewind is reversible
     const autoMsg = `thincoder-auto-${Date.now()}`
     exec(`git stash push --include-untracked -m "${autoMsg}"`)
-    if (path) {
-      const stashRef = `stash@{${id}}`
-      const files = exec(`git stash show --name-only "${stashRef}"`).trim()
-      if (!files) return `Checkpoint ${id} has no tracked file changes.`
-      const match = files.split("\n").find((f) => f === path || f.endsWith(`/${path}`))
-      if (!match) return `File "${path}" not found in checkpoint ${id}. Available: ${files}`
-      exec(`git checkout "${stashRef}" -- "${match}"`)
-      return `Restored "${match}" from checkpoint ${id}. Auto-snapshot created: ${autoMsg}`
-    }
-    exec(`git stash apply "stash@{${id}}"`)
-    return `Restored checkpoint ${id}. Auto-snapshot created before rewind: ${autoMsg}`
+    const stashRef = `stash@{${id}}`
+    const files = exec(`git stash show --name-only "${stashRef}"`).trim()
+    if (!files) return `Checkpoint ${id} has no tracked file changes.`
+    const match = files.split("\n").find((f) => f === path || f.endsWith(`/${path}`))
+    if (!match) return `File "${path}" not found in checkpoint ${id}. Available: ${files}`
+    exec(`git checkout "${stashRef}" -- "${match}"`)
+    return `Restored "${match}" from checkpoint ${id}. Auto-snapshot created: ${autoMsg}`
   }
   if (sub === "cat") {
     if (id === undefined) throw new Error("checkpointId is required for cat — use checkpointAction=list to see snapshot ids")
