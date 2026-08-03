@@ -4,10 +4,10 @@
  * MCP server config stays in VS Code settings (extension-local concern).
  */
 
-import * as vscode from "vscode"
 import { PRESETS, providerNames, isProviderConfigured, storeProviderKey, removeProviderKey, buildProvider, providerLabel, readProviders } from "./presets.mjs"
-import { persistRaw, resolveProviders } from "../config-io.mjs"
+import { persistRaw, resolveProviders, loadMcpServers, addMcpServer, removeMcpServer } from "../config-io.mjs"
 import { addProviderEntry, removeProviderEntry, setActiveProviderEntry } from "./provider-flows.mjs"
+import { mcpConnectedNames } from "../mcp.mjs"
 import { listModels } from "../provider.mjs"
 import { specForModel } from "../specs.mjs"
 import { loadModelPrefs } from "./session-io.mjs"
@@ -89,22 +89,21 @@ export async function deleteProviderKey(name) {
 }
 
 export function getMcpServers() {
-  const c = vscode.workspace.getConfiguration("thincoder")
-  return c.get("mcpServers", {}) || {}
+  return loadMcpServers()
 }
 
-export async function saveMcpServer(name, config) {
-  const c = vscode.workspace.getConfiguration("thincoder")
-  const servers = { ...(c.get("mcpServers") || {}) }
-  servers[name] = config
-  await c.update("mcpServers", servers, vscode.ConfigurationTarget.Global)
+/** Add/update an MCP server in the shared config.json. Returns error string or null (duplicate rejection). */
+export function saveMcpServer(name, config) {
+  return addMcpServer(name, config)
 }
 
-export async function deleteMcpServer(name) {
-  const c = vscode.workspace.getConfiguration("thincoder")
-  const servers = { ...(c.get("mcpServers") || {}) }
-  delete servers[name]
-  await c.update("mcpServers", servers, vscode.ConfigurationTarget.Global)
+export function deleteMcpServer(name) {
+  return removeMcpServer(name)
+}
+
+/** Connected-server names for status display (●/○ + tool counts). */
+export function connectedMcpServers() {
+  return mcpConnectedNames()
 }
 
 export function pushStatus(panel) {

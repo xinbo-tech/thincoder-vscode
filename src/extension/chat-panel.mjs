@@ -7,10 +7,10 @@ import { readFileSync, existsSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { runAgent } from "../agent.mjs"
-import { closeAllMcp } from "../mcp.mjs"
+import { closeAllMcp, mcpConnectedToolCounts, mcpConnect, mcpDisconnectByName } from "../mcp.mjs"
 import { providerNames, getKey, buildProvider } from "./presets.mjs"
 import { listSlots, loadSlot, saveSessionToSlot, newSlot, switchToSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
-import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, handleAddProvider, handleRemoveProvider, handleSetActiveProvider } from "./settings.mjs"
+import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, handleAddProvider, handleRemoveProvider, handleSetActiveProvider } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
 import { generateTitle } from "./generate-title.mjs"
@@ -308,7 +308,16 @@ export class ChatPanel {
   }
 
   _pushMcpStatus() {
-    this._panel?.webview.postMessage({ type: "mcpStatus", servers: getMcpServers(this._context.workspaceState) })
+    const servers = getMcpServers() // array of { name, command?, args?, env?, url?, wsUrl?, headers? }
+    const connected = connectedMcpServers()
+    const toolCounts = mcpConnectedToolCounts()
+    const status = servers.map((s) => ({
+      name: s.name,
+      desc: s.wsUrl ? s.wsUrl : s.url ? s.url : `${s.command} ${(s.args ?? []).join(" ")}`,
+      connected: connected.includes(s.name),
+      toolCount: toolCounts[s.name] ?? 0,
+    }))
+    this._panel?.webview.postMessage({ type: "mcpStatus", servers: status })
   }
 
   // ─── Settings ─────────────────────────────────
@@ -317,8 +326,27 @@ export class ChatPanel {
   async _saveProviderKey(name, key) { await saveProviderKey(name, key); this._pushStatus() }
   async _saveCustomProvider(config) { await saveCustomProvider(config); this._pushStatus() }
   async _deleteProviderKey(name) { await deleteProviderKey(name); this._pushStatus() }
-  async _saveMcpServer(name, config) { await saveMcpServer(name, config); this._pushMcpStatus() }
-  async _deleteMcpServer(name) { await deleteMcpServer(name); this._pushMcpStatus() }
+  _saveMcpServer(name, config) { return saveMcpServer(name, config) }
+  _deleteMcpServer(name) { return deleteMcpServer(name) }
+
+  /** Reconnect an MCP server: disconnect + reconnect (settings panel [Reconnect]). */
+  async _reconnectMcp(name) {
+    const servers = getMcpServers()
+    const srv = servers.find((s) => s.name === name)
+    if (!srv) { this._panel?.webview.postMessage({ type: "providerError", text: `No MCP server named "${name}"` }); return }
+    try {
+      mcpDisconnectByName(name)
+      const client = await mcpConnect({
+        name: srv.name,
+        command: srv.command, args: srv.args, env: srv.env,
+        url: srv.url, wsUrl: srv.wsUrl, headers: srv.headers,
+      })
+      this._panel?.webview.postMessage({ type: "mcpReconnected", name, tools: client.tools.length })
+    } catch (e) {
+      this._panel?.webview.postMessage({ type: "providerError", text: `MCP reconnect ${name} failed: ${e.message}` })
+    }
+    this._pushMcpStatus()
+  }
   async _setAutoApprove(value) {
     const c = vscode.workspace.getConfiguration("thincoder")
     await c.update("autoApprove", value, vscode.ConfigurationTarget.Global)
@@ -602,7 +630,7 @@ export class ChatPanel {
             this._permissionQueue.push({ resolve, toolName })
             this._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
           }),
-      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}), images, skills: loadSkills(cwd), history, fullHistory, engState })
+      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState })
     } catch (e) {
       if (e.name === "AbortError") {
         this._panel.webview.postMessage({ type: "aborted" })

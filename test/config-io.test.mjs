@@ -15,6 +15,7 @@ import {
   providerFromConfig, setProviderKey, removeProviderKeyFromConfig,
   selectProviderModel, providerNamesInConfig,
   loadEmbeddingConfig, saveEmbeddingConfig, migrateCore,
+  loadMcpServers, addMcpServer, removeMcpServer,
 } from "../src/config-io.mjs"
 
 let tmpDir
@@ -379,5 +380,76 @@ describe("migrateCore", () => {
       clearLegacySettings: async () => { cleared = true },
     })
     assert(cleared)
+  })
+
+  it("migrates legacy VS Code mcpServers dict into config.json mcp.servers[]", async () => {
+    let mcpCleared = false
+    await migrateCore({
+      secrets: makeSecrets(),
+      flags: makeFlags(),
+      legacySettings: {},
+      clearLegacySettings: async () => {},
+      legacyMcpServers: {
+        fs: { command: "npx", args: ["-y", "server-fs", "/tmp"] },
+        http1: { url: "https://example.com/mcp", headers: { Authorization: "Bearer x" } },
+        ws1: { wsUrl: "wss://example.com/mcp" },
+      },
+      clearLegacyMcp: async () => { mcpCleared = true },
+    })
+    const servers = readCfg().mcp.servers
+    assert.equal(servers.length, 3)
+    const fs = servers.find((s) => s.name === "fs")
+    assert.equal(fs.command, "npx")
+    assert.deepEqual(fs.args, ["-y", "server-fs", "/tmp"])
+    assert.equal(servers.find((s) => s.name === "http1").headers.Authorization, "Bearer x")
+    assert.equal(servers.find((s) => s.name === "ws1").wsUrl, "wss://example.com/mcp")
+    assert(mcpCleared)
+  })
+
+  it("MCP migration: skips entries that already exist in config.json (CLI wrote them first)", async () => {
+    writeCfg({ mcp: { servers: [{ name: "fs", command: "cli-version" }] } })
+    await migrateCore({
+      secrets: makeSecrets(),
+      flags: makeFlags(),
+      legacySettings: {},
+      clearLegacySettings: async () => {},
+      legacyMcpServers: { fs: { command: "legacy-version" } },
+      clearLegacyMcp: async () => {},
+    })
+    const servers = readCfg().mcp.servers
+    assert.equal(servers.length, 1)
+    assert.equal(servers[0].command, "cli-version")
+  })
+})
+
+// ─── MCP server CRUD (shared config.json) ────────────────────────
+
+describe("MCP server CRUD", () => {
+  it("addMcpServer stores stdio entry with env; loadMcpServers returns array", () => {
+    assert.equal(addMcpServer("fs", { command: "npx", args: ["-y", "srv"], env: { A: "1" } }), null)
+    const servers = loadMcpServers()
+    assert.equal(servers.length, 1)
+    assert.equal(servers[0].name, "fs")
+    assert.deepEqual(servers[0].env, { A: "1" })
+  })
+
+  it("addMcpServer stores http/ws entries with headers", () => {
+    addMcpServer("h", { url: "https://x.test/mcp", headers: { Authorization: "Bearer k" } })
+    addMcpServer("w", { wsUrl: "wss://x.test/mcp" })
+    const servers = loadMcpServers()
+    assert.equal(servers.find((s) => s.name === "h").url, "https://x.test/mcp")
+    assert.equal(servers.find((s) => s.name === "w").wsUrl, "wss://x.test/mcp")
+  })
+
+  it("addMcpServer rejects duplicates", () => {
+    addMcpServer("dup", { command: "a" })
+    assert.match(addMcpServer("dup", { command: "b" }), /already exists/)
+  })
+
+  it("removeMcpServer removes by name; rejects unknown", () => {
+    addMcpServer("gone", { command: "x" })
+    assert.equal(removeMcpServer("gone"), null)
+    assert.equal(loadMcpServers().some((s) => s.name === "gone"), false)
+    assert.match(removeMcpServer("gone"), /No MCP server/)
   })
 })

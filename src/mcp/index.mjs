@@ -153,6 +153,28 @@ export function closeAllMcp() {
   }
 }
 
+/** Connected server names (for the settings panel ●/○ status). */
+export function mcpConnectedNames() {
+  return [..._servers.values()].map((s) => s.serverName)
+}
+
+/** Connected server name → tool count (settings panel status). */
+export function mcpConnectedToolCounts() {
+  const out = {}
+  for (const s of _servers.values()) out[s.serverName] = s.tools?.length ?? 0
+  return out
+}
+
+/** Disconnect all connections to a named server (settings panel reconnect). */
+export function mcpDisconnectByName(name) {
+  for (const [id, server] of _servers) {
+    if (server.serverName === name) {
+      try { server.transport.close() } catch { /* */ }
+      _servers.delete(id)
+    }
+  }
+}
+
 // ─── agent tool ─────────────────────────────────────────────────
 
 /**

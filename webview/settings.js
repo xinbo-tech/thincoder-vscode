@@ -212,7 +212,8 @@ function buildSettings() {
       <div class="key-field"><label>${t("settings.mcp.type")}</label><select id="mcp-type"><option value="stdio">Command (stdio)</option><option value="http">HTTP</option><option value="ws">WebSocket</option></select></div>
       <div id="mcp-stdio-fields">
         <div class="key-field"><label>${t("settings.mcp.command")}</label><input id="mcp-command" placeholder="npx"></div>
-        <div class="key-field"><label>${t("settings.mcp.args")}</label><input id="mcp-args" placeholder="-y,@modelcontextprotocol/server-filesystem,/path"></div>
+        <div class="key-field"><label>${t("settings.mcp.args")}</label><input id="mcp-args" placeholder="-y @modelcontextprotocol/server-filesystem /path"></div>
+        <div class="key-field"><label>${t("settings.mcp.env")}</label><input id="mcp-env" placeholder="KEY=value KEY2=value2 (space-separated)"></div>
       </div>
       <div id="mcp-http-fields" style="display:none">
         <div class="key-field"><label>${t("settings.mcp.url")}</label><input id="mcp-url" placeholder="https://example.com/mcp"></div>
@@ -261,6 +262,7 @@ function buildSettings() {
     document.getElementById("mcp-name").value = ""
     document.getElementById("mcp-command").value = ""
     document.getElementById("mcp-args").value = ""
+    document.getElementById("mcp-env").value = ""
     document.getElementById("mcp-url").value = ""
     document.getElementById("mcp-headers").value = ""
     document.getElementById("mcp-ws-url").value = ""
@@ -280,7 +282,15 @@ function buildSettings() {
     if (type === "stdio") {
       config.command = document.getElementById("mcp-command").value.trim()
       const argsStr = document.getElementById("mcp-args").value.trim()
-      config.args = argsStr ? argsStr.split(",").map((s) => s.trim()) : []
+      config.args = argsStr ? argsStr.split(/\s+/).map((s) => s.trim()).filter(Boolean) : []
+      const envStr = document.getElementById("mcp-env").value.trim()
+      if (envStr) {
+        config.env = {}
+        for (const pair of envStr.split(/\s+/)) {
+          const eq = pair.indexOf("=")
+          if (eq > 0) config.env[pair.slice(0, eq)] = pair.slice(eq + 1).replace(/^["']|["']$/g, "")
+        }
+      }
     } else if (type === "ws") {
       config.wsUrl = document.getElementById("mcp-ws-url").value.trim()
       try { config.headers = JSON.parse(document.getElementById("mcp-ws-headers").value || "{}") } catch { config.headers = {} }
@@ -317,27 +327,33 @@ function buildSettings() {
 function renderMcpList() {
   const list = document.getElementById("mcp-list")
   if (!list) return
-  const servers = window._mcpServers
-  const names = Object.keys(servers)
-  if (names.length === 0) {
+  const servers = window._mcpServers // array of { name, desc, connected, toolCount }
+  if (!Array.isArray(servers) || servers.length === 0) {
     list.innerHTML = `<div style="font-size:12px;opacity:0.5;padding:4px 0">${t("settings.mcp.noServers")}</div>`
     return
   }
-  list.innerHTML = names.map((n) => {
-    const s = servers[n]
-    const type = s.command ? "stdio" : (s.wsUrl ? "ws" : "http")
-    const detail = type === "stdio" ? `${s.command} ${(s.args||[]).join(" ")}` : (s.wsUrl || s.url)
+  list.innerHTML = servers.map((s) => {
+    const mark = s.connected ? "●" : "○"
+    const markColor = s.connected ? "color:var(--accent)" : "opacity:0.4"
+    const type = s.desc.startsWith("ws:") || s.desc.startsWith("wss:") ? "ws" : s.desc.startsWith("http") ? "http" : "stdio"
+    const count = s.connected && s.toolCount ? ` · ${s.toolCount} tools` : ""
     return `<div class="key-row" style="font-size:12px">
-      <span class="key-label">${escHtml(n)}</span>
-      <span style="opacity:0.5;flex:1;margin:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(detail)}</span>
+      <span style="${markColor};width:14px">${mark}</span>
+      <span class="key-label">${escHtml(s.name)}</span>
+      <span style="opacity:0.5;flex:1;margin:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.desc)}${count}</span>
       <span style="font-size:10px;opacity:0.4;margin-right:8px">${type}</span>
-      <button class="key-btn del-key mcp-del-btn" data-name="${escHtml(n)}">✕</button>
+      <button class="key-btn mcp-reconnect-btn" data-name="${escHtml(s.name)}">${t("settings.mcp.reconnect")}</button>
+      <button class="key-btn del-key mcp-del-btn" data-name="${escHtml(s.name)}">✕</button>
     </div>`
   }).join("")
   list.querySelectorAll(".mcp-del-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const name = btn.dataset.name
-      window._vscode.postMessage({ type: "deleteMcpServer", name })
+      window._vscode.postMessage({ type: "deleteMcpServer", name: btn.dataset.name })
+    })
+  })
+  list.querySelectorAll(".mcp-reconnect-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      window._vscode.postMessage({ type: "reconnectMcp", name: btn.dataset.name })
     })
   })
 }

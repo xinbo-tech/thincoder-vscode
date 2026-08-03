@@ -223,6 +223,42 @@ export function loadAgentSettings() {
   }
 }
 
+// ─── MCP servers (shared config.json mcp.servers[] — CLI parity) ───
+
+/** Load MCP server configs: array of { name, command?, args?, env?, url?, wsUrl?, headers? }. */
+export function loadMcpServers() {
+  const raw = loadRaw()
+  const servers = raw.mcp?.servers
+  return Array.isArray(servers) ? servers.filter((s) => s && typeof s === "object" && s.name) : []
+}
+
+/** Add an MCP server entry. Rejects duplicates (CLI /mcp parity). Returns error string or null. */
+export function addMcpServer(name, config) {
+  const servers = loadMcpServers()
+  if (servers.some((s) => s.name === name)) return `MCP server "${name}" already exists`
+  const entry = { name }
+  if (config.url) { entry.url = config.url; if (config.headers) entry.headers = config.headers }
+  else if (config.wsUrl) { entry.wsUrl = config.wsUrl; if (config.headers) entry.headers = config.headers }
+  else { entry.command = config.command; if (config.args) entry.args = config.args; if (config.env) entry.env = config.env }
+  persistRaw((raw) => {
+    raw.mcp = raw.mcp && typeof raw.mcp === "object" ? raw.mcp : {}
+    raw.mcp.servers = Array.isArray(raw.mcp.servers) ? raw.mcp.servers : []
+    raw.mcp.servers.push(entry)
+  })
+  return null
+}
+
+/** Remove an MCP server entry by name. Returns error string or null. */
+export function removeMcpServer(name) {
+  const servers = loadMcpServers()
+  if (!servers.some((s) => s.name === name)) return `No MCP server named "${name}"`
+  persistRaw((raw) => {
+    raw.mcp = raw.mcp && typeof raw.mcp === "object" ? raw.mcp : {}
+    raw.mcp.servers = (raw.mcp.servers ?? []).filter((s) => s?.name !== name)
+  })
+  return null
+}
+
 /** Embedding config from config.json (CLI: config.embedding { baseURL, model, apiKey }). */
 export function loadEmbeddingConfig() {
   const emb = loadRaw().embedding
@@ -311,6 +347,28 @@ export async function migrateCore(deps) {
     }
   } catch { /* ignore */ }
 
+  // Legacy MCP servers (old VS Code settings `thincoder.mcpServers` dict) → config.json
+  // mcp.servers[] (CLI parity). CLI-written entries win; unknown names are kept as-is.
+  const legacyMcp = deps.legacyMcpServers
+  if (legacyMcp && typeof legacyMcp === "object") {
+    const existing = new Set((raw.mcp?.servers ?? []).map((s) => s?.name))
+    const migrated = []
+    for (const [name, cfg] of Object.entries(legacyMcp)) {
+      if (!cfg || typeof cfg !== "object" || existing.has(name)) continue
+      const entry = { name }
+      if (cfg.url) { entry.url = cfg.url; if (cfg.headers) entry.headers = cfg.headers }
+      else if (cfg.wsUrl) { entry.wsUrl = cfg.wsUrl; if (cfg.headers) entry.headers = cfg.headers }
+      else if (cfg.command) { entry.command = cfg.command; if (cfg.args) entry.args = cfg.args; if (cfg.env) entry.env = cfg.env }
+      else continue // unusable entry — drop
+      migrated.push(entry)
+    }
+    if (migrated.length > 0) {
+      raw.mcp = raw.mcp && typeof raw.mcp === "object" ? raw.mcp : {}
+      raw.mcp.servers = Array.isArray(raw.mcp.servers) ? raw.mcp.servers : []
+      raw.mcp.servers.push(...migrated)
+    }
+  }
+
   saveRaw(raw)
 
   // Clean up legacy stores so nothing reads them again
@@ -319,5 +377,6 @@ export async function migrateCore(deps) {
   }
   try { await secrets.delete("thincoder.embedding.apiKey") } catch { /* ignore */ }
   try { await clearLegacySettings() } catch { /* ignore */ }
+  try { await deps.clearLegacyMcp() } catch { /* ignore */ }
   await flags.set()
 }

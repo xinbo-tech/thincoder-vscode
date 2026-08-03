@@ -233,10 +233,12 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   if (depth === 0 && freshMachineLine) {
     injectContext(history, cwd, input)
     // MCP server config
-    if (mcpServers && Object.keys(mcpServers).length > 0) {
-      const list = Object.entries(mcpServers).map(([name, cfg]) =>
-        `  - ${name}: ${cfg.command ? `stdio (${cfg.command} ${(cfg.args || []).join(" ")})` : `http (${cfg.url})`}`
-      ).join("\n")
+    // MCP server config (array of { name, command?, args?, env?, url?, wsUrl?, headers? } — shared config.json)
+    if (mcpServers && mcpServers.length > 0) {
+      const list = mcpServers.map((cfg) => {
+        const desc = cfg.wsUrl ? cfg.wsUrl : cfg.url ? cfg.url : `stdio (${cfg.command} ${(cfg.args ?? []).join(" ")})`
+        return `  - ${cfg.name}: ${desc}`
+      }).join("\n")
       history.push({ role: "user", content: `[System: configured MCP servers (use mcp tool to connect):\n${list}]` })
     }
     // Skills from .thincoder/skills/
