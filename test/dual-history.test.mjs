@@ -22,6 +22,20 @@ function cleanup() {
   rmSync(tmp, { recursive: true, force: true })
 }
 
+
+describe("editor-context — machine-only injection (never pollutes the human line)", () => {
+  it("stripEditorInjection removes a legacy [Current file: ...] tail from a user message", async () => {
+    const { stripEditorInjection } = await import("../src/extension/editor-context.mjs")
+    const msg = "请看一下这个配置\n\n[Current file: src/config.mjs (lines 47-47)\n```\nXinbo1234\n```]"
+    assert.equal(stripEditorInjection(msg), "请看一下这个配置")
+    // 无注入的消息原样
+    assert.equal(stripEditorInjection("普通消息"), "普通消息")
+    // 注入后仍有用户文字（多段消息）——只剥离末尾注入段
+    const multi = "第一段\n\n[Current file: a.mjs (full file (first 3000 chars))\n```\ncode\n```]\n\n第二段"
+    assert.equal(stripEditorInjection(multi), multi, "非末尾的注入段不动（注入总是 append 在末尾）")
+  })
+})
+
 describe("session-io — shared slot format (CLI-compatible)", () => {
   beforeEach(setup)
   afterEach(cleanup)

@@ -15,6 +15,7 @@ import { loadLocaleStrings } from "../i18n.mjs"
 import { getEmbedder, setVSCodeEmbedder, resetEmbedder } from "../embed-config.mjs"
 import { handlePanelMessage, _cwd } from "./panel-messages.mjs"
 import { runPanelChat } from "./panel-chat.mjs"
+import { stripEditorInjection } from "./editor-context.mjs"
 import { loadEmbeddingConfig, saveEmbeddingConfig } from "../config-io.mjs"
 import { buildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../indexer.mjs"
 
@@ -25,6 +26,7 @@ export class ChatPanel {
   constructor(context) {
     this._context = context
     this._panel = null
+
     this._abortController = null
     this._permissionQueue = []
     this._statusBar = null
@@ -122,12 +124,15 @@ export class ChatPanel {
     // writes, so any field we drop here is lost permanently. Spread ...existing so fields the
     // extension doesn't know about (activeModel, engineering, engDesignToken, ...) round-trip
     // intact, then override only what the extension actually owns.
+    // Transient machine-only messages (editor-context injections) are dropped on persist
+    // (CLI saveSession parity) — they are re-injected fresh on the next turn.
+    const keepReal = (m) => !m.transient
     saveSessionToSlot(cwd, slot, {
       ...existing,
       version: 2, cwd, updatedAt: Date.now(),
       title: existing.title ?? "",
       activeProvider: extra.activeProvider ?? existing.activeProvider ?? "",
-      history: fullHistory, contextHistory,
+      history: fullHistory.filter(keepReal), contextHistory: contextHistory.filter(keepReal),
       display: existing.display ?? [], tasks: extra.tasks ?? existing.tasks ?? [],
       planMode: existing.planMode ?? false, goal: existing.goal ?? null,
       autoApprove: existing.autoApprove ?? false, advisor: existing.advisor ?? null,
@@ -149,7 +154,7 @@ export class ChatPanel {
     for (const m of history) {
       // Real messages carry role (LLM line); UI-only ones may carry type. Derive the UI kind from either.
       const kind = m.type ?? m.role
-      if (kind === "user" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "userMessage", text: m.content, timestamp: m.timestamp })
+      if (kind === "user" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "userMessage", text: stripEditorInjection(m.content), timestamp: m.timestamp })
       else if (kind === "assistant" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "assistantMessage", text: m.content, timestamp: m.timestamp })
       // tool calls/results and multimodal parts are not re-rendered from history (they stream live via callbacks)
     }

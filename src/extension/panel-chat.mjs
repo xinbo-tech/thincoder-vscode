@@ -11,7 +11,7 @@ import { specForModel } from "../specs.mjs"
 import { runAgent } from "../agent.mjs"
 import { getMcpServers } from "./settings.mjs"
 import { loadSkills } from "./skills.mjs"
-import { injectEditorContext } from "./editor-context.mjs"
+import { collectEditorInjection } from "./editor-context.mjs"
 import { injectAtRefs } from "./file-refs.mjs"
 import { t } from "../i18n.mjs"
 
@@ -58,7 +58,6 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   const c = vscode.workspace.getConfiguration("thincoder")
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
 
-  text = injectEditorContext(text, cwd)
   text = injectAtRefs(text, cwd)
 
   // Load BOTH persisted lines. fullHistory = human line (never-compacted, all real messages —
@@ -128,7 +127,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
           panel._permissionQueue.push({ resolve, toolName })
           panel._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
         }),
-    }, panel._abortController.signal, c.get("autoApprove", false), { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState })
+    }, panel._abortController.signal, c.get("autoApprove", false), { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: collectEditorInjection(cwd) })
   } catch (e) {
     if (e.name === "AbortError") {
       panel._panel.webview.postMessage({ type: "aborted" })

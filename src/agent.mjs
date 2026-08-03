@@ -192,6 +192,16 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
 
   pushReal(history, fullHistory, { role: "user", content: input })
 
+  // Machine-only injections (editor context, etc.) — pushed to the MACHINE line ONLY,
+  // never into fullHistory (CLI parity: automatic context must not pollute the
+  // human-readable record or the session-restore display). Marked transient so
+  // persistence layers can drop them.
+  for (const inj of opts.injections ?? []) {
+    if (inj && typeof inj.content === "string") {
+      history.push({ role: "user", content: inj.content, transient: true })
+    }
+  }
+
   // Inject pasted images as multimodal content on the first user message
   if (depth === 0 && Array.isArray(opts.images) && opts.images.length > 0) {
     const spec = specForModel(provider.model)
