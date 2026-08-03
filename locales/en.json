@@ -100,6 +100,7 @@
   "settings.proxyWeb": "Web tools (websearch/fetch)",
   "settings.proxyModel": "Model requests (providers with proxy: true)",
   "settings.proxyTest": "Test Connection",
+  "settings.proxyRowTitle": "Route this provider's model requests through the proxy (needs global proxy.model on)",
 
   "settings.indexSection": "Semantic Index",
   "settings.indexBuild": "Build Index",

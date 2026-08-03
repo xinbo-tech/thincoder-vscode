@@ -31,6 +31,7 @@ export function providerStatus() {
       configured, masked: configured ? "****" : "",
       baseURL: entry.baseURL, model: entry.model,
       isActive: name === activeProvider,
+      proxy: entry.proxy === true, // per-provider proxy flag (row checkbox, preset/custom agnostic)
     }
     labels[name] = providerLabel(name)
   }
@@ -50,6 +51,17 @@ export function providerStatus() {
 export function handleAddProvider(payload) { return addProviderEntry(payload) }
 export function handleRemoveProvider(name) { return removeProviderEntry(name) }
 export function handleSetActiveProvider(name) { return setActiveProviderEntry(name) }
+
+/** Set/clear a provider's per-provider proxy flag (false → delete the field, CLI injectProxy parity). */
+export function handleSetProviderProxy(name, proxy) {
+  persistRaw((raw) => {
+    const entry = Array.isArray(raw.providers) ? raw.providers.find((p) => p?.name === name) : null
+    if (!entry) return
+    if (proxy === true) entry.proxy = true
+    else delete entry.proxy
+  })
+  return null
+}
 
 /** Agent/Advisor settings snapshot for the panel (from shared config.json). */
 export function agentSettings() {

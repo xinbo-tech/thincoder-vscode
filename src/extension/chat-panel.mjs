@@ -10,7 +10,7 @@ import { runAgent } from "../agent.mjs"
 import { closeAllMcp, mcpConnectedToolCounts, mcpConnect, mcpDisconnectByName } from "../mcp.mjs"
 import { providerNames, getKey, buildProvider } from "./presets.mjs"
 import { listSlots, loadSlot, saveSessionToSlot, newSlot, switchToSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
-import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, handleAddProvider, handleRemoveProvider, handleSetActiveProvider, agentSettings, saveAgentSettingsFromPanel, proxySettings, saveProxySettingsFromPanel } from "./settings.mjs"
+import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, handleAddProvider, handleRemoveProvider, handleSetActiveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, proxySettings, saveProxySettingsFromPanel } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
 import { generateTitle } from "./generate-title.mjs"
@@ -163,6 +163,11 @@ export class ChatPanel {
         case "setActiveProvider": {
           const err = handleSetActiveProvider(msg.name)
           if (err) this._panel?.webview.postMessage({ type: "providerError", text: err })
+          this._pushSettings()
+          break
+        }
+        case "setProviderProxy": {
+          handleSetProviderProxy(msg.name, msg.proxy === true)
           this._pushSettings()
           break
         }

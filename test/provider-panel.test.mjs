@@ -10,6 +10,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 import { addProviderEntry, removeProviderEntry, setActiveProviderEntry } from "../src/extension/provider-flows.mjs"
+import { handleSetProviderProxy } from "../src/extension/settings.mjs"
 import { _setConfigPathForTest, resolveProviders } from "../src/config-io.mjs"
 
 let tmpDir
@@ -146,5 +147,34 @@ describe("setActiveProviderEntry", () => {
     writeFileSync(cfgPath, JSON.stringify({ providers: [{ name: "a", baseURL: "u", model: "m" }], activeProvider: "a" }))
     assert.match(setActiveProviderEntry("zzz"), /No provider/)
     assert.equal(raw().activeProvider, "a")
+  })
+})
+
+// ─── per-provider proxy flag (row checkbox, preset/custom agnostic) ───
+
+describe("handleSetProviderProxy", () => {
+  it("sets proxy: true on the entry", () => {
+    writeFileSync(cfgPath, JSON.stringify({ providers: [{ name: "a", baseURL: "u", model: "m" }], activeProvider: "a" }))
+    handleSetProviderProxy("a", true)
+    assert.equal(raw().providers[0].proxy, true)
+  })
+
+  it("false deletes the field (not written as false)", () => {
+    writeFileSync(cfgPath, JSON.stringify({ providers: [{ name: "a", baseURL: "u", model: "m", proxy: true }], activeProvider: "a" }))
+    handleSetProviderProxy("a", false)
+    const entry = raw().providers[0]
+    assert.equal("proxy" in entry, false)
+  })
+
+  it("unknown provider is a no-op", () => {
+    writeFileSync(cfgPath, JSON.stringify({ providers: [{ name: "a", baseURL: "u", model: "m" }], activeProvider: "a" }))
+    handleSetProviderProxy("zzz", true)
+    assert.equal("proxy" in raw().providers[0], false)
+  })
+
+  it("works for custom providers too (preset/custom agnostic)", () => {
+    writeFileSync(cfgPath, JSON.stringify({ providers: [{ name: "custom", baseURL: "u", model: "m" }], activeProvider: "custom" }))
+    handleSetProviderProxy("custom", true)
+    assert.equal(raw().providers[0].proxy, true)
   })
 })

@@ -80,6 +80,9 @@ export function initSettings({ vscode, inputEl, onClose }) {
   window._setActive = function(name) {
     window._vscode.postMessage({ type: "setActiveProvider", name })
   }
+  window._setProviderProxy = function(name, proxy) {
+    window._vscode.postMessage({ type: "setProviderProxy", name, proxy })
+  }
   window._removeProvider = function(name) {
     window._vscode.postMessage({ type: "removeProvider", name })
   }
@@ -173,6 +176,10 @@ function buildSettings() {
           onchange="window._setActive('${escHtml(name)}')" title="${t("settings.active")}">
         <span class="key-label">${escHtml(label)}</span>
         <span class="key-status ${s0.configured ? "ok" : ""}">${s0.configured ? s0.masked : "—"}</span>
+        <label class="prov-proxy" title="${t("settings.proxyRowTitle")}">
+          <input type="checkbox" ${s0.proxy ? "checked" : ""} onchange="window._setProviderProxy('${escHtml(name)}', this.checked)">
+          proxy
+        </label>
         <button class="key-btn" onclick="window._editKey('${escHtml(name)}')">${s0.configured ? t("settings.setKey") : t("settings.addKey")}</button>
         <button class="key-btn del-key" onclick="window._removeProvider('${escHtml(name)}')" ${active ? "disabled" : ""} title="${t("settings.remove")}">−</button>
       </div>
