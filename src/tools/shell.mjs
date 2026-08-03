@@ -28,23 +28,11 @@ SAFE_ENV.TERM = "dumb"
 /**
  * WIDE matcher: snapshot before ANY destructive git command. False positives are
  * harmless (one extra snapshot); a missed match is a data-loss disaster.
+ * Git commands are NEVER rejected — the model would just find a way around the
+ * rejection. Snapshot-then-proceed: every uncommitted file is copied (stash,
+ * includes untracked) and the command is allowed to run.
  */
-const GIT_DESTRUCTIVE_RE = /\bgit\s+(?:checkout\s+(?:[\w./-]+\s+)?--(?!\w)|checkout\s+\.|restore\s+(?!--help\b)|reset\s+--hard|clean\s+-\w*[fd])/i
-
-/** Split a command into segments by shell separators (CLI parity). */
-function shellSegments(command) {
-  return command.split(/&&|\|\||>>|\$\(|[;|\n<>]|`|[(]/)
-}
-
-/** Exact matcher: is this segment a destructive git command? (CLI parity) */
-function isDestructiveGitSegment(seg) {
-  if (!/^\s*git\s/.test(seg)) return false
-  if (/\scheckout\s+(?:--|\.(?:\s|$))/.test(seg)) return true
-  if (/\sreset\s+--hard\b/.test(seg)) return true
-  if (/\sclean\s+-\S*f/.test(seg)) return true
-  if (/\srestore\s/.test(seg) && (/--worktree/.test(seg) || !/--staged/.test(seg))) return true
-  return false
-}
+const GIT_DESTRUCTIVE_RE = /\bgit\s+(?:checkout\s+(?:[\w./-]+\s+)?--(?!\w)|checkout\s+\.|restore\s+(?!--help\b)(?!--staged\b(?!.*--worktree))|reset\s+--hard|clean\s+-(?=\S*f)(?!\S*n))/i
 
 /** Whether cwd is inside a git repository */
 function insideGitRepo(cwd) {
@@ -52,13 +40,6 @@ function insideGitRepo(cwd) {
     execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd, stdio: "ignore" })
     return true
   } catch { return false }
-}
-
-/** git status --porcelain ("" when clean or not a repo) */
-function gitStatusPorcelain(cwd) {
-  try {
-    return execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim()
-  } catch { return "" }
 }
 
 /**
@@ -100,31 +81,13 @@ export const bashTool = {
     required: ["command"],
   },
   async execute({ command, timeout }, ctx) {
-    // ── git protection (CLI parity: reject exact destructive matches when
-    //    uncommitted changes exist). The REJECT path does not snapshot — the
-    //    command never runs, so the working tree is untouched and nothing can be
-    //    lost. The ALLOWED variant path snapshots first (stash preserves what the
-    //    command is about to destroy).
-    const hasDestructiveSeg = shellSegments(command).some(isDestructiveGitSegment)
-    let guard = null
-    if (hasDestructiveSeg) {
-      if (!insideGitRepo(ctx.cwd)) {
-        throw new Error(`Refusing destructive git command: not a git repository: ${ctx.cwd}`)
-      }
-      const status = gitStatusPorcelain(ctx.cwd)
-      if (status) {
-        throw new Error(
-          `Refusing destructive git command: uncommitted changes exist.\n` +
-          `First create a checkpoint (action=checkpoint) to protect current work, then commit or stash before the destructive operation.\n` +
-          `(If uncommitted work was already lost, recover from the latest auto-snapshot: checkpoint action=list, then action=rewind.)\n\n${status}`
-        )
-      }
-      // No uncommitted changes → nothing to lose → allow (CLI parity)
-    } else if (GIT_DESTRUCTIVE_RE.test(command)) {
-      // Variant the exact matcher misses (e.g. `git checkout HEAD -- .`):
-      // snapshot protects the work, command is allowed to run.
-      guard = gitGuardSnapshot(command, ctx.cwd)
-    }
+    // Git destructive commands are NEVER rejected (the model would just find a
+    // way around the rejection). Snapshot-then-proceed (CLI parity): every
+    // uncommitted file is stashed before the command runs — rollback becomes
+    // reversible instead of a data-loss event.
+    const guard = GIT_DESTRUCTIVE_RE.test(command)
+      ? gitGuardSnapshot(command, ctx.cwd)
+      : null
 
     return new Promise((resolve) => {
       const child = exec(command, {
