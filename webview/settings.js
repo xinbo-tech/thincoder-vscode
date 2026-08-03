@@ -34,6 +34,8 @@ function paTypeChanged() {
 let _indexStatus = null
 /** @type {{ maxTurns?:number, subagentTurns?:number, compactThreshold?:number|null, verifyGuard?:boolean, advisor?:object } | null} */
 let _agentSettings = null
+/** @type {{ uri?:string, web?:boolean, model?:boolean } | null} */
+let _proxySettings = null
 
 /**
  * Initialize settings panel.
@@ -132,7 +134,7 @@ export function initSettings({ vscode, inputEl, onClose }) {
 
   window._mcpServers = {}
 
-  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings }
+  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateProxySettings }
 }
 
 function openSettings() {
@@ -263,6 +265,19 @@ function buildSettings() {
       <div class="key-field"><label>${t("settings.advisorModel")}</label><input id="adv-model" placeholder="deepseek-chat" value="${escHtml(adv.model || "")}"></div>
       <button id="ag-save-btn" class="key-btn" style="margin-top:6px">${t("settings.save")}</button>`
 
+    // Proxy section
+    const px = _proxySettings || {}
+    html += `<div class="settings-sep"></div>
+      <h4 class="settings-section-title">${t("settings.proxySection")}</h4>
+      <div class="key-field"><label>${t("settings.proxyUri")}</label><input id="px-uri" placeholder="http://127.0.0.1:7890" value="${escHtml(px.uri || "")}"></div>
+      <div class="key-row"><span class="key-label">${t("settings.proxyWeb")}</span>
+        <input type="checkbox" id="px-web" ${px.web !== false ? "checked" : ""}></div>
+      <div class="key-row"><span class="key-label">${t("settings.proxyModel")}</span>
+        <input type="checkbox" id="px-model" ${px.model ? "checked" : ""}></div>
+      <button id="px-save-btn" class="key-btn" style="margin-top:4px">${t("settings.save")}</button>
+      <button id="px-test-btn" class="key-btn" style="margin-top:4px">${t("settings.proxyTest")}</button>
+      <div id="px-test-result" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>`
+
   body.innerHTML = html
 
   // Bind Add-provider form controls
@@ -270,6 +285,34 @@ function buildSettings() {
   document.getElementById("pa-cancel-btn").addEventListener("click", () => window._toggleAddForm(false))
   paTypeChanged()
 
+  // Bind Proxy settings save + test
+  const pxSave = document.getElementById("px-save-btn")
+  if (pxSave) {
+    pxSave.addEventListener("click", () => {
+      const uri = document.getElementById("px-uri")?.value?.trim() ?? ""
+      const web = document.getElementById("px-web")?.checked ?? false
+      const model = document.getElementById("px-model")?.checked ?? false
+      window._vscode.postMessage({ type: "saveProxySettings", settings: { uri, web, model } })
+    })
+  }
+  const pxTest = document.getElementById("px-test-btn")
+  if (pxTest) {
+    pxTest.addEventListener("click", async () => {
+      const result = document.getElementById("px-test-result")
+      if (result) result.textContent = "Testing…"
+      const uri = document.getElementById("px-uri")?.value?.trim() || undefined
+      try {
+        const { proxyFetch } = await import("../src/proxy.mjs")
+        const res = await Promise.race([
+          proxyFetch("https://www.gstatic.com/generate_204", { headers: { "User-Agent": "ThinCoder" } }, uri || null),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after 5s")), 5000)),
+        ])
+        if (result) result.textContent = res.ok ? `✓ OK (HTTP ${res.status})` : `✗ HTTP ${res.status}`
+      } catch (e) {
+        if (result) result.textContent = `✗ ${e.message}`
+      }
+    })
+  }
   // Bind Agent/Advisor settings save
   const agSave = document.getElementById("ag-save-btn")
   if (agSave) {
@@ -412,6 +455,12 @@ function updateProviderStatus(status) {
 
 function updateAgentSettings(settings) {
   _agentSettings = settings
+  const panel = document.getElementById("settings-panel")
+  if (panel && panel.style.display !== "none") buildSettings()
+}
+
+function updateProxySettings(settings) {
+  _proxySettings = settings
   const panel = document.getElementById("settings-panel")
   if (panel && panel.style.display !== "none") buildSettings()
 }

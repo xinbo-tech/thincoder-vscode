@@ -16,7 +16,7 @@ export default [
         // Node.js
         process: "readonly", console: "readonly", Buffer: "readonly",
         TextDecoder: "readonly", TextEncoder: "readonly", URL: "readonly",
-        WebSocket: "readonly",
+        WebSocket: "readonly", Headers: "readonly", Response: "readonly", Request: "readonly",
       },
     },
     rules: {

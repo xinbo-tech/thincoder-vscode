@@ -4,6 +4,7 @@
  */
 
 import { specForModel } from "./specs.mjs"
+import { proxyFetch } from "./proxy.mjs"
 import {
   RETRYABLE_STATUS, MAX_RETRIES, MAX_CONTINUATIONS,
   RATE_LIMIT_BACKOFF_MS, _rateHooks,
@@ -130,10 +131,10 @@ export async function listModels(provider, { signal } = {}) {
   const timeout = setTimeout(() => ctrl.abort(), 15000)
   if (signal) signal.addEventListener("abort", () => ctrl.abort(), { once: true })
   try {
-    const response = await fetch(`${provider.baseURL}/models`, {
+    const response = await proxyFetch(`${provider.baseURL}/models`, {
       headers: { Authorization: `Bearer ${provider.apiKey}` },
       signal: ctrl.signal,
-    })
+    }, provider.proxyUri)
     if (!response.ok) {
       const text = await response.text().catch(() => "")
       throw new Error(`GET /models failed ${response.status}: ${text}`)
@@ -158,12 +159,12 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
 
     let response
     try {
-      response = await fetch(url, {
+      response = await proxyFetch(url, {
         method: "POST",
         headers,
         body,
         signal: signal ? _anySignal([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) : AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      })
+      }, provider.proxyUri)
     } catch (error) {
       if (error.name === "AbortError") throw error
       lastError = error

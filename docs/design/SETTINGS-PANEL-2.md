@@ -1,6 +1,6 @@
 # 配置面板重设计 · 第二部分：MCP / 语义索引 / Agent 设置 / Proxy
 
-> 状态：**批次 B（MCP）已实施**（2026-08-03，commit a23ebdc）。**批次 C（Agent/Advisor 设置）已实施**（2026-08-03）。批次 D（Proxy）待实施。
+> 状态：**全部批次已实施**（批次 B: a23ebdc；批次 C: 812f24f；批次 D: 本批）。
 
 ## 1. MCP Servers 区块
 
@@ -62,20 +62,24 @@ CLI `/config` 的可配置项，config.json `agent.*`，批次 C 前 VS Code 面
 5. chat-panel 路由 saveAgentSettings/getAgentSettings，_pushSettings 带 agentSettings 推送
 6. webview：Agent 区块（maxTurns/subagentTurns/compactThreshold/verifyGuard）+ Advisor 区块（enabled/guard/provider/model）+ 保存按钮
 
-## 4. Proxy（能力缺口，不只是 UI）
+## 4. Proxy（能力缺口，批次 D 已实施）
 
-### 现状
+### 现状（批次 D 后）
 
-CLI 有完整 proxy 支持：config.json `proxy: {uri, web, model}`、`/config` 里的 proxy 菜单（设置 URI、web/model 开关、连接测试、清除）、`proxy.mjs` 手写 CONNECT 隧道、web 工具和 provider 请求按开关走代理。**VS Code 完全没有**——web 工具直连，LLM 请求直连。对墙内用户这是实际痛点。
+CLI 的完整 proxy 支持已移植：
+1. **`src/proxy.mjs`**：从 CLI 逐字移植（零依赖 CONNECT 隧道，net/tls/stream 原生实现）
+2. **接线**：`tools/web.mjs` 的 websearch/fetch 按 `proxy.web` 走代理；`provider.mjs` 的 LLM 请求（chat/listModels）按 `provider.proxyUri` 走代理——providerFromConfig 按 CLI injectProxy 语义注入（per-provider `proxy: true` 且全局 `proxy.model === true` 双重开启）
+3. **面板 Proxy 区块**：URI 输入 + web/model 两个开关 + [Test] 按钮（fetch gstatic generate_204，5s 超时）+ 保存
+4. 落盘 config.json `proxy` 段（config-io normalizeProxy 复用）；URI 清空 = 清除
 
-### 方案（建议，待批）
+### 实施记录（批次 D）
 
-1. 移植 CLI `proxy.mjs` 的 CONNECT 隧道实现（Node 原生 net/tls，零依赖，VS Code extension host 可直接跑）。
-2. 接线两处：`tools/web.mjs` 的 websearch/fetch（按 `proxy.web`）；`provider/transports/*` 的 LLM 请求（按 `proxy.model`，需 fetch 支持 dispatcher——Node 20+ 用 undici ProxyAgent，或走 CLI 同款隧道封装）。
-3. 面板 Proxy 区块：URI 输入 + web/model 两个开关 + [Test] 按钮（对齐 CLI proxy 菜单的 test：fetch gstatic generate_204）。
-4. 落盘 config.json `proxy` 段（config-io 已有 normalizeProxy，直接复用）。
-
-工作量最大的一块，建议**单独一批**做，不与前面三块混。
+- src/proxy.mjs 移植（resolveProxyConfig/resolveWebProxy/streamHttpResponse/tunnelHttps/tcpConnectProxy/proxyFetch）
+- config-io.providerFromConfig 注入 proxyUri（target.proxy === true && proxy.model === true）
+- agent.mjs config.proxy 归一化注入（web 工具的 resolveWebProxy 读 ctx.agent.config.proxy）
+- settings.mjs proxySettings/saveProxySettingsFromPanel；chat-panel 路由 saveProxySettings + 推送 proxySettings
+- eslint globals 补 Headers/Response/Request（Node 18+ 全局）
+- test/proxy.test.mjs：config 解析 ×4、normalizeProxy ×1、本地 CONNECT 隧道 ×2（7 个测试）
 
 ## 5. 已确认不动的
 

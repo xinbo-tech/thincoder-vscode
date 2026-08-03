@@ -15,7 +15,7 @@ import {
   advisorTool, engTool,
 } from "./agent-tools.mjs"
 import { compactHistory, injectContext } from "./context.mjs"
-import { loadAgentSettings, loadRaw } from "./config-io.mjs"
+import { loadAgentSettings, loadRaw, normalizeProxy } from "./config-io.mjs"
 import { isDocFile } from "./advisor/repos.mjs"
 import * as os from "node:os"
 
@@ -173,12 +173,14 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   let cfgEngineering = false
   let cfgVerifyGuard = false
   let cfgCompactThreshold = null
+  let cfgProxy = undefined
   try {
     const raw = loadRaw()
     advisorCfg = raw.agent?.advisor ?? { enabled: false }
     cfgEngineering = raw.agent?.engineering ?? false
     cfgVerifyGuard = raw.agent?.verifyGuard === true // opt-in, CLI parity
     cfgCompactThreshold = raw.agent?.compactThreshold ?? null // null = auto from model context
+    cfgProxy = normalizeProxy(raw.proxy) // web tools consult agent.config.proxy (resolveWebProxy)
   } catch { /* config unreadable — defaults */ }
   const engineering = engState?.enabled ?? cfgEngineering
 
@@ -195,7 +197,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     _engDesignReviewed: engDesignReviewed === true, // eng-coder children arrive pre-authorized
     _calledAdvisorThisRun: false, _mutatedThisRun: false,
     _lastEngState: engineering, _pendingReminders: [],
-    config: { advisor: advisorCfg, agent: { engineering } },
+    config: { advisor: advisorCfg, agent: { engineering }, proxy: cfgProxy },
   }
 
   // Live state channel for the parent (eng-coder mutation merge) — the caller gets a

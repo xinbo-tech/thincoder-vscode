@@ -10,7 +10,7 @@ import { runAgent } from "../agent.mjs"
 import { closeAllMcp, mcpConnectedToolCounts, mcpConnect, mcpDisconnectByName } from "../mcp.mjs"
 import { providerNames, getKey, buildProvider } from "./presets.mjs"
 import { listSlots, loadSlot, saveSessionToSlot, newSlot, switchToSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
-import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, handleAddProvider, handleRemoveProvider, handleSetActiveProvider, agentSettings, saveAgentSettingsFromPanel } from "./settings.mjs"
+import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, handleAddProvider, handleRemoveProvider, handleSetActiveProvider, agentSettings, saveAgentSettingsFromPanel, proxySettings, saveProxySettingsFromPanel } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
 import { generateTitle } from "./generate-title.mjs"
@@ -178,6 +178,11 @@ export class ChatPanel {
           break
         }
         case "getAgentSettings": this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() }); break
+        case "saveProxySettings": {
+          saveProxySettingsFromPanel(msg.settings ?? {})
+          this._pushSettings()
+          break
+        }
       }
       })()  // end async IIFE
     })
@@ -365,6 +370,7 @@ export class ChatPanel {
   _pushSettings() {
     fullStatus(this._panel)
     this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
+    this._panel?.webview.postMessage({ type: "proxySettings", settings: proxySettings() })
     this._pushMcpStatus()
     this._pushIndexStatus()
   }

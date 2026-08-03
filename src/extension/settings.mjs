@@ -5,7 +5,7 @@
  */
 
 import { PRESETS, providerNames, isProviderConfigured, storeProviderKey, removeProviderKey, buildProvider, providerLabel, readProviders } from "./presets.mjs"
-import { persistRaw, resolveProviders, loadMcpServers, addMcpServer, removeMcpServer, loadAgentSettings, saveAgentSettings } from "../config-io.mjs"
+import { persistRaw, resolveProviders, loadMcpServers, addMcpServer, removeMcpServer, loadAgentSettings, saveAgentSettings, loadRaw, normalizeProxy } from "../config-io.mjs"
 import { addProviderEntry, removeProviderEntry, setActiveProviderEntry } from "./provider-flows.mjs"
 import { mcpConnectedNames } from "../mcp.mjs"
 import { listModels } from "../provider.mjs"
@@ -61,6 +61,26 @@ export function agentSettings() {
     verifyGuard: s.verifyGuard,
     advisor: s.advisor ?? { enabled: false },
   }
+}
+
+/** Proxy settings snapshot for the panel (normalized { uri, web, model } | null). */
+export function proxySettings() {
+  const raw = loadRaw()
+  return normalizeProxy(raw.proxy) ?? null
+}
+
+/** Persist proxy settings from the panel. payload: { uri?, web?, model? } (uri '' = clear). */
+export function saveProxySettingsFromPanel(payload) {
+  persistRaw((raw) => {
+    const current = normalizeProxy(raw.proxy) ?? { uri: "", web: true, model: false }
+    const uri = payload.uri !== undefined ? payload.uri.trim() : current.uri
+    if (!uri) { delete raw.proxy; return }
+    raw.proxy = {
+      uri,
+      web: payload.web !== undefined ? !!payload.web : current.web,
+      model: payload.model !== undefined ? !!payload.model : current.model,
+    }
+  })
 }
 
 /** Persist agent settings from the panel. payload: { maxTurns?, subagentTurns?, compactThreshold?, verifyGuard?, advisor? } */

@@ -166,6 +166,13 @@ export function providerFromConfig(name) {
   // Env overrides for the resolved provider (CLI loadConfig runtime overrides)
   if (process.env.THINCODER_BASE_URL) provider.baseURL = process.env.THINCODER_BASE_URL.replace(/\/+$/, "")
   if (provider.baseURL) provider.baseURL = provider.baseURL.replace(/\/+$/, "")
+
+  // Proxy: per-provider `proxy: true` AND global config.proxy.model === true (CLI injectProxy parity).
+  // Default model requests go direct — proxy.model is opt-in.
+  const proxyCfg = normalizeProxy(raw.proxy)
+  if (target.proxy === true && proxyCfg?.uri && proxyCfg.model === true) {
+    provider.proxyUri = proxyCfg.uri
+  }
   return provider
 }
 

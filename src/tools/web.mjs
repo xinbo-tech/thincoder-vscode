@@ -1,6 +1,9 @@
 /**
  * web.mjs — Web tools: websearch, fetch
+ * Both route through the shared proxy when config proxy.web is on (CLI parity).
  */
+
+import { proxyFetch, resolveWebProxy } from "../proxy.mjs"
 
 export const websearchTool = {
   readonly: true,
@@ -18,12 +21,12 @@ export const websearchTool = {
     },
     required: ["query"],
   },
-  async execute({ query, limit }) {
+  async execute({ query, limit }, ctx) {
     try {
       const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${limit || 8}`
-      const res = await fetch(url, {
+      const res = await proxyFetch(url, {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ThinCoder-VSCode/0.1" },
-      })
+      }, resolveWebProxy(ctx))
       const html = await res.text()
       // Simple extraction: find result snippets
       const results = []
@@ -58,12 +61,12 @@ export const fetchTool = {
     },
     required: ["url"],
   },
-  async execute({ url }) {
+  async execute({ url }, ctx) {
     try {
-      const res = await fetch(url, {
+      const res = await proxyFetch(url, {
         headers: { "User-Agent": "Mozilla/5.0 ThinCoder-VSCode/0.1" },
         signal: AbortSignal.timeout(20000),
-      })
+      }, resolveWebProxy(ctx))
       const text = await res.text()
       // Strip HTML tags for cleaner output
       const stripped = text.replace(/<script[\s\S]*?<\/script>/gi, "")
