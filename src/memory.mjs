@@ -23,6 +23,7 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { getEmbedder, setVSCodeEmbedder } from "./embed-config.mjs"
+import { loadIndex, searchIndex } from "./indexer.mjs"
 
 const VALID_TYPES = new Set(["rule", "knowledge", "decision", "pattern"])
 
