@@ -94,6 +94,22 @@ export function saveProxySettingsFromPanel(payload) {
   })
 }
 
+/** Test the proxy connection from the extension host (webview cannot run Node code).
+ *  Returns { ok, status } or { ok: false, error }. */
+export async function testProxyConnection(uri) {
+  const { proxyFetch } = await import("../proxy.mjs")
+  const proxyUri = (uri || "").trim() || null
+  try {
+    const res = await Promise.race([
+      proxyFetch("https://www.gstatic.com/generate_204", { headers: { "User-Agent": "ThinCoder" } }, proxyUri),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after 5s")), 5000)),
+    ])
+    return res.ok ? { ok: true, status: res.status } : { ok: false, status: res.status }
+  } catch (e) {
+    return { ok: false, error: e.message }
+  }
+}
+
 /** Persist agent settings from the panel. payload: { maxTurns?, subagentTurns?, compactThreshold?, verifyGuard?, advisor? } */
 export function saveAgentSettingsFromPanel(payload) {
   const patch = {}

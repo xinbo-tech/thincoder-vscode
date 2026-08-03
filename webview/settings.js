@@ -134,7 +134,7 @@ export function initSettings({ vscode, inputEl, onClose }) {
 
   window._mcpServers = {}
 
-  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateProxySettings }
+  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateProxySettings, updateProxyTestResult }
 }
 
 function openSettings() {
@@ -299,20 +299,12 @@ function buildSettings() {
   }
   const pxTest = document.getElementById("px-test-btn")
   if (pxTest) {
-    pxTest.addEventListener("click", async () => {
+    pxTest.addEventListener("click", () => {
       const result = document.getElementById("px-test-result")
       if (result) result.textContent = "Testing…"
-      const uri = document.getElementById("px-uri")?.value?.trim() || undefined
-      try {
-        const { proxyFetch } = await import("../src/proxy.mjs")
-        const res = await Promise.race([
-          proxyFetch("https://www.gstatic.com/generate_204", { headers: { "User-Agent": "ThinCoder" } }, uri || null),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after 5s")), 5000)),
-        ])
-        if (result) result.textContent = res.ok ? `✓ OK (HTTP ${res.status})` : `✗ HTTP ${res.status}`
-      } catch (e) {
-        if (result) result.textContent = `✗ ${e.message}`
-      }
+      const uri = document.getElementById("px-uri")?.value?.trim() || ""
+      // Test runs in the extension host (Node) — the webview cannot import Node modules.
+      window._vscode.postMessage({ type: "testProxy", uri })
     })
   }
   // Bind Agent/Advisor settings save
@@ -465,6 +457,14 @@ function updateProxySettings(settings) {
   _proxySettings = settings
   const panel = document.getElementById("settings-panel")
   if (panel && panel.style.display !== "none") buildSettings()
+}
+
+function updateProxyTestResult(result) {
+  const el = document.getElementById("px-test-result")
+  if (!el) return
+  if (result?.ok) el.textContent = `✓ OK (HTTP ${result.status})`
+  else if (result?.status) el.textContent = `✗ HTTP ${result.status}`
+  else el.textContent = `✗ ${result?.error || "unknown error"}`
 }
 
 function updateIndexStatus(s) {

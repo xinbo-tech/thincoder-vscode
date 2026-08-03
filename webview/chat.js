@@ -75,7 +75,7 @@ const { showAtDropdown, closeAtDropdown } = _ac
 
 // ─── Settings panel (init early so openSettings is available for toolbar binding) ──
 const _settings = initSettings({ vscode, inputEl: ctx.inputEl, onClose: () => ctx.inputEl.focus() })
-const { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateProxySettings } = _settings
+const { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateProxySettings, updateProxyTestResult } = _settings
 
 // ─── Session bar ───────────────────────────────
 
@@ -629,6 +629,9 @@ window.addEventListener("message", (e) => {
       break
     case "proxySettings":
       updateProxySettings(m.settings || {})
+      break
+    case "proxyTestResult":
+      updateProxyTestResult(m.result || {})
       break
     case "permissionRequest": {
       const el = document.createElement("div")

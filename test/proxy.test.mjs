@@ -105,6 +105,27 @@ describe("proxyFetch — local CONNECT tunnel", () => {
     }
   })
 
+  it("testProxyConnection surfaces proxy failure as { ok:false } (not a crash)", async () => {
+    const { testProxyConnection } = await import("../src/extension/settings.mjs")
+    // Refusing CONNECT proxy → the tunnel fails → result is an error object
+    const proxy = createServer((sock) => {
+      let buf = ""
+      sock.on("data", (d) => {
+        buf += d.toString()
+        if (buf.includes("\r\n\r\n")) sock.write("HTTP/1.1 403 Forbidden\r\n\r\n")
+      })
+    })
+    await new Promise((r) => proxy.listen(0, "127.0.0.1", r))
+    const port = proxy.address().port
+    try {
+      const r = await testProxyConnection(`http://127.0.0.1:${port}`)
+      assert.equal(r.ok, false)
+      assert(r.error, "error message present")
+    } finally {
+      proxy.close()
+    }
+  })
+
   it("no proxy → native fetch (returns an error object for unreachable host, not a throw)", async () => {
     // Unreachable host with no proxy: native fetch rejects — we just assert the call path
     // doesn't crash with a proxy-specific error.
