@@ -9,7 +9,7 @@ import assert from "node:assert/strict"
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { compactHistory } from "../src/context.mjs"
+import { compactHistory, truncateFallback, shrinkOversized } from "../src/context.mjs"
 import { specForModel } from "../src/config.mjs"
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -20,8 +20,8 @@ function setupTempDir() {
   return dir
 }
 
-function mockProvider(model = "deepseek-v4-pro") {
-  return { baseURL: "https://api.test/v1", apiKey: "sk-test", model }
+function mockProvider(model = "deepseek-v4-pro", port = null) {
+  return { baseURL: port ? `http://127.0.0.1:${port}` : "https://api.test/v1", apiKey: "sk-test", model }
 }
 
 // ─── Model specs ────────────────────────────────────────────────
@@ -79,8 +79,25 @@ describe("model specs", () => {
 
 // ─── Compaction ─────────────────────────────────────────────────
 
+/** Local mock LLM server: returns a single SSE response with the given content. */
+function mockLLMServer(content = "这是摘要") {
+  return import("node:http").then(({ createServer }) => {
+    const server = createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "text/event-stream" })
+      res.end(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content } }] })}\n\n` +
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` +
+        `data: [DONE]\n\n`
+      )
+    })
+    return new Promise((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port }))
+    })
+  })
+}
+
 describe("compaction — threshold is model-aware", () => {
-  it("does not compact below 80% of context", async () => {
+  it("does not compact below 60% of context", async () => {
     const cwd = setupTempDir()
     try {
       const messages = []
@@ -90,7 +107,7 @@ describe("compaction — threshold is model-aware", () => {
         messages.push({ role: "assistant", content: `response ${i} `.repeat(30) })
       }
 
-      // 1M model: threshold = 800K — 50K should not trigger
+      // 1M model: threshold = 600K — 50K should not trigger
       const result = await compactHistory(messages, "system prompt", mockProvider("deepseek-v4-pro"))
       assert.equal(result, null, "50K tokens on 1M model should not compact")
     } finally {
@@ -100,6 +117,7 @@ describe("compaction — threshold is model-aware", () => {
 
   it("compacts when over threshold", async () => {
     const cwd = setupTempDir()
+    const { server, port } = await mockLLMServer()
     try {
       const messages = []
       // Create many large messages to force compaction on default 128K model
@@ -108,18 +126,23 @@ describe("compaction — threshold is model-aware", () => {
         messages.push({ role: "assistant", content: `response number ${i} `.repeat(60) })
       }
 
-      // Default model = 128K, threshold = 102K. Large messages should trigger.
-      const result = await compactHistory(messages, "system prompt", mockProvider("unknown-model"))
+      // Default model = 128K, threshold = 76.8K. Large messages should trigger.
+      const result = await compactHistory(
+        messages, "system prompt",
+        mockProvider("unknown-model", port),
+      )
       assert.notEqual(result, null, "should trigger compaction")
-      assert.ok(result[0].content.includes("compacted"), "should have compaction notice")
+      assert.ok(result.some((m) => m.content?.includes("compacted")), "should have compaction notice")
       assert.ok(result.some(m => m.role === "assistant"), "should have assistant ack")
     } finally {
+      server.close()
       rmSync(cwd, { recursive: true, force: true })
     }
   })
 
   it("preserves tool_call—tool_response pairing", async () => {
     const cwd = setupTempDir()
+    const { server, port } = await mockLLMServer()
     try {
       // Create a conversation with tool calls at the boundary
       const messages = []
@@ -136,7 +159,10 @@ describe("compaction — threshold is model-aware", () => {
       messages.push({ role: "tool", tool_call_id: "tool_1", content: "file content here" })
       messages.push({ role: "assistant", content: "I see the file" })
 
-      const result = await compactHistory(messages, "system prompt", mockProvider("unknown-model"))
+      const result = await compactHistory(
+        messages, "system prompt",
+        mockProvider("unknown-model", port),
+      )
       assert.notEqual(result, null, "should compact")
       // The tool response should be in the tail (not summarized)
       const hasToolResponse = result.some(
@@ -144,6 +170,33 @@ describe("compaction — threshold is model-aware", () => {
       )
       assert.ok(hasToolResponse, "tool response should survive compaction")
     } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("head protection: assistant tool_calls at the head boundary pulls its tool responses in", async () => {
+    const cwd = setupTempDir()
+    const { server, port } = await mockLLMServer()
+    try {
+      // Head boundary: message[1] is an assistant declaring tool_calls — its tool
+      // responses must stay in head, otherwise the summary swallows them (protocol 400).
+      const messages = [
+        { role: "user", content: "最初需求" },
+        { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "read", arguments: "{}" } }] },
+        { role: "tool", tool_call_id: "call_1", content: "结果" },
+      ]
+      for (let i = 0; i < 500; i++) {
+        messages.push({ role: "user", content: `msg ${i} `.repeat(80) })
+        messages.push({ role: "assistant", content: `resp ${i} `.repeat(60) })
+      }
+      const result = await compactHistory(messages, "system prompt", mockProvider("unknown-model", port))
+      assert.notEqual(result, null, "should compact")
+      // The tool response survives (in head), the pair is not split
+      assert.ok(result.some((m) => m.role === "tool" && m.tool_call_id === "call_1"), "head tool response must survive")
+      assert.ok(result.some((m) => m.tool_calls?.some((tc) => tc.id === "call_1")), "owner assistant must survive")
+    } finally {
+      server.close()
       rmSync(cwd, { recursive: true, force: true })
     }
   })
@@ -162,7 +215,7 @@ describe("compaction — threshold is model-aware", () => {
     assert.equal(result, null)
   })
 
-  it("fallback summary is used when no provider", async () => {
+  it("no provider throws — caller degrades via truncateFallback (heuristic summary deprecated)", async () => {
     const cwd = setupTempDir()
     try {
       const messages = []
@@ -170,13 +223,65 @@ describe("compaction — threshold is model-aware", () => {
         messages.push({ role: "user", content: `test ${i} `.repeat(80) })
         messages.push({ role: "assistant", content: `resp ${i} `.repeat(60) })
       }
-      // Pass null provider — should use heuristic fallback
-      const result = await compactHistory(messages, "system", null)
-      assert.notEqual(result, null, "should compact with fallback")
-      assert.ok(result[0].content.includes("compacted"), "should have compaction notice")
+      await assert.rejects(
+        () => compactHistory(messages, "system", null),
+        /no provider available/,
+        "null provider must throw so the caller can count failures and degrade",
+      )
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
+  })
+
+  it("measured baseline triggers compaction even when estimation is below threshold", async () => {
+    const cwd = setupTempDir()
+    const { server, port } = await mockLLMServer()
+    try {
+      const messages = []
+      for (let i = 0; i < 14; i++) {
+        messages.push({ role: "user", content: `m${i} ` + "x".repeat(4) }) // ~28 tokens total
+      }
+      // Pure estimation (~28 + system) is far below threshold 500 — but the measured
+      // baseline 10_000 + appended messages exceeds it, so compaction must trigger.
+      const result = await compactHistory(messages, "system prompt", mockProvider("unknown-model", port), 500, {
+        lastPromptTokens: 10_000,
+        usageAtLen: 0,
+      })
+      assert.notEqual(result, null, "measured baseline must trigger compaction")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("truncateFallback drops the middle deterministically (no LLM call)", () => {
+    const history = []
+    for (let i = 0; i < 40; i++) {
+      history.push({ role: "user", content: `消息 ${i}` })
+      history.push({ role: "assistant", content: `回复 ${i}` })
+    }
+    const out = truncateFallback(history, mockProvider("deepseek-v4-pro"))
+    assert.ok(out, "should truncate")
+    assert.ok(out.length < history.length, "result must be shorter")
+    assert.ok(out.some((m) => m.content.includes("truncated")), "blunt truncation note present")
+    assert.ok(out.some((m) => m.content.includes("消息 0")), "head kept")
+    assert.ok(out.some((m) => m.content.includes("回复 39")), "tail kept")
+  })
+
+  it("shrinkOversized truncates a single giant user/tool message body", () => {
+    const history = [
+      { role: "user", content: "需求" },
+      { role: "user", content: "开".repeat(60_000) },
+      { role: "assistant", content: "收到" },
+      { role: "tool", tool_call_id: "c1", content: "结果 " + "y".repeat(20_000) },
+      { role: "user", content: "继续" },
+    ]
+    const out = shrinkOversized(history)
+    assert.ok(out, "should shrink")
+    assert.ok(out[1].content.length < 7_000, "giant user message truncated")
+    assert.ok(out[1].content.includes("truncated"), "stub marker present")
+    assert.equal(out[3].tool_call_id, "c1", "tool_call_id untouched (no protocol 400 risk)")
+    assert.ok(out[3].content.length < 7_000, "giant tool result truncated")
   })
 })
 

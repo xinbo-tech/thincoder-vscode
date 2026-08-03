@@ -14,7 +14,7 @@ import {
   planTool, goalTool, skillTool, verifyTool, timerTool,
   advisorTool, engTool,
 } from "./agent-tools.mjs"
-import { compactHistory, injectContext } from "./context.mjs"
+import { compactHistory, injectContext, truncateFallback, COMPRESS_FAILURE_LIMIT } from "./context.mjs"
 import { loadAgentSettings, loadRaw, normalizeProxy } from "./config-io.mjs"
 import { isDocFile } from "./advisor/repos.mjs"
 import * as os from "node:os"
@@ -55,6 +55,10 @@ const STALL_WINDOW = 5
 const STALL_THRESHOLD = 3
 const MAX_VERIFY_PUSHBACKS = 2
 const MAX_VERIFY_RETRIES = 3
+const MAX_EMPTY_RETRIES = 2 // empty-response retry budget (CLI parity, IK60QP)
+
+/** Task re-injection reminder prefix — stale copies are filtered before re-injecting (CLI parity D7). */
+const TASK_REINJECT_PREFIX = "[System reminder: your current task list after compaction:"
 
 /**
  * Build the engineering-mode prompt fragment: engineering template + project METHODOLOGY.md
@@ -145,6 +149,56 @@ function agentState(agent) {
 }
 
 /**
+ * Re-inject state reminders after the machine line was rewritten by compaction or truncation.
+ * Task list is the single source of truth: stale re-injections are filtered FIRST, then the
+ * latest version is appended (CLI parity D7 — otherwise old copies accumulate and grow stale).
+ */
+function reinjectAfterCompaction(history, agent, autoApprove) {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i]
+    if (m.role === "user" && typeof m.content === "string" && m.content.startsWith(TASK_REINJECT_PREFIX)) {
+      history.splice(i, 1)
+    }
+  }
+
+  // Re-inject task list after compaction (single source of truth)
+  if (agent._tasks?.length > 0) {
+    const pending = agent._tasks.filter((t) => t.status !== "done")
+    const done = agent._tasks.filter((t) => t.status === "done")
+    const taskSummary = [
+      ...pending.map((t) => `- [${t.status}] ${t.title}`),
+      ...done.slice(0, 3).map((t) => `- [done] ${t.title}`),
+    ].join("\n")
+    history.push({
+      role: "user",
+      content: `[System reminder: your current task list after compaction:\n${taskSummary}\nContinue from where you left off.]`,
+    })
+  }
+
+  // Re-inject plan mode if active
+  if (agent._planMode) {
+    history.push({
+      role: "user",
+      content: "[System reminder: plan mode is active. Explore the codebase read-only, design your solution, then call plan with action='exit' to present it for user approval.]",
+    })
+  }
+
+  // Re-inject permission mode reminder
+  if (autoApprove) {
+    history.push({
+      role: "user",
+      content: "[System reminder: AUTO mode is active — all tool calls are automatically approved without asking.]",
+    })
+  } else {
+    history.push({
+      role: "user",
+      content: "[System reminder: Permission mode — confirm with the user before making changes. Describe what you plan to modify and wait for approval before executing file-changing tools.]",
+    })
+  }
+}
+
+
+/**
  * Run the agent loop.
  * @param {object} opts - { depth, role, maxTurns } for subagent context
  */
@@ -188,6 +242,10 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     _tasks: [], _touchedFiles: [], _planMode: false,
     _goal: null, _provider: provider,
     _verifiedThisRun: false, _pendingTimers: [],
+    // Compaction bookkeeping (CLI parity): measured baseline + failure counter + empty-response budget.
+    // All per-run — the agent object is rebuilt on every runAgent call, so they reset per user message.
+    _lastPromptTokens: null, _usageAtLen: null,
+    _compressFailures: 0, _emptyRetries: 0,
     // Advisor / engineering bookkeeping (CLI parity). _advisorRound always starts at 0 — the
     // convergence budget is per-run (runAgent resets it in the CLI), never persisted.
     _role: role,
@@ -306,45 +364,43 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   for (let turn = 0; turn < maxTurns; turn++) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
 
-    // Context compaction check
-    const compacted = await compactHistory(history, systemPrompt, provider, cfgCompactThreshold)
-    if (compacted) {
-      history.length = 0
-      history.push(...compacted)
-
-      // Re-inject task list after compaction (single source of truth)
-      if (agent._tasks?.length > 0) {
-        const pending = agent._tasks.filter((t) => t.status !== "done")
-        const done = agent._tasks.filter((t) => t.status === "done")
-        const taskSummary = [
-          ...pending.map((t) => `- [${t.status}] ${t.title}`),
-          ...done.slice(0, 3).map((t) => `- [done] ${t.title}`),
-        ].join("\n")
-        history.push({
-          role: "user",
-          content: `[System reminder: your current task list after compaction:\n${taskSummary}\nContinue from where you left off.]`,
+    // Context compaction check — only at safe points: history ends with a complete
+    // exchange (user input or tool result), never mid-assistant (CLI parity D1).
+    const lastRole = history.at(-1)?.role
+    if (lastRole === "user" || lastRole === "tool") {
+      try {
+        // Measured baseline path (CLI parity D3): the last response's prompt_tokens is the
+        // true full-context cost; messages appended since are estimated as increments.
+        const compacted = await compactHistory(history, systemPrompt, provider, cfgCompactThreshold, {
+          lastPromptTokens: agent._lastPromptTokens,
+          usageAtLen: agent._usageAtLen,
         })
-      }
-
-      // Re-inject plan mode if active
-      if (agent._planMode) {
-        history.push({
-          role: "user",
-          content: "[System reminder: plan mode is active. Explore the codebase read-only, design your solution, then call plan with action='exit' to present it for user approval.]",
-        })
-      }
-
-      // Re-inject permission mode reminder
-      if (autoApprove) {
-        history.push({
-          role: "user",
-          content: "[System reminder: AUTO mode is active — all tool calls are automatically approved without asking.]",
-        })
-      } else {
-        history.push({
-          role: "user",
-          content: "[System reminder: Permission mode — confirm with the user before making changes. Describe what you plan to modify and wait for approval before executing file-changing tools.]",
-        })
+        if (compacted) {
+          history.length = 0
+          history.push(...compacted)
+          // Measured baseline is invalidated along with old history — fall back to estimation
+          agent._lastPromptTokens = null
+          agent._usageAtLen = null
+          agent._compressFailures = 0
+          reinjectAfterCompaction(history, agent, autoApprove)
+        }
+      } catch (e) {
+        // AbortError must not be swallowed: user cancellation must propagate
+        if (e?.name === "AbortError" || signal?.aborted) throw e
+        // Summary LLM failed — count consecutive failures; after the limit degrade to
+        // deterministic truncation (no network) so the task can continue (CLI parity D6).
+        agent._compressFailures = (agent._compressFailures ?? 0) + 1
+        if (agent._compressFailures >= COMPRESS_FAILURE_LIMIT) {
+          agent._compressFailures = 0
+          const truncated = truncateFallback(history, provider)
+          if (truncated) {
+            history.length = 0
+            history.push(...truncated)
+            agent._lastPromptTokens = null
+            agent._usageAtLen = null
+            reinjectAfterCompaction(history, agent, autoApprove)
+          }
+        }
       }
     }
 
@@ -364,7 +420,15 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       signal,
     })
 
-    if (response.usage && depth === 0) callbacks.onUsage?.(response.usage)
+    if (response.usage && depth === 0) {
+      callbacks.onUsage?.(response.usage)
+      // Measured compaction baseline (CLI parity D3): the full-context prompt_tokens from
+      // this response anchors the next compaction check; appended messages count as increments.
+      if (response.usage.prompt_tokens != null) {
+        agent._lastPromptTokens = response.usage.prompt_tokens
+        agent._usageAtLen = history.length
+      }
+    }
 
     // ─── No tool calls ──────────────────────
     if (response.toolCalls.length === 0) {
@@ -373,7 +437,19 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           // Model output only reasoning (thinking) — treat as content
           response.content = response.reasoning
         } else {
-          throw new Error("LLM returned empty response.")
+          // Transient empty response (reasoning exhausted / output truncated): instead of
+          // aborting the whole turn, inject a reminder and let the model respond again.
+          // Bounded — after MAX_EMPTY_RETRIES consecutive empties, surface the error (CLI parity, IK60QP).
+          const retries = agent._emptyRetries ?? 0
+          if (retries < MAX_EMPTY_RETRIES) {
+            agent._emptyRetries = retries + 1
+            history.push({
+              role: "user",
+              content: "[System reminder: your last response was empty — the provider returned no content (likely reasoning was exhausted or output was truncated). Respond again, continuing your work from where you left off.]",
+            })
+            continue
+          }
+          throw new Error("LLM returned empty response (likely reasoning exhausted or output truncated). Try lowering reasoning effort if this persists.")
         }
       }
 
