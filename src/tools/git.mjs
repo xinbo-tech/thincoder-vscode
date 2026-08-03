@@ -1,8 +1,10 @@
 /**
  * git.mjs — Git tool (CLI parity: single `git` tool with action subcommands).
  * diff / status / log follow the CLI implementation byte-for-byte;
- * checkpoint uses the stash-based snapshot mechanism (CLI uses git-patch snapshots —
- * mechanism divergence tracked in thincoder docs/design/MCP.md §checkpoint-notes).
+ * checkpoint uses the stash-based snapshot mechanism here — the CLI uses v2 full-copy
+ * snapshots (thincoder src/git/checkpoint.mjs). Mechanisms are behaviorally equivalent
+ * for the model (list/create/rewind/cat); aligning VS Code to the CLI v2 implementation
+ * is a tracked follow-up.
  */
 import { runGit, truncate } from "./shared.mjs"
 import { execSync } from "node:child_process"
