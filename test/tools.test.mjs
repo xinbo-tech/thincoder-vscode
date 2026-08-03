@@ -265,3 +265,71 @@ describe("git — unified tool (CLI parity: action subcommands)", () => {
   })
 })
 
+describe("bash — git destructive-command protection (CLI parity)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("rejects checkout -- . when uncommitted changes exist (working tree untouched)", async () => {
+    const { bashTool } = await import("../src/tools/shell.mjs")
+    const { execSync } = await import("node:child_process")
+    execSync("git init -q", { cwd })
+    execSync("git config user.email t@t && git config user.name t", { cwd })
+    writeFileSync(join(cwd, "app.js"), "const v = 1\n")
+    execSync("git add app.js && git commit -qm init", { cwd })
+    writeFileSync(join(cwd, "app.js"), "const v = 2 // uncommitted\n")
+
+    await assert.rejects(
+      () => bashTool.execute({ command: "git checkout -- ." }, { cwd }),
+      /Refusing destructive git command: uncommitted changes exist/,
+    )
+    // 命令未执行 → 工作区原样（拒绝路径不产生副作用）
+    assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 2 // uncommitted\n")
+    // 拒绝路径不创建 stash（没有破坏发生，无需快照）
+    const stash = execSync("git stash list", { cwd, encoding: "utf8" })
+    assert.equal(stash, "", "拒绝路径不应产生 stash")
+  })
+
+  it("variant `git checkout HEAD -- .` is snapshot-guarded and the work is recoverable", async () => {
+    const { bashTool } = await import("../src/tools/shell.mjs")
+    const { execSync } = await import("node:child_process")
+    execSync("git init -q", { cwd })
+    execSync("git config user.email t@t && git config user.name t", { cwd })
+    writeFileSync(join(cwd, "app.js"), "const v = 1\n")
+    execSync("git add app.js && git commit -qm init", { cwd })
+    writeFileSync(join(cwd, "app.js"), "const v = 2 // uncommitted\n")
+    writeFileSync(join(cwd, "new.js"), "export const fresh = 42\n")
+
+    // 变体：精确匹配器漏网 → 放行，但 guard 已 stash 快照
+    const r = await bashTool.execute({ command: "git checkout HEAD -- ." }, { cwd })
+    assert.match(r, /\[auto-protection\]/, "变体命令触发自动快照: " + r.slice(0, 120))
+    assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 1\n", "tracked 修改被回滚抹掉")
+
+    // 从 stash 恢复未提交工作（untracked 经 stash 有 CRLF 转换，比较时归一化）
+    execSync("git stash apply", { cwd, encoding: "utf8" })
+    assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 2 // uncommitted\n", "stash 恢复 tracked 修改")
+    assert.equal(readFileSync(join(cwd, "new.js"), "utf8").replace(/\r\n/g, "\n"), "export const fresh = 42\n", "stash 恢复 untracked 新文件")
+  })
+
+  it("non-destructive git commands are untouched", async () => {
+    const { bashTool } = await import("../src/tools/shell.mjs")
+    const { execSync } = await import("node:child_process")
+    execSync("git init -q", { cwd })
+    execSync("git config user.email t@t && git config user.name t", { cwd })
+    writeFileSync(join(cwd, "app.js"), "const v = 1\n")
+    execSync("git add app.js && git commit -qm init", { cwd })
+
+    for (const cmd of ["git status", "git log --oneline", "git checkout --help", "git branch"]) {
+      const r = await bashTool.execute({ command: cmd }, { cwd })
+      assert.ok(!r.includes("[auto-protection]"), `${cmd} 不应触发保护`)
+    }
+    // 非 git 仓库：拒绝（restore 在非仓库无意义）
+    const plain = mkdtempSync(join(tmpdir(), "thincoder-vscode-shell-plain-"))
+    await assert.rejects(
+      () => bashTool.execute({ command: "git restore ." }, { cwd: plain }),
+      /not a git repository/,
+    )
+    rmSync(plain, { recursive: true, force: true })
+  })
+})
+
+
