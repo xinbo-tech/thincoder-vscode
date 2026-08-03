@@ -174,7 +174,19 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
     if (response.ok) return response
 
     const text = await response.text().catch(() => "")
-    const message = `LLM API error ${response.status}: ${text}`
+    let message = `LLM API error ${response.status}: ${text}`
+    // Kimi has TWO separate platforms with non-interchangeable keys (IK5VGJ):
+    // Moonshot (api.moonshot.cn, sk-...) vs Kimi For Coding (api.kimi.com/coding/v1, sk-kimi-...).
+    // A 401 on either endpoint is usually a wrong-platform key — say so instead of a bare 401.
+    if (response.status === 401) {
+      const key = String(provider.apiKey ?? "").trim()
+      const base = String(provider.baseURL ?? "").toLowerCase()
+      const kimiCodeKey = /^sk-kimi-/i.test(key)
+      const kimiCodeUrl = base.includes("api.kimi.com")
+      if (kimiCodeKey || kimiCodeUrl) {
+        message += " — tip: Kimi has two separate platforms with NON-interchangeable API keys: Moonshot (api.moonshot.cn/v1, sk-...) and Kimi For Coding (api.kimi.com/coding/v1, sk-kimi-...). Your key or baseURL looks mismatched — check which platform issued it."
+      }
+    }
     if (isNonRetryableError(response.status, text)) throw new Error(message)
     if (response.status === 429) {
       const retryAfter = Number(response.headers.get("retry-after"))

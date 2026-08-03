@@ -23,6 +23,8 @@ const MODEL_SPECS = [
   ["deepseek-chat",     { context: 256_000,   maxOutput: 384_000, thinking: false, prefixMode: true,  cacheMode: "prompt", thinkApi: "type", reasoningEcho: "required", reasoningEffortEnum: ["high", "max"], tempRange: [0, 2] }],
   // Kimi series
   ["kimi-k3",           { context: 1_000_000, maxOutput: 128_000, thinking: true,  partialMode: true, multimodal: true, cacheMode: "prompt", thinkApi: "effort", reasoningEcho: "required", reasoningEffortEnum: ["low", "high", "max"] }],
+  // Kimi For Coding endpoint uses the short model ID "k3" (same specs as kimi-k3) — IK5VGJ
+  ["k3",                { context: 1_000_000, maxOutput: 128_000, thinking: true,  partialMode: true, multimodal: true, cacheMode: "prompt", thinkApi: "effort", reasoningEcho: "required", reasoningEffortEnum: ["low", "high", "max"] }],
   ["kimi-k2",           { context: 256_000,   maxOutput: 128_000, thinking: false, partialMode: true, multimodal: true, cacheMode: "none" }],
   ["moonshot",          { context: 128_000,   maxOutput: 32_000,  thinking: false, cacheMode: "none" }],
   // GLM series
@@ -62,11 +64,20 @@ const MODEL_SPECS = [
 
 const DEFAULT_SPEC = { context: 128_000, maxOutput: 32_000, cacheMode: "none" }
 
+/** Warn once per unknown model name — specForModel is a hot path (every request). IK5VGJ */
+const warnedModels = new Set()
+
 /** Look up spec by model name prefix (case-insensitive), conservative default for unknown models */
 export function specForModel(model) {
   const m = (model ?? "").toLowerCase()
   for (const [prefix, spec] of [...MODEL_SPECS].sort((a, b) => b[0].length - a[0].length)) {
     if (m.startsWith(prefix.toLowerCase())) return spec
+  }
+  // Unknown model: warn ONCE (not per request) so a typo'd ID or a missing alias surfaces
+  // instead of silently degrading to the 128K default (IK5VGJ).
+  if (m && !warnedModels.has(m)) {
+    warnedModels.add(m)
+    console.warn(`[config] model "${model}" not found in MODEL_SPECS — using default spec (128K context, 32K output). Check the model ID or add an alias.`)
   }
   return DEFAULT_SPEC
 }

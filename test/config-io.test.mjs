@@ -56,11 +56,13 @@ function readCfg() {
 
 describe("PROVIDER_PRESETS — CLI parity", () => {
   it("mirrors the CLI preset values (endpoints, models, field names)", () => {
-    assert.equal(Object.keys(PROVIDER_PRESETS).length, 16)
+    assert.equal(Object.keys(PROVIDER_PRESETS).length, 17)
     assert.equal(PROVIDER_PRESETS.deepseek.baseURL, "https://api.deepseek.com") // no /v1
     assert.equal(PROVIDER_PRESETS.minimax.baseURL, "https://api.minimaxi.com/v1")
     assert.equal(PROVIDER_PRESETS.grok.model, "grok-4.5")
     assert.equal(PROVIDER_PRESETS.kimi.thinking, null)
+    assert.equal(PROVIDER_PRESETS["kimi-code"].baseURL, "https://api.kimi.com/coding/v1") // IK5VGJ
+    assert.equal(PROVIDER_PRESETS["kimi-code"].model, "k3")
     assert.equal(PROVIDER_PRESETS.qwen.reasoningEffort, "high")
     // field names use CLI vocabulary: reasoningEffort / desc (not defaultEffort / label)
     assert.equal("reasoningEffort" in PROVIDER_PRESETS.deepseek, true)

@@ -75,6 +75,35 @@ describe("model specs", () => {
     assert.equal(specForModel("deepseek-v4-pro").maxOutput, 384_000)
     assert.equal(specForModel("deepseek-v4-flash").context, 256_000)
   })
+
+  it("kimi-code preset + short ID k3 get the kimi-k3 spec (IK5VGJ)", async () => {
+    const { PROVIDER_PRESETS } = await import("../src/config-io.mjs")
+    const preset = PROVIDER_PRESETS["kimi-code"]
+    assert.ok(preset, "kimi-code preset must exist")
+    assert.equal(preset.baseURL, "https://api.kimi.com/coding/v1")
+    assert.equal(preset.model, "k3")
+    const s = specForModel("k3")
+    assert.equal(s.context, 1_000_000, "k3 must get 1M context (not the 128K default)")
+    assert.equal(s.multimodal, true, "k3 supports images — read_image must not be gated off")
+    assert.equal(s.partialMode, true)
+    assert.equal(s.reasoningEcho, "required")
+    assert.equal(specForModel("kimi-k3").context, 1_000_000, "kimi-k3 itself unaffected")
+  })
+
+  it("unknown model name warns once, not per request (IK5VGJ)", () => {
+    const warns = []
+    const orig = console.warn
+    console.warn = (...a) => warns.push(a.join(" "))
+    try {
+      const name = `no-such-model-${Date.now()}`
+      assert.equal(specForModel(name).context, 128_000)
+      assert.equal(specForModel(name).context, 128_000)
+      assert.equal(warns.length, 1, "warn exactly once per model name")
+      assert.ok(warns[0].includes(name))
+    } finally {
+      console.warn = orig
+    }
+  })
 })
 
 // ─── Compaction ─────────────────────────────────────────────────
@@ -282,6 +311,33 @@ describe("compaction — threshold is model-aware", () => {
     assert.ok(out[1].content.includes("truncated"), "stub marker present")
     assert.equal(out[3].tool_call_id, "c1", "tool_call_id untouched (no protocol 400 risk)")
     assert.ok(out[3].content.length < 7_000, "giant tool result truncated")
+  })
+
+  it("401 with sk-kimi- key hints at the Kimi two-platform mismatch (IK5VGJ)", async () => {
+    const { chat } = await import("../src/provider.mjs")
+    const origFetch = globalThis.fetch
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 401,
+      text: async () => JSON.stringify({ error: { message: "invalid api key" } }),
+    })
+    try {
+      // Kimi For Coding key on a non-kimi endpoint → hint appended
+      await assert.rejects(
+        () => chat({ baseURL: "https://api.moonshot.cn/v1", apiKey: "sk-kimi-abc", model: "k3" }, {
+          messages: [{ role: "user", content: "hi" }],
+        }),
+        /Kimi|Moonshot/,
+        "401 with sk-kimi- key must hint at the two-platform mismatch",
+      )
+      // Plain key on a plain endpoint → bare message preserved
+      const err = await chat({ baseURL: "https://api.other.com/v1", apiKey: "sk-abc", model: "m" }, {
+        messages: [{ role: "user", content: "hi" }],
+      }).then(() => null, (e) => e)
+      assert.ok(!/tip: Kimi/.test(err.message), "non-Kimi 401 keeps the bare message")
+    } finally {
+      globalThis.fetch = origFetch
+    }
   })
 })
 
