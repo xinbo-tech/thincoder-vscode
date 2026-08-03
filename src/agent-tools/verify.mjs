@@ -3,12 +3,12 @@
  * Run a pre-completion self-check: syntax checks + VSCode diagnostics on changed files,
  * optionally the full test suite.
  */
-import { join, isAbsolute } from "node:path"
 import { resolvePath } from "../tools/shared.mjs"
 import * as vscode from "vscode"
 
 export const verifyTool = {
   name: "verify",
+  readonly: true,
   description:
     "Run a pre-completion self-check. Runs syntax checks and reads editor diagnostics on changed files.\n" +
     "Parameters:\n" +

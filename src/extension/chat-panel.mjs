@@ -208,6 +208,10 @@ export class ChatPanel {
       display: existing.display ?? [], tasks: extra.tasks ?? existing.tasks ?? [],
       planMode: existing.planMode ?? false, goal: existing.goal ?? null,
       autoApprove: existing.autoApprove ?? false, advisor: existing.advisor ?? null,
+      // Engineering state persisted by runAgent (agentState): design token survives turns;
+      // the engineering flag mirrors config.json so the CLI side round-trips it too.
+      engineering: extra.engineering ?? existing.engineering ?? false,
+      engDesignToken: extra.engDesignToken ?? existing.engDesignToken ?? null,
       pendingReminders: existing.pendingReminders ?? [], sessionStart: existing.sessionStart ?? null,
     })
   }
@@ -508,6 +512,14 @@ export class ChatPanel {
     const history = Array.isArray(contextHistory) ? contextHistory : [...fullHistory]
     const isFirstMessage = fullHistory.filter((m) => (m.type ?? m.role) === "user").length === 0
 
+    // Restore the session-scoped design token (persists across turns within a session; the
+    // `engineering` flag and advisor convergence budget live elsewhere — the flag in config.json,
+    // the budget resets per run, CLI parity).
+    const sessionData = this._activeData() ?? {}
+    const engState = {
+      engDesignToken: sessionData.engDesignToken ?? null,
+    }
+
     // Persist model selection
     const prefs = { model: modelOverride || p.model, provider: providerName, reasoning: reasoning || "" }
     saveModelPrefs(this._context.workspaceState, prefs)
@@ -545,9 +557,11 @@ export class ChatPanel {
         onToolCall: (n, a, id) => this._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
         onToolResult: (n, r, id) => this._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 2000), id }),
         onToolPanel: (name, text) => this._panel?.webview.postMessage({ type: "toolPanel", name, text }),
-        onComplete: () => {
+        onComplete: (content, agentState) => {
           // runAgent already appended the real messages to both lines via pushReal; just persist them.
-          this._saveLines(fullHistory, history, { activeProvider: providerName })
+          // agentState carries the engineering/advisor bookkeeping (CLI session fields:
+          // engineering / engDesignToken / advisorRound).
+          this._saveLines(fullHistory, history, { activeProvider: providerName, ...agentState })
           this._panel?.webview.postMessage({ type: "complete" })
           this._pushSessions()
         },
@@ -556,7 +570,7 @@ export class ChatPanel {
             this._permissionQueue.push({ resolve, toolName })
             this._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
           }),
-      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}), images, skills: loadSkills(cwd), history, fullHistory })
+      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: c.get("mcpServers", {}), images, skills: loadSkills(cwd), history, fullHistory, engState })
     } catch (e) {
       if (e.name === "AbortError") {
         this._panel.webview.postMessage({ type: "aborted" })

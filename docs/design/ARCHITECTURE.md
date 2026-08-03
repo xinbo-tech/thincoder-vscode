@@ -119,7 +119,7 @@ user input
 **工具清单（20+）**：
 | 分类 | 工具 |
 |------|------|
-| 文件 | `read`, `write`, `edit`, `insert_after`, `delete`, `syntax_check` |
+| 文件 | `read`, `write`, `edit`, `insert_after`, `delete`, `lint`（CLI 级联）, `checklist` |
 | 搜索 | `glob`, `grep`, `ls`, `code_search`, `doc_search` |
 | Git | `git_diff`, `git_status`, `git_log`, `checkpoint` |
 | 系统 | `bash` |
@@ -127,7 +127,13 @@ user input
 | 交互 | `question` |
 | 媒体 | `read_image` |
 | 补丁 | `apply_patch` |
-| 元工具 | `task`, `recent_changes`, `subagent`, `plan`, `goal`, `skill`, `verify` |
+| 元工具 | `task`, `recent_changes`, `subagent`, `plan`, `goal`, `skill`, `verify`, `timer`, `advisor`, `eng` |
+
+**advisor / eng（与 CLI 同源移植）**：
+- `advisor`：独立只读评审子代理，工具集 = read/glob/grep/ls/git_diff/git_status/git_log/code_search（CLI 另有 lsp，VS Code 侧待 T19 落地）。收敛协议（round 1 全量 → round 2 验证+新明显问题 → round 3+ 严格验证，机械上限 5 轮）、会话内 `_advisorSession` 复用、`.thincoder/advisor.md` 自定义标准、`advisor.enabled/guard` 配置、advisor guard pushback（最多 3 次）——全部与 CLI 一致。
+- `type='design'` 设计评审：生成 HMAC 签名 design token（1 小时过期），advisor 仅在无 🔴 时回显 `[DESIGN-TOKEN:…]`，回显即签发 token 给 eng-coder。
+- `eng`：工程模式开关，engineering 标志落盘共享 config.json（`agent.engineering`）；工程模式下主代理 system prompt 换成 `engineering.md` + 项目 METHODOLOGY.md，dispatch 门禁机械拦截 design review 通过前的代码文件写入（docs/** 豁免），`eng-coder` 子代理须持 token 才获写权限（spawn 时校验 + 运行时门禁双保险）。
+- 工程状态持久化：`engineering` 进 config.json，`engDesignToken` 进会话槽位文件（`_advisorRound` 为 per-run，不持久化，与 CLI 一致）。
 
 ### 4. LLM 调用层（`src/provider.mjs` + `src/provider/rate.mjs`）
 

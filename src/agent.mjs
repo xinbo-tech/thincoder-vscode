@@ -12,19 +12,36 @@ import { builtinTools, toOpenAISchema, readImageTool } from "./tools.mjs"
 import {
   taskTool, recentChangesTool, subagentTool,
   planTool, goalTool, skillTool, verifyTool, timerTool,
+  advisorTool, engTool,
 } from "./agent-tools.mjs"
 import { compactHistory, injectContext } from "./context.mjs"
-import { loadAgentSettings } from "./config-io.mjs"
+import { loadAgentSettings, loadRaw } from "./config-io.mjs"
+import { isDocFile } from "./advisor/repos.mjs"
 import * as os from "node:os"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SYSTEM_PROMPT = readFileSync(join(__dirname, "prompts", "system.md"), "utf8")
 const DISCIPLINE_RULES = readFileSync(join(__dirname, "prompts", "discipline.md"), "utf8")
 const MAIN_OVERLAY = readFileSync(join(__dirname, "prompts", "main.md"), "utf8")
-let _EXPLORE, _CODER, _PLAN
+let _EXPLORE, _CODER, _PLAN, _ENG_CODER, _ENG_MAIN, _ENG_SUB
 try { _EXPLORE = readFileSync(join(__dirname, "prompts", "explore.md"), "utf8") } catch { _EXPLORE = "" }
 try { _CODER = readFileSync(join(__dirname, "prompts", "coder.md"), "utf8") } catch { _CODER = "" }
 try { _PLAN = readFileSync(join(__dirname, "prompts", "plan.md"), "utf8") } catch { _PLAN = "" }
+try { _ENG_CODER = readFileSync(join(__dirname, "prompts", "eng-coder.md"), "utf8") } catch { _ENG_CODER = "" }
+try { _ENG_MAIN = readFileSync(join(__dirname, "prompts", "engineering.md"), "utf8") } catch { _ENG_MAIN = "" }
+try { _ENG_SUB = readFileSync(join(__dirname, "prompts", "engineering-sub.md"), "utf8") } catch { _ENG_SUB = "" }
+
+/** Engineering mode reminder — shared with the eng tool (CLI parity). */
+export const ENG_ON_REMINDER =
+  "[System reminder: engineering mode is ON — design-before-code enforced. " +
+  "Workflow: Requirements doc → Design doc → advisor(type='design') → " +
+  "user approval → eng-coder implementation. Code changes go through eng-coder " +
+  "subagents only. Advisor calls are NOT per-turn-mandatory — call only at " +
+  "flow nodes or when the user asks.]"
+
+/** File-modifying tools — the engineering design gate blocks these before review passes (CLI parity). */
+const FILE_MUTATORS = new Set(["write", "edit", "insert_after", "apply_patch", "delete", "hashline_edit"])
+const MAX_ADVISOR_PUSHBACKS = 3
 
 const DEFAULT_MAX_TURNS = 100
 
@@ -38,6 +55,33 @@ const STALL_WINDOW = 5
 const STALL_THRESHOLD = 3
 const MAX_VERIFY_PUSHBACKS = 2
 const MAX_VERIFY_RETRIES = 3
+
+/**
+ * Build the engineering-mode prompt fragment: engineering template + project METHODOLOGY.md
+ * (CLI setup.mjs buildEngineeringPrompt parity). Returns { prompt, templateMissing, methodologyMissing }.
+ */
+function loadEngineeringPrompt(cwd, role) {
+  const engTemplate = role === "eng-coder" ? _ENG_SUB : _ENG_MAIN
+  let methodology = ""
+  try { methodology = readFileSync(join(cwd, "METHODOLOGY.md"), "utf8") } catch { /* no methodology */ }
+  const templateMissing = !engTemplate
+  const methodologyMissing = !methodology
+  const prompt = engTemplate
+    ? (methodology ? `${engTemplate}\n\n---\n\n## Project METHODOLOGY.md\n\n${methodology}` : engTemplate)
+    : (methodology ? `[ENGINEERING MODE]\n\nFollow this methodology strictly:\n\n${methodology}` : null)
+  return { prompt, templateMissing, methodologyMissing }
+}
+
+/**
+ * True when this run mutated at least one CODE file (CLI hasCodeMutations parity).
+ * Doc-only changes (docs/, *.md, LICENSE…) must NOT trigger the advisor guard.
+ * _touchedFiles stores absolute paths; the src/ check matches a path component.
+ */
+function hasCodeMutations(agent) {
+  const files = agent._touchedFiles ?? []
+  if (files.length === 0) return agent._mutatedThisRun
+  return files.some((p) => /(?:^|[\\/])src[\\/]/.test(p) || !isDocFile(p))
+}
 const MAX_TOOL_RESULT = 16000 // chars — large results saved to disk instead of truncated (aligns with CLI)
 const TOOL_RESULT_PREVIEW = 2000 // chars shown inline when offloaded (aligns with CLI)
 const MAX_PARALLEL_SUBAGENTS = 3
@@ -90,16 +134,28 @@ function pushReal(history, fullHistory, msg) {
   history.push(msg)
 }
 
+/** Extract the persisted engineering/advisor state for the session file (CLI session.mjs fields).
+ *  Only the design token is session-scoped — engineering lives in config.json and the advisor
+ *  convergence budget resets per run (CLI parity). */
+function agentState(agent) {
+  return {
+    engineering: agent.config?.agent?.engineering ?? false,
+    engDesignToken: agent._engDesignToken ?? null,
+  }
+}
+
 /**
  * Run the agent loop.
  * @param {object} opts - { depth, role, maxTurns } for subagent context
  */
 export async function runAgent(provider, cwd, input, callbacks = {}, signal, autoApprove = true, opts = {}) {
-  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills } = opts
+  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills, engState, engDesignReviewed } = opts
 
   const agentTools = depth === 0
-    ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool]
-    : [taskTool, recentChangesTool] // subagents get fewer meta-tools
+    ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool, advisorTool, engTool]
+    : role === "eng-coder"
+      ? [taskTool, recentChangesTool, planTool, timerTool, advisorTool, verifyTool] // eng-coder: design review + verify gates
+      : [taskTool, recentChangesTool] // subagents get fewer meta-tools
 
   // Subagent role-based tool filtering: explore/plan get read-only tools only
   const isReadOnlyRole = depth > 0 && (role === "explore" || role === "plan")
@@ -111,20 +167,50 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const toolSchemas = tools.map(toOpenAISchema)
   const toolByName = new Map(tools.map((t) => [t.name, t]))
 
+  // Runtime config: advisor settings live in the shared config.json (CLI agent.advisor),
+  // engineering state is per-session (persisted by chat-panel alongside the history lines).
+  let advisorCfg = { enabled: false }
+  let cfgEngineering = false
+  try {
+    const raw = loadRaw()
+    advisorCfg = raw.agent?.advisor ?? { enabled: false }
+    cfgEngineering = raw.agent?.engineering ?? false
+  } catch { /* config unreadable — defaults */ }
+  const engineering = engState?.enabled ?? cfgEngineering
+
   const agent = {
     _tasks: [], _touchedFiles: [], _planMode: false,
     _goal: null, _provider: provider,
     _verifiedThisRun: false, _pendingTimers: [],
+    // Advisor / engineering bookkeeping (CLI parity). _advisorRound always starts at 0 — the
+    // convergence budget is per-run (runAgent resets it in the CLI), never persisted.
+    _role: role,
+    _advisorRound: 0,
+    _advisorSession: null, _advisorLastSnapshotHash: null,
+    _engDesignToken: engState?.engDesignToken ?? null,
+    _engDesignReviewed: engDesignReviewed === true, // eng-coder children arrive pre-authorized
+    _calledAdvisorThisRun: false, _mutatedThisRun: false,
+    _lastEngState: engineering, _pendingReminders: [],
+    config: { advisor: advisorCfg, agent: { engineering } },
   }
+
+  // Live state channel for the parent (eng-coder mutation merge) — the caller gets a
+  // reference to the same array, so it stays current as the child touches files.
+  if (opts.stateSink) opts.stateSink.touchedFiles = agent._touchedFiles
   const platform = { win32: "Windows", darwin: "macOS", linux: "Linux" }[os.platform()] ?? os.platform()
 
-  // System prompt
-  let base = `${SYSTEM_PROMPT}\n\n${DISCIPLINE_RULES}`
+  // System prompt — engineering mode replaces the standard discipline block with
+  // engineering.md (or engineering-sub.md for eng-coder) + project METHODOLOGY.md (CLI parity).
+  const engPromptActive = engineering && (depth === 0 || role === "eng-coder")
+  const engResult = engPromptActive ? loadEngineeringPrompt(cwd, role) : null
+  let base = engPromptActive
+    ? (engResult.prompt ? `${SYSTEM_PROMPT}\n\n${engResult.prompt}` : SYSTEM_PROMPT)
+    : `${SYSTEM_PROMPT}\n\n${DISCIPLINE_RULES}`
   if (depth > 0 && role) {
-    const overlay = { explore: _EXPLORE, coder: _CODER, plan: _PLAN }[role] || ""
+    const overlay = { explore: _EXPLORE, coder: _CODER, plan: _PLAN, "eng-coder": _ENG_CODER }[role] || ""
     base = overlay ? `${overlay}\n\n${base}` : base
   }
-  const systemPrompt = `${base}${depth === 0 ? `\n\n${MAIN_OVERLAY}` : ""}\n\nOS: ${platform}. Working directory: ${cwd}.`
+  const systemPrompt = `${base}${depth === 0 && !engPromptActive ? `\n\n${MAIN_OVERLAY}` : ""}\n\nOS: ${platform}. Working directory: ${cwd}.`
 
   // Dual-line history. Top-level runs use PERSISTENT lines passed in via opts (survive across calls,
   // written to the session file by chat-panel): history = machine context (compaction shrinks it),
@@ -134,6 +220,11 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const history = depth === 0
     ? (opts.history ?? (opts.history = [...fullHistory]))
     : []
+
+  // The advisor helpers (ported from the CLI) reach for agent.cwd and agent.history —
+  // keep those aliases live so the ported modules work unchanged.
+  agent.cwd = cwd
+  agent.history = history
 
   // ─── Context injection (top-level only, fresh machine line only) ────
   // These machine-only injections are transient context; a persistent machine line already carries
@@ -167,6 +258,16 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         content: "[System reminder: Permission mode — confirm with the user before making changes. Describe what you plan to modify and wait for approval before executing file-changing tools.]",
       })
     }
+    // Engineering mode degraded-constraint warnings (CLI setup.mjs parity)
+    if (engPromptActive && (engResult.templateMissing || engResult.methodologyMissing)) {
+      const warnings = []
+      if (engResult.templateMissing) warnings.push(`Engineering template (${role === "eng-coder" ? "engineering-sub.md" : "engineering.md"}) not found — using degraded constraints.`)
+      if (engResult.methodologyMissing) warnings.push("METHODOLOGY.md not found — project-specific rules are absent.")
+      history.push({
+        role: "user",
+        content: `[System reminder: ENGINEERING MODE is active but ${warnings.join(" ")} Create METHODOLOGY.md and ensure prompt templates exist for full enforcement, or disable engineering mode (eng tool).]`,
+      })
+    }
   }
 
   pushReal(history, fullHistory, { role: "user", content: input })
@@ -192,6 +293,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const maxTurns = overrideTurns || configuredMaxTurns()
   const recentSigs = []
   let guardPushbacks = 0
+  let advisorPushbacks = 0
 
   for (let turn = 0; turn < maxTurns; turn++) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
@@ -236,6 +338,12 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           content: "[System reminder: Permission mode — confirm with the user before making changes. Describe what you plan to modify and wait for approval before executing file-changing tools.]",
         })
       }
+    }
+
+    // Flush pending reminders queued by meta-tools (eng enter/exit, etc.)
+    if (agent._pendingReminders.length > 0) {
+      for (const reminder of agent._pendingReminders) history.push({ role: "user", content: reminder })
+      agent._pendingReminders = []
     }
 
     const messages = [{ role: "system", content: systemPrompt }, ...history]
@@ -306,10 +414,26 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
             continue
           }
         }
+
+        // Advisor guard (CLI completion.mjs parity): OPT-IN via advisor.enabled + guard!==false,
+        // NEVER in engineering mode (engineering has its own mandatory gates).
+        const advisorCfg = agent.config?.advisor
+        const advisorReview = advisorCfg?.enabled && advisorCfg?.guard !== false
+        if (advisorReview && !agent.config?.agent?.engineering
+            && agent._mutatedThisRun && !agent._calledAdvisorThisRun && hasCodeMutations(agent)
+            && advisorPushbacks < MAX_ADVISOR_PUSHBACKS) {
+          advisorPushbacks++
+          pushReal(history, fullHistory, { role: "assistant", content: response.content })
+          history.push({
+            role: "user",
+            content: `[System reminder: you changed code in this run and MUST get an advisor review before finishing (round ${agent._advisorRound + 1}). Call the \`advisor\` tool now. This is required, not optional — do not skip it even if you believe the changes are trivial — the review will be quick either way. After the review, produce a response table for every issue found (see discipline rules for format).]`,
+          })
+          continue
+        }
       }
 
       pushReal(history, fullHistory, { role: "assistant", content: response.content })
-      if (depth === 0) callbacks.onComplete?.(response.content)
+      if (depth === 0) callbacks.onComplete?.(response.content, agentState(agent))
       return response.content
     }
 
@@ -365,6 +489,25 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         // Plan mode guard
         if (agent._planMode && tool && !tool.readonly) {
           return { tool_call_id: tc.id, toolName, content: "Error: plan mode active", meta: null }
+        }
+
+        // Engineering coder hard gate: no file modification before the design review passed (CLI dispatch.mjs parity).
+        if (agent._role === "eng-coder" && agent.config?.agent?.engineering
+            && !agent._engDesignReviewed && FILE_MUTATORS.has(toolName)) {
+          return { tool_call_id: tc.id, toolName, content: "Error: engineering design gate — call advisor with type='design' to review the design document before any file modification. If the review found issues, report them to the parent agent.", meta: null }
+        }
+
+        // Engineering mode PARENT gate: no code-file writes before the design review passed.
+        // Docs/** and root-level docs are exempt (writing them IS the design step); everything
+        // under src/ (incl. src/prompts/*.md) is product code and needs a design token.
+        if (agent.config?.agent?.engineering && depth === 0 && !agent._engDesignToken
+            && FILE_MUTATORS.has(toolName)) {
+          const paths = tool.touchedPaths ? tool.touchedPaths(args) : [args.path]
+          // Unknown/missing paths are treated as code — block conservatively.
+          const touchesCode = paths.some((p) => typeof p !== "string" || /^src[\\/]/.test(p) || !isDocFile(p))
+          if (touchesCode) {
+            return { tool_call_id: tc.id, toolName, content: "Error: engineering design gate — write the design document in docs/ first, then call advisor with type='design' to review it, and wait for user approval. Implementation is done by eng-coder subagents.", meta: null }
+          }
         }
 
         // Permission gate: any non-readonly tool at depth 0 in manual mode
@@ -455,12 +598,38 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           if (depth === 0) callbacks.onToolResult?.(toolName, content, tool_call_id)
         }
 
-        // Track mutations — use tool metadata, not a hardcoded list
+        // Track mutations + advisor/verify bookkeeping (CLI parity)
         if (meta) {
           const { args, tool } = meta
           if (tool && !tool.readonly && !tool.sideEffectExempt) {
-            if (args?.path) agent._touchedFiles.push(args.path)
-            if (toolName === "verify") agent._verifiedThisRun = true
+            // Side-effect tools (bash, git, …) invalidate prior review/verify —
+            // the environment changed even if no code file did.
+            if (agent._calledAdvisorThisRun) agent._calledAdvisorThisRun = false
+            if (agent._verifiedThisRun) {
+              agent._verifiedThisRun = false
+              agent._verifyPassed = undefined
+            }
+          }
+          if (toolName === "verify") agent._verifiedThisRun = true
+          if (toolName === "advisor") {
+            agent._calledAdvisorThisRun = true
+            // Design reviews are a separate gate with no convergence protocol —
+            // they must not consume code-review rounds. A failed/interrupted review
+            // still counts as an attempt (next retry uses the next round's prompt).
+            try {
+              if (args.type !== "design") agent._advisorRound++
+            } catch {
+              agent._advisorRound++
+            }
+          }
+          if (FILE_MUTATORS.has(toolName)) {
+            agent._mutatedThisRun = true
+            const paths = tool.touchedPaths ? tool.touchedPaths(args) : [args?.path]
+            for (const p of paths) {
+              if (typeof p !== "string") continue
+              const abs = join(cwd, p)
+              if (!agent._touchedFiles.includes(abs)) agent._touchedFiles.push(abs)
+            }
           }
         }
 
