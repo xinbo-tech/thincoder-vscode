@@ -6,9 +6,7 @@
   "session.deleteConfirm": "Delete session \"${title}\"? This cannot be undone.",
   "session.switchConfirm": "Switch session? Unsent message will be lost.",
   "session.generatingTitle": "generating title…",
-
   "input.placeholder": "Ask ThinCoder... (Shift+Enter for new line)",
-
   "toolbar.send": "Send (Enter)",
   "toolbar.stop": "Stop",
   "toolbar.attach": "Attach image",
@@ -17,45 +15,36 @@
   "toolbar.reasoning": "Reasoning effort",
   "toolbar.autoApprove": "Auto-approve tools",
   "toolbar.settings": "Settings",
-
   "welcome.heading": "ThinCoder",
   "welcome.text": "Ask me to read, write, search, or explain code in this workspace.",
   "welcome.shortcuts": "Type @ for file references · Enter to send · Shift+Enter for newline",
   "welcome.shortcutsHtml": "Type <code>@</code> for file references · <code>Enter</code> to send · <code>Shift+Enter</code> for newline",
-
   "msg.user": "You",
   "msg.assistant": "ThinCoder",
   "msg.copy": "Copy",
   "msg.copyTitle": "Copy message",
   "msg.copied": "Copied!",
-
   "tool.running": "running…",
   "tool.done": "done",
   "tool.initial": "Running…",
-
   "status.thinking": "Thinking",
   "status.plan": "PLAN",
   "status.stopped": "[stopped]",
-
   "error.title": "Error",
   "error.provider": "No provider configured — click ⚙ to set API keys",
   "error.failedProvider": "Failed to build provider \"${name}\" — check your API key",
   "error.chatNull": "_chat: panel is null",
   "error.retry": "Retry",
-
   "auto.confirmText": "AUTO mode executes ALL tool calls — including file writes and shell commands — without asking for approval.",
   "auto.enable": "⚠ Enable AUTO",
   "auto.cancel": "Cancel",
-
   "panel.taskDesc": "Agent tracks multi-step work here — created and updated automatically",
   "panel.subDesc": "Background sub-tasks — explore, plan, or implement independently",
   "panel.goalDesc": "Long-running objective — runs until complete or cancelled",
-
   "perm.wantsTo": "ThinCoder wants to run",
   "perm.approve": "Approve",
   "perm.approveAll": "Approve All",
   "perm.deny": "Deny",
-
   "model.loading": "Loading models…",
   "model.reasoning": "Reasoning",
   "model.noReasoning": "No reasoning",
@@ -63,13 +52,11 @@
   "model.addProvider": "+ Add provider…",
   "model.removeProvider": "− Remove provider…",
   "model.setKey": "Key…",
-
   "settings.title": "Settings",
   "settings.changeKey": "Change",
   "settings.addKey": "Add Key",
   "settings.save": "Save",
   "settings.cancel": "Cancel",
-
   "settings.customSection": "Custom Provider",
   "settings.apiKey": "API Key",
   "settings.baseUrl": "Base URL",
@@ -83,7 +70,6 @@
   "settings.format": "API Format",
   "settings.keyOptional": "API Key (optional)",
   "settings.remove": "Remove",
-  "settings.active": "Active",
   "settings.setKey": "Key",
   "settings.agentSection": "Agent",
   "settings.advisorSection": "Advisor",
@@ -101,11 +87,9 @@
   "settings.proxyModel": "Model requests (providers with proxy: true)",
   "settings.proxyTest": "Test Connection",
   "settings.proxyRowTitle": "Route this provider's model requests through the proxy (needs global proxy.model on)",
-
   "settings.indexSection": "Semantic Index",
   "settings.indexBuild": "Build Index",
   "settings.indexRebuild": "Rebuild Index",
-
   "settings.mcpSection": "MCP Servers",
   "settings.mcpAdd": "+ Add Server",
   "settings.mcp.noServers": "No MCP servers configured",
@@ -118,10 +102,8 @@
   "settings.mcp.url": "URL",
   "settings.mcp.wsUrl": "WebSocket URL",
   "settings.mcp.headers": "Headers (JSON)",
-
   "banner.configured": "ThinCoder",
   "banner.notConfigured": "⚠ Not configured — click ⚙ to set API keys",
-
   "reasoning.max": "Maximum",
   "reasoning.xhigh": "Extra High",
   "reasoning.high": "High",
@@ -130,23 +112,18 @@
   "reasoning.minimal": "Minimal",
   "reasoning.none": "Off",
   "reasoning.enabled": "Reasoning",
-
   "task.in_progress": "in progress",
   "task.pending": "pending",
   "task.done": "done",
-
   "goal.objective": "Objective",
   "goal.criteria": "Criteria",
   "goal.active": "active",
   "goal.done": "done",
   "goal.cancelled": "cancelled",
-
   "sub.running": "running",
   "sub.done": "done",
   "sub.error": "error",
-
   "paste.images": "${count} image(s) attached",
-
   "command.prompt": "What to do?",
   "command.placeholder": "e.g. Add a README"
 }

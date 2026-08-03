@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "no
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
-import { addProviderEntry, removeProviderEntry, setActiveProviderEntry } from "../src/extension/provider-flows.mjs"
+import { addProviderEntry, removeProviderEntry } from "../src/extension/provider-flows.mjs"
 import { handleSetProviderProxy } from "../src/extension/settings.mjs"
 import { _setConfigPathForTest, resolveProviders } from "../src/config-io.mjs"
 
@@ -127,26 +127,6 @@ describe("removeProviderEntry", () => {
   it("rejects unknown name", () => {
     writeFileSync(cfgPath, JSON.stringify({ providers: [{ name: "a", baseURL: "u", model: "m" }], activeProvider: "a" }))
     assert.match(removeProviderEntry("zzz"), /No provider/)
-  })
-})
-
-describe("setActiveProviderEntry", () => {
-  it("points activeProvider at an existing entry", () => {
-    writeFileSync(cfgPath, JSON.stringify({
-      providers: [
-        { name: "a", baseURL: "u", model: "m" },
-        { name: "b", baseURL: "u", model: "m" },
-      ],
-      activeProvider: "a",
-    }))
-    assert.equal(setActiveProviderEntry("b"), null)
-    assert.equal(raw().activeProvider, "b")
-  })
-
-  it("rejects unknown name", () => {
-    writeFileSync(cfgPath, JSON.stringify({ providers: [{ name: "a", baseURL: "u", model: "m" }], activeProvider: "a" }))
-    assert.match(setActiveProviderEntry("zzz"), /No provider/)
-    assert.equal(raw().activeProvider, "a")
   })
 })
 

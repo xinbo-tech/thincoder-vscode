@@ -77,9 +77,6 @@ export function initSettings({ vscode, inputEl, onClose }) {
   }
 
   // Provider management (panel-internal, posts payloads to the extension host)
-  window._setActive = function(name) {
-    window._vscode.postMessage({ type: "setActiveProvider", name })
-  }
   window._setProviderProxy = function(name, proxy) {
     window._vscode.postMessage({ type: "setProviderProxy", name, proxy })
   }
@@ -164,16 +161,14 @@ function buildSettings() {
   const vscode = window._vscode
 
   let html = ""
-  // ─── Providers section: two-line rows, active radio, Key/− buttons, [+ Add] form ───
+  // ─── Providers section: two-line rows, proxy checkbox, Key/− buttons, [+ Add] form ───
   html += `<h4 class="settings-section-title">${t("settings.providersSection")}</h4>`
   html += `<div id="prov-list">`
   for (const [name, s0] of Object.entries(ps)) {
     const label = _providerStatus.labels?.[name] || PROVIDER_LABELS[name] || name
-    const active = !!s0.isActive
+    const active = !!s0.isActive // active provider cannot be removed (CLI parity)
     html += `<div class="prov-row" id="prov-${escHtml(name)}">
       <div class="key-row" id="rowline-${escHtml(name)}">
-        <input type="radio" name="active-provider" class="prov-radio" ${active ? "checked" : ""}
-          onchange="window._setActive('${escHtml(name)}')" title="${t("settings.active")}">
         <span class="key-label">${escHtml(label)}</span>
         <span class="key-status ${s0.configured ? "ok" : ""}">${s0.configured ? s0.masked : "—"}</span>
         <label class="prov-proxy" title="${t("settings.proxyRowTitle")}">

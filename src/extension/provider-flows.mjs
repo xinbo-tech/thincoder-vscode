@@ -4,7 +4,7 @@
  * Two entry paths share the same pure persistence functions:
  *  1. QuickPick flows (addProviderFlow / removeProviderFlow / setKeyFlow) — the model
  *     dropdown's shortcut entries; VS Code QuickPick/InputBox stand in for the CLI picker.
- *  2. Settings panel messages (addProvider / removeProvider / setActiveProvider) — the
+ *  2. Settings panel messages (addProvider / removeProvider / setProviderProxy) — the
  *     panel posts a payload straight to the pure functions (no UI round-trip on the host).
  *
  * Persistence semantics are identical to the CLI (config.json providers[] + activeProvider).
@@ -65,19 +65,6 @@ export function removeProviderEntry(name) {
   if (!providers.some((p) => p.name === name)) return `No provider named "${name}"`
   if (name === activeProvider) return "The active provider cannot be removed — switch active first"
   persistRaw((raw) => { raw.providers = (raw.providers ?? []).filter((p) => p?.name !== name) })
-  return null
-}
-
-/** Point config.json activeProvider at an existing entry (CLI /provider use parity). */
-export function setActiveProviderEntry(name) {
-  let providers
-  try {
-    ({ providers } = resolveProviders())
-  } catch (e) {
-    return e.message
-  }
-  if (!providers.some((p) => p.name === name)) return `No provider named "${name}"`
-  persistRaw((raw) => { raw.activeProvider = name })
   return null
 }
 

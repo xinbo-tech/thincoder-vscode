@@ -6,7 +6,7 @@
 
 import { PRESETS, providerNames, isProviderConfigured, storeProviderKey, removeProviderKey, buildProvider, providerLabel, readProviders } from "./presets.mjs"
 import { persistRaw, resolveProviders, loadMcpServers, addMcpServer, removeMcpServer, loadAgentSettings, saveAgentSettings, loadRaw, normalizeProxy } from "../config-io.mjs"
-import { addProviderEntry, removeProviderEntry, setActiveProviderEntry } from "./provider-flows.mjs"
+import { addProviderEntry, removeProviderEntry } from "./provider-flows.mjs"
 import { mcpConnectedNames } from "../mcp.mjs"
 import { listModels } from "../provider.mjs"
 import { specForModel } from "../specs.mjs"
@@ -50,7 +50,6 @@ export function providerStatus() {
 
 export function handleAddProvider(payload) { return addProviderEntry(payload) }
 export function handleRemoveProvider(name) { return removeProviderEntry(name) }
-export function handleSetActiveProvider(name) { return setActiveProviderEntry(name) }
 
 /** Set/clear a provider's per-provider proxy flag (false → delete the field, CLI injectProxy parity). */
 export function handleSetProviderProxy(name, proxy) {

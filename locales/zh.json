@@ -6,9 +6,7 @@
   "session.deleteConfirm": "确定删除会话 \"${title}\"？此操作不可恢复。",
   "session.switchConfirm": "切换会话？未发送的消息将丢失。",
   "session.generatingTitle": "正在生成标题…",
-
   "input.placeholder": "向 ThinCoder 提问...（Shift+Enter 换行）",
-
   "toolbar.send": "发送（Enter）",
   "toolbar.stop": "停止",
   "toolbar.attach": "添加图片",
@@ -17,45 +15,36 @@
   "toolbar.reasoning": "推理深度",
   "toolbar.autoApprove": "自动批准工具",
   "toolbar.settings": "设置",
-
   "welcome.heading": "ThinCoder",
   "welcome.text": "让我帮你读代码、写代码、搜索代码，或者解释这个项目。",
   "welcome.shortcuts": "输入 @ 引用文件 · Enter 发送 · Shift+Enter 换行",
   "welcome.shortcutsHtml": "输入 <code>@</code> 引用文件 · <code>Enter</code> 发送 · <code>Shift+Enter</code> 换行",
-
   "msg.user": "你",
   "msg.assistant": "ThinCoder",
   "msg.copy": "复制",
   "msg.copyTitle": "复制消息",
   "msg.copied": "已复制！",
-
   "tool.running": "执行中…",
   "tool.done": "完成",
   "tool.initial": "执行中…",
-
   "status.thinking": "思考中",
   "status.plan": "规划",
   "status.stopped": "[已停止]",
-
   "error.title": "错误",
   "error.provider": "未配置 API 密钥 — 点击 ⚙ 设置",
   "error.failedProvider": "无法初始化 ${name} — 请检查 API 密钥",
   "error.chatNull": "_chat: panel is null",
   "error.retry": "重试",
-
   "auto.confirmText": "AUTO 模式将执行所有工具调用——包括文件写入和 Shell 命令——不再逐一确认。",
   "auto.enable": "⚠ 启用 AUTO",
   "auto.cancel": "取消",
-
   "panel.taskDesc": "Agent 在此跟踪多步骤任务 — 自动创建和更新",
   "panel.subDesc": "后台子任务 — 独立探索、规划或实现",
   "panel.goalDesc": "长期目标 — 持续运行直到完成或取消",
-
   "perm.wantsTo": "ThinCoder 想要执行",
   "perm.approve": "批准",
   "perm.approveAll": "全部批准",
   "perm.deny": "拒绝",
-
   "model.loading": "加载模型…",
   "model.reasoning": "推理深度",
   "model.noReasoning": "不支持推理",
@@ -63,13 +52,11 @@
   "model.addProvider": "+ 添加 provider…",
   "model.removeProvider": "− 移除 provider…",
   "model.setKey": "设置密钥…",
-
   "settings.title": "设置",
   "settings.changeKey": "修改",
   "settings.addKey": "添加 Key",
   "settings.save": "保存",
   "settings.cancel": "取消",
-
   "settings.customSection": "自定义 Provider",
   "settings.apiKey": "API Key",
   "settings.baseUrl": "Base URL",
@@ -83,7 +70,6 @@
   "settings.format": "API 格式",
   "settings.keyOptional": "API Key（可选）",
   "settings.remove": "移除",
-  "settings.active": "当前",
   "settings.setKey": "密钥",
   "settings.agentSection": "Agent",
   "settings.advisorSection": "Advisor",
@@ -101,11 +87,9 @@
   "settings.proxyModel": "模型请求（proxy: true 的 provider）",
   "settings.proxyTest": "测试连接",
   "settings.proxyRowTitle": "该 provider 的模型请求走代理（需全局 proxy.model 开启）",
-
   "settings.indexSection": "语义索引",
   "settings.indexBuild": "构建索引",
   "settings.indexRebuild": "重新构建",
-
   "settings.mcpSection": "MCP 服务器",
   "settings.mcpAdd": "+ 添加服务器",
   "settings.mcp.noServers": "未配置 MCP 服务器",
@@ -118,10 +102,8 @@
   "settings.mcp.url": "URL",
   "settings.mcp.wsUrl": "WebSocket URL",
   "settings.mcp.headers": "Headers (JSON)",
-
   "banner.configured": "ThinCoder",
   "banner.notConfigured": "⚠ 未配置 — 点击 ⚙ 设置 API 密钥",
-
   "reasoning.max": "最大",
   "reasoning.xhigh": "很高",
   "reasoning.high": "高",
@@ -130,23 +112,18 @@
   "reasoning.minimal": "最小",
   "reasoning.none": "关闭",
   "reasoning.enabled": "推理",
-
   "task.in_progress": "进行中",
   "task.pending": "待处理",
   "task.done": "已完成",
-
   "goal.objective": "目标",
   "goal.criteria": "验收标准",
   "goal.active": "进行中",
   "goal.done": "已完成",
   "goal.cancelled": "已取消",
-
   "sub.running": "运行中",
   "sub.done": "完成",
   "sub.error": "错误",
-
   "paste.images": "已添加 ${count} 张图片",
-
   "command.prompt": "要做什么？",
   "command.placeholder": "例如：添加一个 README"
 }
