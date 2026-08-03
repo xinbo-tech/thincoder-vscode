@@ -13,6 +13,23 @@ const PROVIDER_LABELS = {
 
 /** @type {{ providers?: Record<string,{configured:boolean,masked:string}>, custom?: {baseURL?:string,model?:string}, labels?: Record<string,string> }} */
 let _providerStatus = {}
+/** Show preset info (read-only) or custom fields depending on the Add form's type select. */
+function paTypeChanged() {
+  const type = document.getElementById("pa-type")?.value
+  const info = document.getElementById("pa-preset-info")
+  const customFields = document.getElementById("pa-custom-fields")
+  if (!info || !customFields) return
+  if (type === "custom") {
+    info.style.display = "none"
+    customFields.style.display = "block"
+  } else {
+    const p = (_providerStatus.presets || []).find((x) => x.name === type)
+    info.style.display = "block"
+    customFields.style.display = "none"
+    info.textContent = p ? `${p.model} · ${p.baseURL ?? ""}` : ""
+  }
+}
+
 /** @type {{ built?:boolean, files?:number, chunks?:number } | null} */
 let _indexStatus = null
 
@@ -26,20 +43,11 @@ export function initSettings({ vscode, inputEl, onClose }) {
     closeSettings()
     if (onClose) onClose()
   })
-  document.getElementById("settings-body").addEventListener("change", (e) => {
-    const id = e.target.id
-    if (id !== "s-custom-key" && id !== "s-custom-url" && id !== "s-custom-model") return
-    const key = document.getElementById("s-custom-key")?.value
-    const url = document.getElementById("s-custom-url")?.value
-    const model = document.getElementById("s-custom-model")?.value
-    if (key || url || model) {
-      vscode.postMessage({ type: "saveCustomProvider", config: { key, baseURL: url, model } })
-    }
-  })
 
   // Expose to inline onclick handlers
   window._editKey = function(name) {
-    const row = document.getElementById("row-" + name)
+    const row = document.getElementById("rowline-" + name)
+    if (!row) return
     const label = _providerStatus.labels?.[name] || PROVIDER_LABELS[name] || name
     row.innerHTML = `<span class="key-label">${escHtml(label)}</span>
       <input id="input-${name}" type="password" placeholder="sk-..." style="flex:1;margin:0 8px;"
@@ -62,6 +70,44 @@ export function initSettings({ vscode, inputEl, onClose }) {
 
   window._delKey = function(name) {
     window._vscode.postMessage({ type: "deleteProviderKey", name })
+  }
+
+  // Provider management (panel-internal, posts payloads to the extension host)
+  window._setActive = function(name) {
+    window._vscode.postMessage({ type: "setActiveProvider", name })
+  }
+  window._removeProvider = function(name) {
+    window._vscode.postMessage({ type: "removeProvider", name })
+  }
+  window._toggleAddForm = function(show) {
+    const form = document.getElementById("prov-add-form")
+    const list = document.getElementById("prov-list")
+    if (!form || !list) return
+    form.style.display = show ? "block" : "none"
+    list.style.display = show ? "none" : "block"
+    if (show) {
+      const typeSel = document.getElementById("pa-type")
+      if (typeSel) typeSel.value = typeSel.options[0]?.value ?? "custom"
+      paTypeChanged()
+      document.getElementById("pa-key") && (document.getElementById("pa-key").value = "")
+    }
+  }
+  window._paTypeChanged = paTypeChanged
+  window._paSave = function() {
+    const type = document.getElementById("pa-type")?.value
+    const key = document.getElementById("pa-key")?.value?.trim() || undefined
+    if (type === "custom") {
+      const custom = {
+        name: document.getElementById("pa-name")?.value?.trim(),
+        baseURL: document.getElementById("pa-url")?.value?.trim(),
+        model: document.getElementById("pa-model")?.value?.trim(),
+        format: document.getElementById("pa-format")?.value,
+      }
+      window._vscode.postMessage({ type: "addProvider", custom, key })
+    } else {
+      window._vscode.postMessage({ type: "addProvider", preset: type, key })
+    }
+    window._toggleAddForm(false)
   }
 
   // Embedding key row — same pattern as provider keys
@@ -108,30 +154,53 @@ function closeSettings() {
 function buildSettings() {
   const body = document.getElementById("settings-body")
   const ps = _providerStatus.providers || {}
-  const custom = _providerStatus.custom || null
   const vscode = window._vscode
 
   let html = ""
-  // Providers are dynamic now (shared ~/.thincoder/config.json) — render whatever config reports,
-  // labels included. "custom" keeps its dedicated form below.
+  // ─── Providers section: two-line rows, active radio, Key/− buttons, [+ Add] form ───
+  html += `<h4 class="settings-section-title">${t("settings.providersSection")}</h4>`
+  html += `<div id="prov-list">`
   for (const [name, s0] of Object.entries(ps)) {
-    if (name === "custom") continue
     const label = _providerStatus.labels?.[name] || PROVIDER_LABELS[name] || name
-    html += `<div class="key-row" id="row-${name}">
-      <span class="key-label">${escHtml(label)}</span>
-      <span class="key-status ${s0.configured ? "ok" : ""}" id="status-${name}">${s0.configured ? s0.masked : "—"}</span>
-      ${s0.configured
-        ? `<button class="key-btn" onclick="window._editKey('${name}')">${t("settings.changeKey")}</button>
-           <button class="key-btn del-key" onclick="window._delKey('${name}')">✕</button>`
-        : `<button class="key-btn" onclick="window._editKey('${name}')">${t("settings.addKey")}</button>`}
+    const active = !!s0.isActive
+    html += `<div class="prov-row" id="prov-${escHtml(name)}">
+      <div class="key-row" id="rowline-${escHtml(name)}">
+        <input type="radio" name="active-provider" class="prov-radio" ${active ? "checked" : ""}
+          onchange="window._setActive('${escHtml(name)}')" title="${t("settings.active")}">
+        <span class="key-label">${escHtml(label)}</span>
+        <span class="key-status ${s0.configured ? "ok" : ""}">${s0.configured ? s0.masked : "—"}</span>
+        <button class="key-btn" onclick="window._editKey('${escHtml(name)}')">${s0.configured ? t("settings.setKey") : t("settings.addKey")}</button>
+        <button class="key-btn del-key" onclick="window._removeProvider('${escHtml(name)}')" ${active ? "disabled" : ""} title="${t("settings.remove")}">−</button>
+      </div>
+      <div class="prov-sub">${escHtml(s0.model || "")}${s0.baseURL ? ` · ${escHtml(s0.baseURL)}` : ""}</div>
     </div>`
   }
+  html += `<button id="prov-add-btn" class="key-btn" style="margin-top:6px" onclick="window._toggleAddForm(true)">${t("settings.addProvider")}</button>`
+  html += `</div>`
 
-  html += `<div class="settings-sep"></div>
-    <h4 class="settings-section-title">${t("settings.customSection")}</h4>
-    <div class="key-field"><label>${t("settings.apiKey")}</label><input id="s-custom-key" type="password" placeholder="sk-..."></div>
-    <div class="key-field"><label>${t("settings.baseUrl")}</label><input id="s-custom-url" placeholder="https://api.example.com/v1" value="${escHtml(custom?.baseURL || "")}"></div>
-    <div class="key-field"><label>${t("settings.model")}</label><input id="s-custom-model" placeholder="model-name" value="${escHtml(custom?.model || "")}"></div>`
+  // [+ Add] form (hidden until toggled): preset select or custom fields
+  const presets = _providerStatus.presets || []
+  html += `<div id="prov-add-form" style="display:none;margin-top:8px">
+    <h4 class="settings-section-title">${t("settings.addProviderTitle")}</h4>
+    <div class="key-field"><label>${t("settings.presetChoice")}</label>
+      <select id="pa-type" onchange="window._paTypeChanged()">
+        ${presets.map((p) => `<option value="${escHtml(p.name)}">${escHtml(p.name)} — ${escHtml(p.desc)} (${escHtml(p.model)})</option>`).join("")}
+        <option value="custom">${t("settings.customChoice")}</option>
+      </select>
+    </div>
+    <div id="pa-preset-info" class="prov-sub" style="padding:2px 0"></div>
+    <div id="pa-custom-fields" style="display:none">
+      <div class="key-field"><label>${t("settings.providerName")}</label><input id="pa-name" placeholder="my-provider"></div>
+      <div class="key-field"><label>${t("settings.baseUrl")}</label><input id="pa-url" placeholder="https://api.example.com/v1"></div>
+      <div class="key-field"><label>${t("settings.model")}</label><input id="pa-model" placeholder="model-name"></div>
+      <div class="key-field"><label>${t("settings.format")}</label>
+        <select id="pa-format"><option value="openai">openai (default)</option><option value="anthropic">anthropic</option><option value="google">google</option></select>
+      </div>
+    </div>
+    <div class="key-field"><label>${t("settings.keyOptional")}</label><input id="pa-key" type="password" placeholder="sk-..."></div>
+    <button id="pa-save-btn" class="key-btn">${t("settings.save")}</button>
+    <button id="pa-cancel-btn" class="key-btn">${t("settings.cancel")}</button>
+  </div>`
 
   // MCP section
   html += `<div class="settings-sep"></div>
@@ -173,6 +242,11 @@ function buildSettings() {
       <button id="index-build-btn" class="key-btn" style="margin-top:4px">${t("settings.indexBuild") || "Build Index"}</button>`
 
   body.innerHTML = html
+
+  // Bind Add-provider form controls
+  document.getElementById("pa-save-btn").addEventListener("click", () => window._paSave())
+  document.getElementById("pa-cancel-btn").addEventListener("click", () => window._toggleAddForm(false))
+  paTypeChanged()
 
   // Bind MCP type toggle
   document.getElementById("mcp-type").addEventListener("change", (e) => {

@@ -1,7 +1,7 @@
 # 配置面板（Settings Panel）功能梳理与重新设计
 
-> 状态：**设计待评审**——本文档先梳理现状、列出问题、给出对齐 CLI 的重设计方案。
-> 实施需用户批准。
+> 状态：**批次 A 已实施**（2026-08-03，commit 见 git log "settings panel provider redesign"）。
+> 批次 B/C/D 设计见 SETTINGS-PANEL-2.md，待批。
 
 ## 1. 现状盘点
 

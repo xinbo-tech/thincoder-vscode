@@ -6,31 +6,50 @@
 
 import * as vscode from "vscode"
 import { PRESETS, providerNames, isProviderConfigured, storeProviderKey, removeProviderKey, buildProvider, providerLabel, readProviders } from "./presets.mjs"
-import { persistRaw } from "../config-io.mjs"
+import { persistRaw, resolveProviders } from "../config-io.mjs"
+import { addProviderEntry, removeProviderEntry, setActiveProviderEntry } from "./provider-flows.mjs"
 import { listModels } from "../provider.mjs"
 import { specForModel } from "../specs.mjs"
 import { loadModelPrefs } from "./session-io.mjs"
 
 /**
  * Status snapshot for the settings panel. Shape consumed by webview/settings.js:
- * { providers: { name: { configured, masked, baseURL, model } }, custom, labels }.
- * Providers are now dynamic (config.json providers[]), so labels travel with the payload.
+ * { providers: { name: { configured, masked, baseURL, model, isActive } }, custom, labels,
+ *   presets: [{ name, desc, model }] (not yet added), activeProvider }.
+ * Providers are dynamic (config.json providers[]), so labels travel with the payload.
  */
 export function providerStatus() {
   const providers = readProviders()
+  let activeProvider = ""
+  try { ({ activeProvider } = resolveProviders()) } catch { /* config unreadable */ }
   const status = {}
   const labels = {}
   for (const name of providerNames()) {
     const configured = isProviderConfigured(name)
     const entry = providers[name] || {}
-    status[name] = { configured, masked: configured ? "****" : "", baseURL: entry.baseURL, model: entry.model }
+    status[name] = {
+      configured, masked: configured ? "****" : "",
+      baseURL: entry.baseURL, model: entry.model,
+      isActive: name === activeProvider,
+    }
     labels[name] = providerLabel(name)
   }
+  // Presets not yet added — the panel's [+ Add] form offers these (CLI addProviderFlow parity)
+  const existing = new Set(providerNames())
+  const presets = Object.entries(PRESETS)
+    .filter(([name]) => !existing.has(name))
+    .map(([name, p]) => ({ name, desc: p.desc, model: p.model, baseURL: p.baseURL }))
   const custom = providers.custom && typeof providers.custom === "object"
     ? { baseURL: providers.custom.baseURL || "", model: providers.custom.model || "", hasKey: isProviderConfigured("custom") }
     : null
-  return { providers: status, custom, labels }
+  return { providers: status, custom, labels, presets, activeProvider }
 }
+
+// ─── Panel message handlers (pure persistence, error string or null) ───
+
+export function handleAddProvider(payload) { return addProviderEntry(payload) }
+export function handleRemoveProvider(name) { return removeProviderEntry(name) }
+export function handleSetActiveProvider(name) { return setActiveProviderEntry(name) }
 
 export async function saveProviderKey(name, key) {
   if (!key || !key.trim()) return

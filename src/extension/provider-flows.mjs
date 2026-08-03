@@ -1,13 +1,89 @@
 /**
- * provider-flows.mjs — provider add/remove/key flows (CLI addProviderFlow / removeProviderFlow / setKeyFlow)
- * Webview has no TUI picker, so the extension host's QuickPick/InputBox stand in for
- * showPicker/askQuestion; persistence semantics are identical to the CLI (config.json providers[]).
+ * provider-flows.mjs — provider add/remove/active/key management (CLI flow parity).
+ *
+ * Two entry paths share the same pure persistence functions:
+ *  1. QuickPick flows (addProviderFlow / removeProviderFlow / setKeyFlow) — the model
+ *     dropdown's shortcut entries; VS Code QuickPick/InputBox stand in for the CLI picker.
+ *  2. Settings panel messages (addProvider / removeProvider / setActiveProvider) — the
+ *     panel posts a payload straight to the pure functions (no UI round-trip on the host).
+ *
+ * Persistence semantics are identical to the CLI (config.json providers[] + activeProvider).
  */
 
 import * as vscode from "vscode"
 import { PROVIDER_PRESETS, presetToEntry, resolveProviders, persistRaw, setProviderKey } from "../config-io.mjs"
 
-/** Add a provider: pick an unused preset (auto-filled from PROVIDER_PRESETS) or configure custom manually. */
+const FORMATS = ["openai", "anthropic", "google"]
+
+// ─── Pure persistence (no UI) — return an error string, or null on success ───
+
+/** Add a provider entry. payload: { preset?: name, custom?: { name, baseURL, model, format }, key? } */
+export function addProviderEntry({ preset, custom, key } = {}) {
+  let providers
+  try {
+    ({ providers } = resolveProviders())
+  } catch (e) {
+    return e.message
+  }
+  const existing = new Set(providers.map((p) => p.name))
+
+  let entry
+  if (preset) {
+    if (!PROVIDER_PRESETS[preset]) return `Unknown preset: ${preset}`
+    if (existing.has(preset)) return `Provider "${preset}" already exists`
+    entry = presetToEntry(preset)
+  } else if (custom) {
+    const name = (custom.name || "").trim()
+    if (!name) return "Provider name is required"
+    if (existing.has(name) || PROVIDER_PRESETS[name]) return `Name "${name}" is already in use`
+    const baseURL = (custom.baseURL || "").trim().replace(/\/+$/, "")
+    if (!baseURL) return "Base URL is required"
+    const model = (custom.model || "").trim()
+    if (!model) return "Model is required"
+    const format = (custom.format || "openai").trim()
+    if (!FORMATS.includes(format)) return `Unknown API format: ${format} (expected ${FORMATS.join("/")})`
+    entry = { name, baseURL, model }
+    if (format !== "openai") entry.format = format
+  } else {
+    return "Add provider needs a preset or a custom config"
+  }
+
+  persistRaw((raw) => { (raw.providers ??= []).push(entry) })
+  const k = (key || "").trim()
+  if (k) setProviderKey(entry.name, k)
+  return null
+}
+
+/** Remove a provider entry. The active provider is protected (CLI parity). */
+export function removeProviderEntry(name) {
+  let providers, activeProvider
+  try {
+    ({ providers, activeProvider } = resolveProviders())
+  } catch (e) {
+    return e.message
+  }
+  if (!providers.some((p) => p.name === name)) return `No provider named "${name}"`
+  if (name === activeProvider) return "The active provider cannot be removed — switch active first"
+  persistRaw((raw) => { raw.providers = (raw.providers ?? []).filter((p) => p?.name !== name) })
+  return null
+}
+
+/** Point config.json activeProvider at an existing entry (CLI /provider use parity). */
+export function setActiveProviderEntry(name) {
+  let providers
+  try {
+    ({ providers } = resolveProviders())
+  } catch (e) {
+    return e.message
+  }
+  if (!providers.some((p) => p.name === name)) return `No provider named "${name}"`
+  persistRaw((raw) => { raw.activeProvider = name })
+  return null
+}
+
+// ─── QuickPick flows (model dropdown shortcuts) ───
+
+/** Add a provider interactively: pick an unused preset or configure custom manually. */
 export async function addProviderFlow(refresh) {
   let providers
   try {
@@ -43,37 +119,32 @@ export async function addProviderFlow(refresh) {
     const baseURL = (await vscode.window.showInputBox({
       prompt: `Base URL for ${name}`,
       placeHolder: "https://api.example.com/v1",
-    }))?.trim().replace(/\/+$/, "")
+    }))?.trim()
     if (!baseURL) return
     const model = (await vscode.window.showInputBox({ prompt: `Model name for ${name}` }))?.trim()
     if (!model) return
     const format = await vscode.window.showQuickPick(
-      [
-        { label: "openai", description: "(default)" },
-        { label: "anthropic", description: "Messages API" },
-        { label: "google", description: "streamGenerateContent" },
-      ],
+      FORMATS.map((f) => ({ label: f, description: f === "openai" ? "(default)" : f === "anthropic" ? "Messages API" : "streamGenerateContent" })),
       { placeHolder: "API format" },
     )
     if (!format) return
-    const entry = { name, baseURL, model }
-    if (format.label !== "openai") entry.format = format.label
-    persistRaw((raw) => { (raw.providers ??= []).push(entry) })
+    const err = addProviderEntry({ custom: { name, baseURL, model, format: format.label } })
+    if (err) { vscode.window.showErrorMessage(err); return }
     const key = await vscode.window.showInputBox({ prompt: `API key for ${name} (leave empty to skip)`, password: true })
     if (key?.trim()) setProviderKey(name, key.trim())
     await refresh?.()
     return
   }
 
-  // Preset: create the entry from the preset (desc stripped, everything else kept) then ask for a key
-  const entry = presetToEntry(sel.name)
-  persistRaw((raw) => { (raw.providers ??= []).push(entry) })
+  // Preset: entry auto-filled from PROVIDER_PRESETS, then ask for a key
+  const err = addProviderEntry({ preset: sel.name })
+  if (err) { vscode.window.showErrorMessage(err); return }
   const key = await vscode.window.showInputBox({ prompt: `API key for ${sel.name} (leave empty to skip)`, password: true })
   if (key?.trim()) setProviderKey(sel.name, key.trim())
   await refresh?.()
 }
 
-/** Remove a provider (the active one is protected, CLI parity). */
+/** Remove a provider interactively (active one is not listed, CLI parity). */
 export async function removeProviderFlow(refresh) {
   let providers, activeProvider
   try {
@@ -92,8 +163,9 @@ export async function removeProviderFlow(refresh) {
     { placeHolder: "Remove provider" },
   )
   if (!sel) return
-  persistRaw((raw) => { raw.providers = (raw.providers ?? []).filter((p) => p?.name !== sel.label) })
-  await refresh?.()
+  const err = removeProviderEntry(sel.label)
+  if (err) vscode.window.showErrorMessage(err)
+  else await refresh?.()
 }
 
 /** Set / replace an API key for a configured provider. */

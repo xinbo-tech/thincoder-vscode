@@ -10,7 +10,7 @@ import { runAgent } from "../agent.mjs"
 import { closeAllMcp } from "../mcp.mjs"
 import { providerNames, getKey, buildProvider } from "./presets.mjs"
 import { listSlots, loadSlot, saveSessionToSlot, newSlot, switchToSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
-import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer } from "./settings.mjs"
+import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, handleAddProvider, handleRemoveProvider, handleSetActiveProvider } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
 import { generateTitle } from "./generate-title.mjs"
@@ -140,8 +140,32 @@ export class ChatPanel {
         case "deleteProviderKey": await this._deleteProviderKey(msg.name); break
         case "saveMcpServer": await this._saveMcpServer(msg.name, msg.config); break
         case "deleteMcpServer": await this._deleteMcpServer(msg.name); break
-        case "addProvider": await addProviderFlow(() => this._pushSettings()); break
-        case "removeProvider": await removeProviderFlow(() => this._pushSettings()); break
+        case "addProvider":
+          // Payload form (settings panel [+ Add] form): persist directly.
+          // No payload (model dropdown shortcut): interactive QuickPick flow.
+          if (msg.preset || msg.custom) {
+            const err = handleAddProvider({ preset: msg.preset, custom: msg.custom, key: msg.key })
+            if (err) this._panel?.webview.postMessage({ type: "providerError", text: err })
+            this._pushSettings()
+          } else {
+            await addProviderFlow(() => this._pushSettings())
+          }
+          break
+        case "removeProvider":
+          if (msg.name) {
+            const err = handleRemoveProvider(msg.name)
+            if (err) this._panel?.webview.postMessage({ type: "providerError", text: err })
+            this._pushSettings()
+          } else {
+            await removeProviderFlow(() => this._pushSettings())
+          }
+          break
+        case "setActiveProvider": {
+          const err = handleSetActiveProvider(msg.name)
+          if (err) this._panel?.webview.postMessage({ type: "providerError", text: err })
+          this._pushSettings()
+          break
+        }
         case "setKey": await setKeyFlow(() => this._pushSettings()); break
         case "saveEmbeddingConfig": await this._saveEmbeddingConfig(msg.config); break
         case "saveEmbedKey": await this._saveEmbeddingConfig({ apiKey: msg.key }); break
