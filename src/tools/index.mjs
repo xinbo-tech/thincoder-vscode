@@ -10,6 +10,7 @@ import { websearchTool, fetchTool } from "./web.mjs"
 import { insertAfterTool, applyPatchTool, lsTool, deleteTool } from "./more-file.mjs"
 import { lintTool } from "./linter.mjs"
 import { checklistTool } from "./checklist.mjs"
+import { lspTool } from "./lsp.mjs"
 import { questionTool } from "./question.mjs"
 import { readImageTool } from "./read_image.mjs"
 import { codeSearchTool, docSearchTool } from "./code.mjs"
@@ -25,6 +26,7 @@ export { websearchTool, fetchTool }
 export { insertAfterTool, applyPatchTool, lsTool, deleteTool }
 export { lintTool } from "./linter.mjs"
 export { checklistTool } from "./checklist.mjs"
+export { lspTool } from "./lsp.mjs"
 export { questionTool }
 export { readImageTool }
 export { codeSearchTool, docSearchTool }
@@ -39,6 +41,7 @@ export const builtinTools = [
   gitDiffTool, gitStatusTool, gitLogTool, checkpointTool,
   websearchTool, fetchTool, questionTool,
   repoOutlineTool, codeSearchTool, docSearchTool,
+  lspTool,
   memoryPutTool, memorySearchTool, mcpTool,
 ]
 

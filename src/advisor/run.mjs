@@ -6,7 +6,7 @@
  */
 import { chat } from "../provider.mjs"
 import { resolveProviders, findProvider } from "../config-io.mjs"
-import { toOpenAISchema, readTool, globTool, grepTool, lsTool, gitDiffTool, gitStatusTool, gitLogTool, codeSearchTool } from "../tools/index.mjs"
+import { toOpenAISchema, readTool, globTool, grepTool, lsTool, gitDiffTool, gitStatusTool, gitLogTool, codeSearchTool, lspTool } from "../tools/index.mjs"
 import { prepareAdvisorMessages } from "./main.mjs"
 import { extractPriorIssueTable } from "./history.mjs"
 
@@ -47,7 +47,8 @@ async function compactMessages(messages, _provider) {
 
 // The advisor gets read-only exploration tools. VS Code splits git into three read-only tools
 // (git_diff/git_status/git_log) — checkpoint is not included, so no mutation is possible.
-const ADVISOR_TOOLS = [readTool, globTool, grepTool, lsTool, gitDiffTool, gitStatusTool, gitLogTool, codeSearchTool]
+// lsp uses VS Code's native language services (CLI parity — the CLI spawns LSP servers instead).
+const ADVISOR_TOOLS = [readTool, globTool, grepTool, lsTool, gitDiffTool, gitStatusTool, gitLogTool, lspTool, codeSearchTool]
 const ADVISOR_TOOL_SCHEMAS = ADVISOR_TOOLS.map(toOpenAISchema)
 const ADVISOR_TOOL_BY_NAME = new Map(ADVISOR_TOOLS.map((t) => [t.name, t]))
 
