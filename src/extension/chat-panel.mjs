@@ -8,17 +8,18 @@ import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { runAgent } from "../agent.mjs"
 import { closeAllMcp } from "../mcp.mjs"
-import { providerNames, getKey, buildProvider, initProviderKeyStore, loadProviderKeyCache } from "./presets.mjs"
+import { providerNames, getKey, buildProvider } from "./presets.mjs"
 import { listSlots, loadSlot, saveSessionToSlot, newSlot, switchToSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
 import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer } from "./settings.mjs"
+import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { generateTitle } from "./generate-title.mjs"
 import { injectEditorContext } from "./editor-context.mjs"
 import { specForModel } from "../specs.mjs"
 import { t, loadLocaleStrings } from "../i18n.mjs"
 import { loadSkills } from "./skills.mjs"
 import { injectAtRefs } from "./file-refs.mjs"
-import { createEmbedder } from "../embedding.mjs"
 import { getEmbedder, setVSCodeEmbedder, resetEmbedder } from "../embed-config.mjs"
+import { loadEmbeddingConfig, saveEmbeddingConfig, selectProviderModel } from "../config-io.mjs"
 import { buildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../indexer.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -63,7 +64,6 @@ export class ChatPanel {
    */
   resolveWebviewView(webviewView, _context, _token) {
     this._panel = webviewView
-
     webviewView.webview.options = {
       enableScripts: true,
       retainContextWhenHidden: true,
@@ -91,6 +91,12 @@ export class ChatPanel {
           prefs.model = msg.model
           prefs.provider = msg.provider || ""
           saveModelPrefs(this._context.workspaceState, prefs)
+          // Persist into the shared config.json too (CLI selectModel semantics): the CLI
+          // resumes this session with activeProvider/activeModel, so the selection must
+          // survive the panel, not just the workspaceState prefs.
+          if (msg.provider && msg.model) {
+            try { selectProviderModel(msg.provider, msg.model) } catch {}
+          }
           break
         }
         case "selectReasoning": {
@@ -349,8 +355,9 @@ export class ChatPanel {
     this._slot = slots.length === 0 ? newSlot(cwd) : activeSlot(cwd)
     this._pushSessions()
     this._loadSession()
-    initProviderKeyStore(this._context.secrets)
-    await loadProviderKeyCache()
+    // One-time migration of legacy key stores (SecretStorage + thincoder.providers settings)
+    // into the shared ~/.thincoder/config.json. Flag-guarded, safe to call on every open.
+    await migrateLegacySettings(this._context)
     await fullStatus(this._panel, this._context.workspaceState, () => this._pushSessions())
     this._pushMcpStatus()
     const prefs = this._loadModelPrefs()
@@ -367,28 +374,28 @@ export class ChatPanel {
   }
 
   async _resolveEmbedder() {
-    // Try VSCode SecretStorage
-    if (this._context.secrets) {
-      try {
-        const key = await this._context.secrets.get("thincoder.embedding.apiKey")
-        if (key) {
-          const emb = createEmbedder({ baseURL: "https://api.siliconflow.cn/v1", model: "BAAI/bge-m3", apiKey: key })
-          setVSCodeEmbedder({ baseURL: "https://api.siliconflow.cn/v1", model: "BAAI/bge-m3", apiKey: key })
-          return emb
-        }
-      } catch {}
+    // Embedding key now lives in the shared config.json (CLI parity); legacy SecretStorage
+    // entries were migrated into it by migrateLegacySettings.
+    const emb = loadEmbeddingConfig()
+    if (emb?.apiKey && emb.baseURL && emb.model) {
+      setVSCodeEmbedder(emb)
+      return getEmbedder()
     }
     return getEmbedder()
   }
 
   async _saveEmbeddingConfig({ apiKey }) {
     if (apiKey) {
-      try { await this._context.secrets.store("thincoder.embedding.apiKey", apiKey) } catch {}
+      saveEmbeddingConfig({
+        apiKey,
+        baseURL: "https://api.siliconflow.cn/v1",
+        model: "BAAI/bge-m3",
+      })
       resetEmbedder()
       setVSCodeEmbedder({ baseURL: "https://api.siliconflow.cn/v1", model: "BAAI/bge-m3", apiKey })
     } else {
-      // Delete key — clear SecretStorage and reset embedder
-      try { await this._context.secrets.delete("thincoder.embedding.apiKey") } catch {}
+      // Delete key — remove from shared config.json and reset the cached embedder
+      saveEmbeddingConfig({ apiKey: "" })
       resetEmbedder()
     }
     this._pushSettings()

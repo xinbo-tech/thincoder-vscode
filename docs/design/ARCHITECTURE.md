@@ -67,7 +67,7 @@ class ChatPanel {
 
 **Provider 增删（对齐 CLI）**：`addProviderFlow`（选 preset[过滤已添加] → 自动填 baseURL/model → 输 key；custom 手动输 name/baseURL/model + 选 format）、`removeProviderFlow`（列非 active provider 供删）、`setKeyFlow`（设/改 key）。
 
-**协议 transport**：三种 `provider.format` —— `openai`（默认，SSE chat completions）、`anthropic`（Messages API）、`google`（streamGenerateContent）。**缺口（待补）**：VS Code 当前仅有 openai transport，需补齐 anthropic / google 两个 transport 才能承接 custom 的协议选择及 claude/gemini preset。
+**协议 transport**：三种 `provider.format` —— `openai`（默认，SSE chat completions）、`anthropic`（Messages API）、`google`（streamGenerateContent）。三种 transport 均已实现并在 `src/provider.mjs` 的 `TRANSPORTS` 表按 format 分派（含 thinking、tool calls、多模态），可承接 custom 的协议选择及 claude/gemini preset。
 
 **LLM 标题生成**：
 - 触发：会话第一条用户消息后，agent 完成回复
@@ -100,8 +100,8 @@ user input
 **子 agent 支持**：
 - `depth=0`：顶层 agent，拥有完整工具集 + meta 工具
 - `depth=1`：子 agent，role 为 explore/plan/coder，工具集缩减，prompt 叠加角色 overlay
-- explore：maxTurns=30，只读工具
-- plan/coder：maxTurns=50，完整工具
+- explore/plan：只读工具；coder：完整工具
+- 轮次上限对齐 CLI：统一取共享 config.json 的 `agent.subagentTurns`（默认 100），顶层轮次取 `agent.maxTurns`（默认 100）
 
 ### 3. 工具系统（`src/tools.mjs` → `src/tools/`）
 
@@ -210,4 +210,4 @@ user input
 | 记忆系统 | 3-layer FTS5 + vector | JSON 文件存储（单层） |
 | MCP | ✅ | ✅ stdio + HTTP（`thincoder.mcpServers` 配置） |
 
-> **字段往返完整（待补缺口）**：共享槽位文件是全量覆盖写。当前 `chat-panel._saveLines` 逐字段重建 data，漏掉了 CLI 写入的 `activeModel` 与 `engineering`——同一会话经 CLI 设置模型后再到 VS Code 发消息，这两个字段会被抹掉，CLI resume 丢失模型覆盖。修法：`_saveLines` 改为 `...existing` 展开式透传（不认识的字段原样保留），而非逐字段重建子集。契约详见 CLI `docs/design/ARCHITECTURE.md`「会话存储统一 → 字段往返完整」。
+> **字段往返完整（已落地）**：共享槽位文件是全量覆盖写。`chat-panel._saveLines` 现以 `...existing` 展开式透传（不认识的字段原样保留），仅覆盖扩展自己拥有的字段——CLI 写入的 `activeModel`/`engineering`/`engDesignToken` 等字段在 VS Code 侧往返不丢。契约详见 CLI `docs/design/ARCHITECTURE.md`「会话存储统一 → 字段往返完整」。

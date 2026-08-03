@@ -24,7 +24,12 @@ export const subagentTool = {
     const { runAgent } = await import("../agent.mjs")
     const provider = ctx.agent._provider
     const cwd = ctx.cwd
-    const maxTurns = role === "explore" ? 30 : 50
+    // CLI parity: all roles share config.agent.subagentTurns (default 100)
+    let maxTurns = 100
+    try {
+      const { loadAgentSettings } = await import("../config-io.mjs")
+      maxTurns = loadAgentSettings().subagentTurns
+    } catch { /* keep default */ }
     const subId = ++_subIdCounter
 
     ctx.callbacks?.onSubagent?.({ id: subId, role, status: "started", startedAt: Date.now() })

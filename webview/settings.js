@@ -11,7 +11,7 @@ const PROVIDER_LABELS = {
   grok: "Grok (xAI)", mistral: "Mistral",
 }
 
-/** @type {{ providers?: Record<string,{configured:boolean,masked:string}>, custom?: {baseURL?:string,model?:string} }} */
+/** @type {{ providers?: Record<string,{configured:boolean,masked:string}>, custom?: {baseURL?:string,model?:string}, labels?: Record<string,string> }} */
 let _providerStatus = {}
 /** @type {{ built?:boolean, files?:number, chunks?:number } | null} */
 let _indexStatus = null
@@ -40,7 +40,8 @@ export function initSettings({ vscode, inputEl, onClose }) {
   // Expose to inline onclick handlers
   window._editKey = function(name) {
     const row = document.getElementById("row-" + name)
-    row.innerHTML = `<span class="key-label">${PROVIDER_LABELS[name]}</span>
+    const label = _providerStatus.labels?.[name] || PROVIDER_LABELS[name] || name
+    row.innerHTML = `<span class="key-label">${escHtml(label)}</span>
       <input id="input-${name}" type="password" placeholder="sk-..." style="flex:1;margin:0 8px;"
         onkeydown="if(event.key==='Enter')window._saveKey('${name}')">
       <button class="key-btn" onclick="window._saveKey('${name}')">${t("settings.save")}</button>
@@ -111,12 +112,15 @@ function buildSettings() {
   const vscode = window._vscode
 
   let html = ""
-  for (const [name, label] of Object.entries(PROVIDER_LABELS)) {
-    const s = ps[name] || {}
+  // Providers are dynamic now (shared ~/.thincoder/config.json) — render whatever config reports,
+  // labels included. "custom" keeps its dedicated form below.
+  for (const [name, s0] of Object.entries(ps)) {
+    if (name === "custom") continue
+    const label = _providerStatus.labels?.[name] || PROVIDER_LABELS[name] || name
     html += `<div class="key-row" id="row-${name}">
-      <span class="key-label">${label}</span>
-      <span class="key-status ${s.configured ? "ok" : ""}" id="status-${name}">${s.configured ? s.masked : "—"}</span>
-      ${s.configured
+      <span class="key-label">${escHtml(label)}</span>
+      <span class="key-status ${s0.configured ? "ok" : ""}" id="status-${name}">${s0.configured ? s0.masked : "—"}</span>
+      ${s0.configured
         ? `<button class="key-btn" onclick="window._editKey('${name}')">${t("settings.changeKey")}</button>
            <button class="key-btn del-key" onclick="window._delKey('${name}')">✕</button>`
         : `<button class="key-btn" onclick="window._editKey('${name}')">${t("settings.addKey")}</button>`}

@@ -14,6 +14,7 @@ import {
   planTool, goalTool, skillTool, verifyTool, timerTool,
 } from "./agent-tools.mjs"
 import { compactHistory, injectContext } from "./context.mjs"
+import { loadAgentSettings } from "./config-io.mjs"
 import * as os from "node:os"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -26,6 +27,13 @@ try { _CODER = readFileSync(join(__dirname, "prompts", "coder.md"), "utf8") } ca
 try { _PLAN = readFileSync(join(__dirname, "prompts", "plan.md"), "utf8") } catch { _PLAN = "" }
 
 const DEFAULT_MAX_TURNS = 100
+
+/** Top-level turn limit from the shared config.json (CLI agent.maxTurns), with local default fallback. */
+function configuredMaxTurns() {
+  try {
+    return loadAgentSettings().maxTurns
+  } catch { return DEFAULT_MAX_TURNS }
+}
 const STALL_WINDOW = 5
 const STALL_THRESHOLD = 3
 const MAX_VERIFY_PUSHBACKS = 2
@@ -181,7 +189,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   }
 
   // ─── Main loop ─────────────────────────────
-  const maxTurns = overrideTurns || DEFAULT_MAX_TURNS
+  const maxTurns = overrideTurns || configuredMaxTurns()
   const recentSigs = []
   let guardPushbacks = 0
 

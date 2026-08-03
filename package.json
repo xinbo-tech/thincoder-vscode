@@ -79,7 +79,8 @@
           "type": "object",
           "default": {},
           "order": 1,
-          "markdownDescription": "# Providers\nAPI keys and custom provider config. Keys are provider names (`deepseek`, `kimi`, `glm`, `qwen`, `minimax`, `openai`).\n\nValue is either a key string: `\"sk-xxx\"`, or an object for custom providers: `{ \"key\": \"sk-xxx\", \"baseURL\": \"...\", \"model\": \"...\" }`.\n\nUse the in-panel Settings (⚙) for a easier UI."
+          "markdownDescription": "# Providers (legacy — migrated automatically)\nProvider configuration now lives in `~/.thincoder/config.json`, shared with the CLI. On first activation any keys/providers stored here (and in SecretStorage) are migrated into that file and this setting is cleared. Use the in-panel Settings (⚙) or edit `~/.thincoder/config.json` directly.",
+          "deprecationMessage": "Provider config is stored in ~/.thincoder/config.json (shared with the CLI). This setting is only read once for migration."
         },
         "thincoder.autoApprove": {
           "type": "boolean",
@@ -98,7 +99,7 @@
   },
   "scripts": {
     "package": "npx @vscode/vsce package",
-    "test": "node --test test/unit.test.mjs test/dual-history.test.mjs test/tools.test.mjs",
+    "test": "node --test test/unit.test.mjs test/dual-history.test.mjs test/tools.test.mjs test/config-io.test.mjs",
     "lint": "eslint ."
   },
   "devDependencies": {

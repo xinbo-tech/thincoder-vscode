@@ -1,7 +1,8 @@
 /**
  * embed-config.mjs — shared embedding config (used by chat-panel, code tools, memory tools)
  *
- * Priority: VSCode SecretStorage → CLI ~/.thincoder/config.json → env vars
+ * Priority: ~/.thincoder/config.json (shared with CLI) → env vars
+ * (Legacy VS Code SecretStorage keys are migrated into config.json by migrate-settings.mjs)
  */
 
 import { readFileSync, existsSync } from "node:fs"

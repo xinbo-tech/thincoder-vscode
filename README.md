@@ -52,7 +52,7 @@ All settings under `thincoder.*` in VS Code settings:
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `thincoder.providers` | object | `{}` | API keys and custom provider config. Keys are provider names (`deepseek`, `kimi`, `glm`, `qwen`, `minimax`, `openai`, `custom`). Value is a key string (`"sk-xxx"`) or an object `{ key, baseURL, model }` for custom providers. |
+| `thincoder.providers` | object | `{}` | **Deprecated** — legacy provider/key storage. On first activation it is migrated into `~/.thincoder/config.json` (shared with the CLI) and then cleared. Edit that file or use the in-panel Settings (⚙) instead. |
 | `thincoder.autoApprove` | boolean | `false` | When enabled, the agent auto-executes file-modifying tools without asking. **Off by default for safety — you must explicitly opt in.** |
 
 ### Supported Providers

@@ -1,28 +1,35 @@
 /**
  * settings.mjs — provider settings and key management
- * Extracted from extension.mjs ChatPanel class.
+ * Backed by the shared ~/.thincoder/config.json (see src/config-io.mjs).
+ * MCP server config stays in VS Code settings (extension-local concern).
  */
 
 import * as vscode from "vscode"
-import { PRESETS, providerNames, isProviderConfigured, storeProviderKey, removeProviderKey, readProviders, buildProvider } from "./presets.mjs"
+import { PRESETS, providerNames, isProviderConfigured, storeProviderKey, removeProviderKey, buildProvider, providerLabel, readProviders } from "./presets.mjs"
+import { persistRaw } from "../config-io.mjs"
 import { listModels } from "../provider.mjs"
 import { specForModel } from "../specs.mjs"
 import { loadModelPrefs } from "./session-io.mjs"
 
+/**
+ * Status snapshot for the settings panel. Shape consumed by webview/settings.js:
+ * { providers: { name: { configured, masked, baseURL, model } }, custom, labels }.
+ * Providers are now dynamic (config.json providers[]), so labels travel with the payload.
+ */
 export function providerStatus() {
   const providers = readProviders()
   const status = {}
-  const builtins = [...Object.keys(PRESETS), "custom"]
-  for (const name of builtins) {
+  const labels = {}
+  for (const name of providerNames()) {
     const configured = isProviderConfigured(name)
-    const entry = providers[name]
-    const customInfo = (entry && typeof entry === "object")
-      ? { baseURL: entry.baseURL, model: entry.model } : {}
-    status[name] = { configured, masked: configured ? "****" : "", ...customInfo }
+    const entry = providers[name] || {}
+    status[name] = { configured, masked: configured ? "****" : "", baseURL: entry.baseURL, model: entry.model }
+    labels[name] = providerLabel(name)
   }
-  const custom = providers.custom
-  const customCfg = (custom && typeof custom === "object") ? { baseURL: custom.baseURL || "", model: custom.model || "", hasKey: isProviderConfigured("custom") } : null
-  return { providers: status, custom: customCfg }
+  const custom = providers.custom && typeof providers.custom === "object"
+    ? { baseURL: providers.custom.baseURL || "", model: providers.custom.model || "", hasKey: isProviderConfigured("custom") }
+    : null
+  return { providers: status, custom, labels }
 }
 
 export async function saveProviderKey(name, key) {
@@ -30,31 +37,35 @@ export async function saveProviderKey(name, key) {
   await storeProviderKey(name, key)
 }
 
+/** Save a custom provider entry (provider named "custom" in config.json). */
 export async function saveCustomProvider({ key, baseURL, model }) {
-  const c = vscode.workspace.getConfiguration("thincoder")
-  const providers = { ...(c.get("providers") || {}) }
-  // Save as long as key is provided (baseURL and model are optional)
-  if (key) {
-    await storeProviderKey("custom", key)
-    providers.custom = { baseURL: (baseURL || "").trim(), model: (model || "").trim() }
-  } else {
-    // Only delete if ALL fields are empty (user explicitly cleared everything)
-    if (!baseURL && !model) {
-      await removeProviderKey("custom")
-      delete providers.custom
+  const url = (baseURL || "").trim().replace(/\/+$/, "")
+  const mdl = (model || "").trim()
+  persistRaw((raw) => {
+    raw.providers = Array.isArray(raw.providers) ? raw.providers : []
+    let entry = raw.providers.find((p) => p?.name === "custom")
+    if (key) {
+      if (!entry) { entry = { name: "custom" }; raw.providers.push(entry) }
+      entry.apiKey = key.trim()
+      if (url) entry.baseURL = url
+      if (mdl) entry.model = mdl
+    } else if (!url && !mdl && entry) {
+      // All fields empty → user cleared everything: drop the entry
+      raw.providers = raw.providers.filter((p) => p?.name !== "custom")
     }
-  }
-  await c.update("providers", providers, vscode.ConfigurationTarget.Global)
+  })
 }
 
 export async function deleteProviderKey(name) {
   await removeProviderKey(name)
-  // Also clean up any custom provider metadata
+  // A bare "custom" entry with no baseURL/model is useless — drop it entirely
   if (name === "custom") {
-    const c = vscode.workspace.getConfiguration("thincoder")
-    const providers = { ...(c.get("providers") || {}) }
-    delete providers.custom
-    await c.update("providers", providers, vscode.ConfigurationTarget.Global)
+    persistRaw((raw) => {
+      const entry = Array.isArray(raw.providers) ? raw.providers.find((p) => p?.name === "custom") : null
+      if (entry && !entry.baseURL && !entry.model && !entry.apiKey) {
+        raw.providers = raw.providers.filter((p) => p?.name !== "custom")
+      }
+    })
   }
 }
 
@@ -100,17 +111,17 @@ export async function fullStatus(panel, workspaceState, pushSessionsFn) {
         return { name, models: list.map((id) => {
           const spec = specForModel(id)
           const r = spec.reasoningEffortEnum || (spec.thinking ? ["enabled"] : [])
-          return { id, label: id, provider: name, group: PRESETS[name]?.label || "Custom", reasoning: r }
+          return { id, label: id, provider: name, group: providerLabel(name), reasoning: r }
         })}
       } catch {
         const m = PRESETS[name]?.model || prov.model
         const spec = specForModel(m)
         const r = spec.reasoningEffortEnum || (spec.thinking ? ["enabled"] : [])
-        return { name, models: [{ id: m, label: m, provider: name, group: PRESETS[name]?.label || "Custom", reasoning: r }] }
+        return { name, models: [{ id: m, label: m, provider: name, group: providerLabel(name), reasoning: r }] }
       }
     })
   )
   const allModels = results.flatMap((r) => r.status === "fulfilled" ? r.value.models : [])
   panel?.webview.postMessage({ type: "models", models: allModels, prefs: loadModelPrefs(workspaceState) })
-  pushSessionsFn()
+  pushSessionsFn?.()
 }
