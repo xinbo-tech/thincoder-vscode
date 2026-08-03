@@ -60,7 +60,9 @@
   "model.reasoning": "推理深度",
   "model.noReasoning": "不支持推理",
   "model.noReasoningDesc": "关闭（不支持）",
-  "model.back": "← 返回 provider 列表",
+  "model.addProvider": "+ 添加 provider…",
+  "model.removeProvider": "− 移除 provider…",
+  "model.setKey": "设置密钥…",
 
   "settings.title": "设置",
   "settings.changeKey": "修改",

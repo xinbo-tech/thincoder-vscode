@@ -12,6 +12,7 @@ import { providerNames, getKey, buildProvider } from "./presets.mjs"
 import { listSlots, loadSlot, saveSessionToSlot, newSlot, switchToSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
 import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
+import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
 import { generateTitle } from "./generate-title.mjs"
 import { injectEditorContext } from "./editor-context.mjs"
 import { specForModel } from "../specs.mjs"
@@ -139,6 +140,9 @@ export class ChatPanel {
         case "deleteProviderKey": await this._deleteProviderKey(msg.name); break
         case "saveMcpServer": await this._saveMcpServer(msg.name, msg.config); break
         case "deleteMcpServer": await this._deleteMcpServer(msg.name); break
+        case "addProvider": await addProviderFlow(() => this._pushSettings()); break
+        case "removeProvider": await removeProviderFlow(() => this._pushSettings()); break
+        case "setKey": await setKeyFlow(() => this._pushSettings()); break
         case "saveEmbeddingConfig": await this._saveEmbeddingConfig(msg.config); break
         case "saveEmbedKey": await this._saveEmbeddingConfig({ apiKey: msg.key }); break
         case "deleteEmbedKey": await this._saveEmbeddingConfig({ apiKey: "" }); break

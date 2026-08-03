@@ -60,7 +60,9 @@
   "model.reasoning": "Reasoning",
   "model.noReasoning": "No reasoning",
   "model.noReasoningDesc": "Off (not supported)",
-  "model.back": "← Back to providers",
+  "model.addProvider": "+ Add provider…",
+  "model.removeProvider": "− Remove provider…",
+  "model.setKey": "Key…",
 
   "settings.title": "Settings",
   "settings.changeKey": "Change",

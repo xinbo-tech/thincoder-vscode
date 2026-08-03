@@ -376,6 +376,28 @@ function buildModelDropdown() {
   for (const [provider, { group, models }] of byProvider) {
     ctx.dropdown.appendChild(providerRow(provider, group, models))
   }
+  // Bottom management entries (CLI: add / remove / key flows at the picker footer)
+  const sep = document.createElement("div")
+  sep.className = "dropdown-sep"
+  ctx.dropdown.appendChild(sep)
+  ctx.dropdown.appendChild(manageEntry(t("model.addProvider"), "addProvider"))
+  ctx.dropdown.appendChild(manageEntry(t("model.removeProvider"), "removeProvider"))
+  ctx.dropdown.appendChild(manageEntry(t("model.setKey"), "setKey"))
+}
+
+// A management entry at the dropdown footer — posts the flow request to the extension host.
+function manageEntry(label, type) {
+  const item = document.createElement("div")
+  item.className = "dropdown-item dropdown-manage"
+  item.tabIndex = 0
+  item.setAttribute("role", "menuitem")
+  item.innerHTML = `<span>${label}</span>`
+  item.addEventListener("click", (e) => {
+    e.stopPropagation()
+    ctx.dropdown.style.display = "none"
+    vscode.postMessage({ type })
+  })
+  return item
 }
 
 // A Level-1 provider row with a hover flyout of its models on the right.

@@ -287,6 +287,16 @@
   font-size: 11px;
   margin-left: 4px;
 }
+.dropdown-sep {
+  height: 1px;
+  background: var(--border, #444);
+  opacity: 0.5;
+  margin: 4px 0;
+}
+.dropdown-manage {
+  opacity: 0.75;
+  font-size: 11px;
+}
 
 /* Flyout submenu: hidden until the provider row is hovered/open. Positioned to the right,
    its bottom edge aligned with the triggering row's bottom edge. */
