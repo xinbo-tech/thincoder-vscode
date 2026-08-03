@@ -57,7 +57,7 @@ CLI `/config` 的可配置项，config.json `agent.*`，批次 C 前 VS Code 面
 
 1. config-io.mjs 新增 `loadAgentSettings`（扩展 maxTurns/subagentTurns/compactThreshold/verifyGuard/advisor）+ `saveAgentSettings`
 2. **verifyGuard 行为修正**：agent.mjs 的 verify guard 改为 `cfgVerifyGuard === true` 才启用（对齐 CLI opt-in；默认 off 后不再自动回推——与 CLI 一致）
-3. **compactThreshold 接线**：context.mjs `compactHistory` 加第 4 参 explicitThreshold；agent.mjs 读 config 传入（explicit > auto-from-model，CLI resolveCompactThreshold 语义）
+3. **compactThreshold 接线**：context.mjs `compactHistory` 加 explicitThreshold 参数 + baseline 参数（实测 prompt_tokens 基线，CLI parity）；agent.mjs 读 config 传入（explicit > auto-from-model，CLI resolveCompactThreshold 语义；auto = context × 0.6，对齐 CONTEXT-COMPACTION.md D2）
 4. settings.mjs 新增 agentSettings/saveAgentSettingsFromPanel（advisor 段合并保留旧字段）
 5. chat-panel 路由 saveAgentSettings/getAgentSettings，_pushSettings 带 agentSettings 推送
 6. webview：Agent 区块（maxTurns/subagentTurns/compactThreshold/verifyGuard）+ Advisor 区块（enabled/guard/provider/model）+ 保存按钮

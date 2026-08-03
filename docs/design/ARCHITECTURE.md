@@ -162,10 +162,13 @@ user input
 
 ### 5. src/context.mjs — 上下文管理
 
-**上下文压缩**：
-- 阈值：~80K tokens（估算）
-- 策略：保留最后 ~30 条消息，旧消息归纳为摘要
-- 摘要注入格式：`[Context compacted: ...] <conversation_summary>...</conversation_summary>`
+**上下文压缩**（与 CLI 统一规范，见 thincoder `docs/design/CONTEXT-COMPACTION.md`）：
+- 触发：仅安全点（history 末尾为 user/tool）且完整 prompt 估算 ≥ 阈值；**实测优先**——上次响应的 `usage.prompt_tokens` 为基线，之后的消息按增量估算（无基线时 system+tools+history 纯估算）
+- 阈值：显式 `agent.compactThreshold` 优先，否则 auto = 模型 context × **0.6**（为注入上下文与输出/reasoning 留余量）
+- 策略：head（最早 2 条，tool_calls 配对保护）+ LLM 摘要（thinking 关闭，对前端静默）+ tail（窗口自适应 `max(10, ctx/100K×30)`，≤40% 历史，orphan tool 拉回 owner）
+- 降级链：摘要 LLM 失败 → 连续 3 次后 `truncateFallback` 确定性截断（无 LLM 调用）；无 middle 可切 → `shrinkOversized` 单消息截断
+- 压缩后回注：task 列表（先清旧注入去重）+ plan mode + AUTO/permission reminder
+- 空响应（reasoning 耗尽/输出截断）：注入 reminder 重试，上限 2 次，仍空才抛错（IK60QP，CLI 同语义）
 
 **仓库大纲**：
 - 扫描 `.js/.mjs/.ts/.jsx/.tsx` 文件

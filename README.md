@@ -61,6 +61,7 @@ All settings under `thincoder.*` in VS Code settings:
 |----------|--------------|-------------|
 | DeepSeek | `deepseek-v4-pro` | `https://api.deepseek.com/v1` |
 | Kimi (Moonshot) | `kimi-k3` | `https://api.moonshot.cn/v1` |
+| Kimi For Coding | `k3` | `https://api.kimi.com/coding/v1` — separate platform, `sk-kimi-` keys are NOT interchangeable with Moonshot |
 | GLM (Zhipu) | `glm-5.2` | `https://open.bigmodel.cn/api/paas/v4` |
 | Qwen (Alibaba) | `qwen3.7-max` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | MiniMax | `MiniMax-M3` | `https://api.minimax.chat/v1` |
