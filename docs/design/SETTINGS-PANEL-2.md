@@ -32,18 +32,15 @@
 
 ## 2. Semantic Index 区块
 
-### 现状问题
+**模型与 baseURL 写死为 SiliconFlow bge-m3——这是定案，不是待修问题。**（2026-08-03 用户拍板：embedding 模型固定；CLI 侧原有的 5 模型选择属过度工程，已在 CLI `2d99b60` 撤除该 picker。向量索引的格式假定单一 embedding 空间，暴露模型选择只会制造索引失配。）
 
-| # | 问题 | 详情 |
+VS Code 现状（`_saveEmbeddingConfig`/`_resolveEmbedder` 写死 bge-m3 + SiliconFlow）**保持不动**。本区块唯一要做的：
+
+| # | 事项 | 详情 |
 |---|------|------|
-| I1 | **embedding 模型/baseURL 写死** | `_saveEmbeddingConfig` 硬编码 SiliconFlow + bge-m3；CLI `/config` 可选 5 个 embedding 模型且存 config.json `embedding.model/baseURL` |
-| I2 | UI 无 model/baseURL 设置入口 | config.json 里手改了 embedding.model，UI 显示不出来也改不了 |
+| I1 | key 管理入口保留 | 现有 Add/Change/✕ 交互不变，落盘 config.json embedding.apiKey（已如此） |
 
-### 方案
-
-1. embedding 区块改为完整读写 config.json 的 `embedding` 段：apiKey（现有）+ model 下拉（CLI 同款 5 选项：bge-m3 / bge-large-zh / bge-large-en / text-embedding-3-small / 3-large）+ baseURL（默认 SiliconFlow，可改，高级折叠）。
-2. `_saveEmbeddingConfig` / `_resolveEmbedder` / embed-config.mjs 全部跟随 config.json 的 embedding 段（不再硬编码）。
-3. 索引构建行为不变。
+不做：模型选择、baseURL 输入、任何 embedding 高级设置。
 
 ## 3. Agent 设置区块（新增，目前完全没有）
 
@@ -105,7 +102,7 @@ CLI 有完整 proxy 支持：config.json `proxy: {uri, web, model}`、`/config` 
 |------|------|------|
 | A（已批） | Provider 区块重设计（SETTINGS-PANEL.md） | — |
 | B | MCP：迁移 config.json + env/重名/重连 | A 完成后（settings.js 同一文件） |
-| C | 语义索引 embedding 段 + Agent/Advisor 设置区块 + verifyGuard/compactThreshold 接线 | 与 B 无冲突，可并行 |
+| C | Agent/Advisor 设置区块 + verifyGuard/compactThreshold 接线（embedding 区块不动，模型写死 bge-m3） | 与 B 无冲突，可并行 |
 | D | Proxy 全套（移植 + 接线 + UI） | 独立一批 |
 
 ## 7. 验收标准
@@ -115,11 +112,10 @@ CLI 有完整 proxy 支持：config.json `proxy: {uri, web, model}`、`/config` 
 2. stdio 表单含 env；重名拒绝；行显示 ●/○ 与工具数；[Reconnect] 可用
 3. 旧 `thincoder.mcpServers` settings 一次性迁入 config.json 并清除
 
-**C（索引 + Agent）**：
-4. embedding model 可选 5 个且落 config.json，embedder 跟随
-5. maxTurns/subagentTurns/compactThreshold/verifyGuard/advisor 五项可看可改，改后下一轮生效
-6. verifyGuard 默认 off 时 verify guard 不回推（与 CLI 一致）
+**C（Agent 设置）**：
+4. maxTurns/subagentTurns/compactThreshold/verifyGuard/advisor 五项可看可改，改后下一轮生效
+5. verifyGuard 默认 off 时 verify guard 不回推（与 CLI 一致）
 
 **D（Proxy）**：
-7. 设 proxy URI + web:on 后 websearch/fetch 走代理；Test 按钮返回 OK/错误
-8. model:on 时 LLM 请求走代理
+6. 设 proxy URI + web:on 后 websearch/fetch 走代理；Test 按钮返回 OK/错误
+7. model:on 时 LLM 请求走代理
