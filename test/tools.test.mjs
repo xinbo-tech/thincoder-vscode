@@ -331,4 +331,38 @@ describe("bash — git destructive-command protection (CLI parity)", () => {
   })
 })
 
+describe("bash — background process does not hang (CLI parity)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("returns after grace when a background child holds the output pipe", async () => {
+    const { bashTool } = await import("../src/tools/shell.mjs")
+    // 独立目录：后台子进程 cwd 占用，不能动共享 cwd（describe 级 cleanup）
+    const bgDir = mkdtempSync(join(tmpdir(), "thincoder-vscode-bg-"))
+    try {
+      const cmd = process.platform === "win32"
+        ? 'start /b node -e "setTimeout(() => process.exit(0), 5000)"'
+        : 'node -e "setTimeout(() => process.exit(0), 5000)" &'
+      const t0 = Date.now()
+      const r = await bashTool.execute({ command: cmd }, { cwd: bgDir })
+      const elapsed = Date.now() - t0
+      assert.ok(elapsed < 10000, `应在 grace 后返回而非卡到超时，实际 ${elapsed}ms`)
+      assert.match(r, /\(background\)/, "提示后台进程持有管道: " + r.slice(0, 120))
+    } finally {
+      // 后台子进程 cwd 是 bgDir，5 秒自退后才可删除——轮询等待
+      for (let i = 0; i < 20; i++) {
+        try { rmSync(bgDir, { recursive: true, force: true }); break } catch { await new Promise((r) => setTimeout(r, 500)) }
+      }
+    }
+  })
+
+  it("normal commands still return full output (callback wins the race)", async () => {
+    const { bashTool } = await import("../src/tools/shell.mjs")
+    const r = await bashTool.execute({ command: "echo hello-from-vscode" }, { cwd })
+    assert.ok(r.includes("hello-from-vscode"), "正常命令输出完整: " + r)
+    assert.ok(!r.includes("(background)"), "正常命令不触发 background 提示")
+  })
+})
+
+
 

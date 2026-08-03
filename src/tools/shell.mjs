@@ -98,6 +98,13 @@ export const bashTool = {
       : null
 
     return new Promise((resolve) => {
+      let settled = false
+      const finish = (out) => {
+        if (settled) return
+        settled = true
+        ctx.callbacks?.onToolPanel?.("bash", out)
+        resolve(guard ? `${guard.notice}\n\n${out}` : out)
+      }
       const child = exec(command, {
         cwd: ctx.cwd,
         timeout: timeout || BASH_TIMEOUT_MS,
@@ -105,7 +112,7 @@ export const bashTool = {
         maxBuffer: 2 * 1024 * 1024,
       }, (error, stdout, stderr) => {
         if (error && error.killed) {
-          resolve(`(killed — timeout ${timeout || BASH_TIMEOUT_MS}ms)`)
+          finish(`(killed — timeout ${timeout || BASH_TIMEOUT_MS}ms)`)
           return
         }
         const out = [
@@ -113,8 +120,18 @@ export const bashTool = {
           stderr ? `[stderr]:\n${stderr}` : "",
           `(exit code ${error ? error.code ?? 1 : 0})`,
         ].filter(Boolean).join("\n")
-        ctx.callbacks?.onToolPanel?.("bash", out)
-        resolve(guard ? `${guard.notice}\n\n${out}` : out)
+        finish(out)
+      })
+      // exec's callback waits for the stdio pipes to close. A BACKGROUND child
+      // (start /b, &, …) inherits them, so the callback never fires and the tool
+      // hangs until the timeout — resolve after a grace period instead (CLI parity).
+      child.once("exit", () => {
+        setTimeout(() => {
+          finish(
+            "(background) the shell exited but a child process still holds the output pipe — output may be incomplete; the process may still be running\n" +
+            "[stdout]:\n(empty)"
+          )
+        }, 1000)
       })
       // Wire abort signal
       if (ctx.signal) {
