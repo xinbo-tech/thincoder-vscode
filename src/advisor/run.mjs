@@ -6,7 +6,7 @@
  */
 import { chat } from "../provider.mjs"
 import { resolveProviders, findProvider } from "../config-io.mjs"
-import { toOpenAISchema, readTool, globTool, grepTool, lsTool, gitDiffTool, gitStatusTool, gitLogTool, codeSearchTool, lspTool } from "../tools/index.mjs"
+import { toOpenAISchema, readTool, globTool, grepTool, lsTool, gitTool, codeSearchTool, lspTool } from "../tools/index.mjs"
 import { prepareAdvisorMessages } from "./main.mjs"
 import { extractPriorIssueTable } from "./history.mjs"
 
@@ -45,10 +45,22 @@ async function compactMessages(messages, _provider) {
   return [system, { role: "user", content: `[Context compacted] ${summary}` }, ...recent]
 }
 
-// The advisor gets read-only exploration tools. VS Code splits git into three read-only tools
-// (git_diff/git_status/git_log) — checkpoint is not included, so no mutation is possible.
+// The advisor gets read-only exploration tools. The git tool is wrapped to block
+// checkpoint create/rewind (CLI parity) — the advisor must not mutate state.
 // lsp uses VS Code's native language services (CLI parity — the CLI spawns LSP servers instead).
-const ADVISOR_TOOLS = [readTool, globTool, grepTool, lsTool, gitDiffTool, gitStatusTool, gitLogTool, lspTool, codeSearchTool]
+const advisorGitTool = {
+  ...gitTool,
+  readonly: true,
+  async execute(args, ctx) {
+    if (args.action === "checkpoint") {
+      if (args.checkpointAction === "create" || args.checkpointAction === "rewind") {
+        return "Error: checkpoint create/rewind is disabled in advisor mode. Use diff/status/log only."
+      }
+    }
+    return gitTool.execute(args, ctx)
+  },
+}
+const ADVISOR_TOOLS = [readTool, globTool, grepTool, lsTool, advisorGitTool, lspTool, codeSearchTool]
 const ADVISOR_TOOL_SCHEMAS = ADVISOR_TOOLS.map(toOpenAISchema)
 const ADVISOR_TOOL_BY_NAME = new Map(ADVISOR_TOOLS.map((t) => [t.name, t]))
 

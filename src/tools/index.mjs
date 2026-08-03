@@ -2,10 +2,10 @@
  * index.mjs — Tools module index: imports, re-exports, and tool registry
  */
 
-import { readTool, writeTool, editTool } from "./file.mjs"
+import { readTool, writeTool, editTool, hashlineEditTool } from "./file.mjs"
 import { globTool, grepTool } from "./search.mjs"
 import { bashTool } from "./shell.mjs"
-import { gitDiffTool, gitStatusTool, gitLogTool, checkpointTool } from "./git.mjs"
+import { gitTool } from "./git.mjs"
 import { websearchTool, fetchTool } from "./web.mjs"
 import { insertAfterTool, applyPatchTool, lsTool, deleteTool } from "./more-file.mjs"
 import { lintTool } from "./linter.mjs"
@@ -18,10 +18,10 @@ import { codeSearchTool, docSearchTool } from "./code.mjs"
 import { repoOutlineTool } from "../repomap.mjs"
 import { memoryPutTool, memorySearchTool } from "../memory.mjs"
 
-export { readTool, writeTool, editTool }
+export { readTool, writeTool, editTool, hashlineEditTool }
 export { globTool, grepTool }
 export { bashTool }
-export { gitDiffTool, gitStatusTool, gitLogTool, checkpointTool }
+export { gitTool }
 export { websearchTool, fetchTool }
 export { insertAfterTool, applyPatchTool, lsTool, deleteTool }
 export { lintTool } from "./linter.mjs"
@@ -36,10 +36,10 @@ export { BASH_TIMEOUT_MS, resolvePath, formatSize } from "./shared.mjs"
 
 /** All built-in tools */
 export const builtinTools = [
-  readTool, writeTool, editTool, insertAfterTool, applyPatchTool,
+  readTool, writeTool, editTool, insertAfterTool, applyPatchTool, hashlineEditTool,
   lintTool, checklistTool, lsTool, deleteTool,
   globTool, grepTool, bashTool,
-  gitDiffTool, gitStatusTool, gitLogTool, checkpointTool,
+  gitTool,
   websearchTool, fetchTool, questionTool,
   repoOutlineTool, codeSearchTool, docSearchTool,
   lspTool, executeTool,

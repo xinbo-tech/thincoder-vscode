@@ -175,3 +175,93 @@ describe("timer — thinking-budget timer (ported from CLI)", () => {
     assert.equal(timerTool.sideEffectExempt, true)
   })
 })
+
+describe("hashline_edit — content-hash addressing (ported from CLI)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("replaces a single line by hash", async () => {
+    const { hashlineEditTool } = await import("../src/tools/file.mjs")
+    const { hashLine } = await import("../src/tools/shared.mjs")
+    const f = join(cwd, "a.txt")
+    writeFileSync(f, "line one\nline two\nline three\n")
+    const h = hashLine("line two")
+    const r = await hashlineEditTool.execute({ path: "a.txt", old_hashes: [h], new_content: "replaced" }, ctx())
+    assert.match(r, /replaced 1 line\(s\) at L2/)
+    assert.equal(readFileSync(f, "utf8"), "line one\nreplaced\nline three\n")
+  })
+
+  it("replaces a contiguous block by hash sequence", async () => {
+    const { hashlineEditTool } = await import("../src/tools/file.mjs")
+    const { hashLine } = await import("../src/tools/shared.mjs")
+    const f = join(cwd, "b.txt")
+    writeFileSync(f, "a\nb\nc\nd\n")
+    const r = await hashlineEditTool.execute({
+      path: "b.txt",
+      old_hashes: [hashLine("b"), hashLine("c")],
+      new_content: "x\ny",
+    }, ctx())
+    assert.match(r, /replaced 2 line\(s\) at L2 with 2 line\(s\)/)
+    assert.equal(readFileSync(f, "utf8"), "a\nx\ny\nd\n")
+  })
+
+  it("reports missing hash sequence with current hashes", async () => {
+    const { hashlineEditTool } = await import("../src/tools/file.mjs")
+    const f = join(cwd, "c.txt")
+    writeFileSync(f, "only\n")
+    await assert.rejects(
+      () => hashlineEditTool.execute({ path: "c.txt", old_hashes: ["deadbeef00aa"], new_content: "x" }, ctx()),
+      /Hash sequence not found/,
+    )
+  })
+
+  it("rejects ambiguous matches with position details", async () => {
+    const { hashlineEditTool } = await import("../src/tools/file.mjs")
+    const { hashLine } = await import("../src/tools/shared.mjs")
+    const f = join(cwd, "d.txt")
+    writeFileSync(f, "same\nsame\nsame\n")
+    await assert.rejects(
+      () => hashlineEditTool.execute({ path: "d.txt", old_hashes: [hashLine("same")], new_content: "x" }, ctx()),
+      /matches 3 positions/,
+    )
+  })
+})
+
+describe("git — unified tool (CLI parity: action subcommands)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("builtin registry exposes git as a single tool (no git_diff/status/log/checkpoint)", async () => {
+    const { builtinTools } = await import("../src/tools/index.mjs")
+    const names = builtinTools.map((t) => t.name)
+    assert.ok(names.includes("git"))
+    assert.ok(!names.includes("git_diff"))
+    assert.ok(!names.includes("git_status"))
+    assert.ok(!names.includes("git_log"))
+    assert.ok(!names.includes("checkpoint"))
+    assert.ok(names.includes("hashline_edit"))
+  })
+
+  it("diff/status/log run against a real repo", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const { execSync } = await import("node:child_process")
+    execSync("git init -q", { cwd })
+    execSync('git config user.email t@t && git config user.name t', { cwd })
+    writeFileSync(join(cwd, "f.txt"), "hello\n")
+    execSync("git add f.txt && git commit -qm init", { cwd })
+    writeFileSync(join(cwd, "f.txt"), "hello world\n")
+    const st = await gitTool.execute({ action: "status" }, ctx())
+    assert.match(st, /f\.txt/, "modified file listed: " + st)
+    const df = await gitTool.execute({ action: "diff" }, ctx())
+    assert.match(df, /hello world/)
+    const lg = await gitTool.execute({ action: "log", oneline: true }, ctx())
+    assert.match(lg, /init/)
+  })
+
+  it("unknown action returns guidance", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const r = await gitTool.execute({ action: "nope" }, ctx())
+    assert.match(r, /Unknown action 'nope'/)
+  })
+})
+

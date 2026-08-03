@@ -1,137 +1,157 @@
 /**
- * git.mjs — Git and checkpoint tools: git_diff, git_status, git_log, checkpoint
+ * git.mjs — Git tool (CLI parity: single `git` tool with action subcommands).
+ * diff / status / log follow the CLI implementation byte-for-byte;
+ * checkpoint uses the stash-based snapshot mechanism (CLI uses git-patch snapshots —
+ * mechanism divergence tracked in thincoder docs/design/MCP.md §checkpoint-notes).
  */
-
+import { runGit, truncate } from "./shared.mjs"
 import { execSync } from "node:child_process"
 
-export const gitDiffTool = {
-  readonly: true,
-  name: "git_diff",
-  description: "Show git diff (unified format). Use to see uncommitted changes.",
-  parameters: {
-    type: "object",
-    properties: {
-      staged: { type: "boolean", description: "Show staged changes" },
-      path: { type: "string", description: "File or directory to diff" },
-    },
-  },
-  async execute({ staged, path: filePath }, ctx) {
-    try {
-      const args = ["--no-pager", "diff"]
-      if (staged) args.push("--staged")
-      if (filePath) args.push(filePath)
-      const result = execSync(`git ${args.join(" ")}`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
-      return result || "(no changes)"
-    } catch (e) {
-      return `git diff error: ${e.stderr || e.message}`
-    }
-  },
-}
-
-export const gitStatusTool = {
-  readonly: true,
-  name: "git_status",
-  description: "Show git status — staged, unstaged, untracked files.",
-  parameters: { type: "object", properties: {} },
-  async execute(_args, ctx) {
-    try {
-      const result = execSync("git status --short", { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
-      return result || "(working tree clean)"
-    } catch (e) {
-      return `git status error: ${e.stderr || e.message}`
-    }
-  },
-}
-
-export const gitLogTool = {
-  readonly: true,
-  name: "git_log",
-  description: "Show recent git commit history.",
-  parameters: {
-    type: "object",
-    properties: {
-      count: { type: "number", description: "Number of commits (default 10)" },
-      path: { type: "string", description: "File or directory" },
-      oneline: { type: "boolean", description: "One-line format" },
-    },
-  },
-  async execute({ count, path: filePath, oneline }, ctx) {
-    try {
-      const args = ["--no-pager", "log", oneline ? "--oneline" : "", `-${count || 10}`]
-      if (filePath) args.push("--", filePath)
-      const result = execSync(`git ${args.filter(Boolean).join(" ")}`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
-      return result || "(no commits)"
-    } catch (e) {
-      return `git log error: ${e.stderr || e.message}`
-    }
-  },
-}
-
-export const checkpointTool = {
-  name: "checkpoint",
+export const gitTool = {
+  name: "git",
+  readonly: false,
   description:
-    "List, create, and restore workspace snapshots (checkpoints). Git repositories only.\n" +
+    "Run a git command. Use this to see uncommitted changes, staged changes, diff against a ref, recent commits, or manage checkpoints. Only works inside a git repository.\n" +
+    "- action='diff': Show unified diff — what changed since last commit. Set staged=true for staged-only diff, ref=<ref> to compare against a specific commit/branch, path=<dir> to scope to a file or directory.\n" +
+    "- action='status': Show working tree state — staged, unstaged, untracked files, and conflicts. Returns categorized lists.\n" +
+    "- action='log': Show recent commit history. Set count to limit, oneline=true for compact format, path=<file> to see history of one file.\n" +
+    "- action='checkpoint': Manage git-based snapshots. Use checkpointAction to choose: list (overview), create (snapshot now), rewind (restore snapshot by id), cat (read a file from a snapshot).\n\n" +
     "Parameters:\n" +
-    "- action (required): \"list\" | \"create\" | \"rewind\" | \"cat\"\n" +
-    "- id: snapshot id (required for rewind and cat; optional for list — when given, shows the file tree inside that snapshot)\n" +
-    "- path: for rewind — restore only this single file; for cat — read this file's content from the snapshot",
+    "- action (required): diff / status / log / checkpoint\n" +
+    "- staged: (diff) Show staged changes instead of working tree\n" +
+    "- path: (diff/log/checkpoint:cat/checkpoint:rewind) File or directory to scope to\n" +
+    "- ref: (diff) Compare against this ref (default HEAD)\n" +
+    "- count: (log) Number of commits (default 10)\n" +
+    "- oneline: (log) One-line-per-commit format\n" +
+    "- checkpointAction: (checkpoint) list snapshots / create one / restore by id / read file from snapshot\n" +
+    "- checkpointId: (checkpoint) Snapshot id — required for rewind and cat; optional for list (shows file tree)",
   parameters: {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["list", "create", "rewind", "cat"], description: "list snapshots / create one now / restore a snapshot by id / read a file's content from a snapshot" },
-      id: { type: "string", description: "Snapshot id (required for rewind and cat; optional for list — shows file tree of that snapshot)" },
-      path: { type: "string", description: "Restore only this single file from the checkpoint (tracked or untracked). Other files are left untouched." },
+      action: { type: "string", enum: ["diff", "status", "log", "checkpoint"], description: "diff / status / log / checkpoint" },
+      staged: { type: "boolean", description: "(diff) Show staged changes instead of working tree" },
+      path: { type: "string", description: "(diff/log/checkpoint:cat/checkpoint:rewind) File or directory to scope to" },
+      ref: { type: "string", description: "(diff) Compare against this ref (default HEAD)" },
+      count: { type: "number", description: "(log) Number of commits (default 10)" },
+      oneline: { type: "boolean", description: "(log) One-line-per-commit format" },
+      checkpointAction: { type: "string", enum: ["list", "create", "rewind", "cat"], description: "(checkpoint) list snapshots / create one / restore by id / read file from snapshot" },
+      checkpointId: { type: "string", description: "(checkpoint) Snapshot id — required for rewind and cat; optional for list (shows file tree)" },
     },
     required: ["action"],
   },
-  async execute({ action, id, path }, ctx) {
-    try {
-      if (action === "list") {
-        if (id) {
-          const files = execSync(`git stash show --name-only "stash@{${id}}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 5000 })
-          return files || "(empty snapshot)"
+  async execute(args, ctx) {
+    switch (args.action) {
+      case "diff": {
+        const ref = args.ref ?? "HEAD"
+        if (!/^[A-Za-z0-9._/~^@][A-Za-z0-9._/~^@{}-]*$/.test(ref)) throw new Error(`Invalid git ref: ${ref}`)
+        const flags = args.staged ? ["--staged"] : []
+        const paths = args.path ? [args.path] : []
+        const out = runGit(ctx.cwd, ["diff", ...flags, ref, "--", ...paths])
+        return truncate(out || "(no changes)")
+      }
+      case "status": {
+        const porcelain = runGit(ctx.cwd, ["status", "--porcelain"])
+        if (!porcelain) return "(clean — no changes)"
+
+        const staged = []
+        const unstaged = []
+        const untracked = []
+        const conflicts = []
+        for (const line of porcelain.split("\n")) {
+          if (!line) continue
+          const clean = line.replace(/\r/g, "")
+          const m = clean.match(/^(..?)\s+(.+)$/)
+          if (!m) continue
+          const [, status, rawFile] = m
+          const file = status.includes("R") && rawFile.includes(" -> ") ? rawFile.replace(" -> ", " → ") : rawFile
+          const idx = status[0] ?? " "
+          const wt = status[1] ?? " "
+          if (idx === "U" || wt === "U" || (idx === "A" && wt === "A")) {
+            conflicts.push(file)
+          } else if (idx === "?" && wt === "?") {
+            untracked.push(file)
+          } else {
+            if (idx !== " " && idx !== "?") staged.push(idx + " " + file)
+            if (wt !== " " && wt !== "?") unstaged.push(wt + " " + file)
+          }
         }
-        const result = execSync("git stash list", { cwd: ctx.cwd, encoding: "utf8", timeout: 5000 })
-        return result || "(no snapshots)"
+        const parts = []
+        if (staged.length) parts.push("Staged (" + staged.length + "):\n" + staged.join("\n"))
+        if (unstaged.length) parts.push("Unstaged (" + unstaged.length + "):\n" + unstaged.join("\n"))
+        if (untracked.length) parts.push("Untracked (" + untracked.length + "):\n" + untracked.join("\n"))
+        if (conflicts.length) parts.push("Conflicts (" + conflicts.length + "):\n" + conflicts.join("\n"))
+        return truncate(parts.join("\n\n"))
       }
-      if (action === "create") {
-        const msg = `thincoder-${Date.now()}`
-        execSync(`git stash push --include-untracked -m "${msg}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
-        return `Snapshot created: ${msg}`
+      case "log": {
+        const n = Math.min(Math.max(1, args.count ?? 10), 200)
+        const isOneline = args.oneline
+        const cmdArgs = isOneline
+          ? ["log", "-" + n, "--oneline"]
+          : ["log", "-" + n, "--format=%h %ad %an %s", "--date=short"]
+        if (args.path) cmdArgs.push("--", args.path)
+        const out = runGit(ctx.cwd, cmdArgs)
+        return truncate(out || "(no commits)")
       }
-      if (action === "rewind") {
-        if (id === undefined) return "Error: rewind requires an id parameter (snapshot index from list)"
-        // Auto-snapshot current state first so rewind is reversible
-        const autoMsg = `thincoder-auto-${Date.now()}`
-        execSync(`git stash push --include-untracked -m "${autoMsg}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
-        if (path) {
-          // Restore a single file from the snapshot
-          const stashRef = `stash@{${id}}`
-          const files = execSync(`git stash show --name-only "${stashRef}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 5000 }).trim()
-          if (!files) return `Snapshot ${id} has no tracked file changes.`
-          const match = files.split("\n").find((f) => f === path || f.endsWith(`/${path}`))
-          if (!match) return `File "${path}" not found in snapshot ${id}. Available: ${files}`
-          execSync(`git checkout "${stashRef}" -- "${match}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
-          return `Restored "${match}" from snapshot ${id}. Auto-snapshot created: ${autoMsg}`
-        }
-        // Full restore: apply the target stash
-        execSync(`git stash apply "stash@{${id}}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
-        return `Restored snapshot ${id}. Auto-snapshot created before rewind: ${autoMsg}`
+      case "checkpoint": {
+        return await checkpointExecute(args, ctx)
       }
-      if (action === "cat") {
-        if (id === undefined) return "Error: cat requires an id parameter"
-        if (!path) return "Error: cat requires a path parameter"
-        // Read a file from the snapshot
-        const stashRef = `stash@{${id}}`
-        const files = execSync(`git stash show --name-only "${stashRef}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 5000 }).trim()
-        if (!files) return `Snapshot ${id} has no tracked file changes.`
-        const match = files.split("\n").find((f) => f === path || f.endsWith(`/${path}`))
-        if (!match) return `File "${path}" not found in snapshot ${id}.`
-        return execSync(`git show "${stashRef}:${match}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024 })
-      }
-      return `Error: unknown action "${action}". Use "list", "create", "rewind", or "cat".`
-    } catch (e) {
-      return `checkpoint error: ${e.stderr || e.message}`
+      default:
+        return `Unknown action '${args.action}'. Use: diff | status | log | checkpoint`
     }
   },
+}
+
+/** Stash-based checkpoint sub-actions (parameter names aligned to CLI: checkpointAction/checkpointId). */
+async function checkpointExecute({ checkpointAction: sub, checkpointId: id, path }, ctx) {
+  const exec = (cmd) => {
+    try {
+      return execSync(cmd, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
+    } catch (e) {
+      throw new Error((e.stderr || e.message || "").trim(), { cause: e })
+    }
+  }
+  if (!sub) return "checkpoint: missing checkpointAction — use: list | create | rewind | cat"
+
+  if (sub === "create") {
+    const msg = `thincoder-${Date.now()}`
+    exec(`git stash push --include-untracked -m "${msg}"`)
+    return `Checkpoint ${msg} created`
+  }
+  if (sub === "rewind") {
+    if (id === undefined) throw new Error("checkpointId is required for rewind — use checkpointAction=list to see snapshot ids")
+    // Auto-snapshot current state first so rewind is reversible
+    const autoMsg = `thincoder-auto-${Date.now()}`
+    exec(`git stash push --include-untracked -m "${autoMsg}"`)
+    if (path) {
+      const stashRef = `stash@{${id}}`
+      const files = exec(`git stash show --name-only "${stashRef}"`).trim()
+      if (!files) return `Checkpoint ${id} has no tracked file changes.`
+      const match = files.split("\n").find((f) => f === path || f.endsWith(`/${path}`))
+      if (!match) return `File "${path}" not found in checkpoint ${id}. Available: ${files}`
+      exec(`git checkout "${stashRef}" -- "${match}"`)
+      return `Restored "${match}" from checkpoint ${id}. Auto-snapshot created: ${autoMsg}`
+    }
+    exec(`git stash apply "stash@{${id}}"`)
+    return `Restored checkpoint ${id}. Auto-snapshot created before rewind: ${autoMsg}`
+  }
+  if (sub === "cat") {
+    if (id === undefined) throw new Error("checkpointId is required for cat — use checkpointAction=list to see snapshot ids")
+    if (!path) throw new Error("path is required for cat — specify which file to read")
+    const stashRef = `stash@{${id}}`
+    const files = exec(`git stash show --name-only "${stashRef}"`).trim()
+    if (!files) return `Checkpoint ${id} has no tracked file changes.`
+    const match = files.split("\n").find((f) => f === path || f.endsWith(`/${path}`))
+    if (!match) return `File "${path}" not found in checkpoint ${id}.`
+    return exec(`git show "${stashRef}:${match}"`)
+  }
+  if (sub === "list") {
+    const out = exec("git stash list").trim()
+    if (!out) return "(no checkpoints yet — one is auto-created before each user task)"
+    if (id !== undefined) {
+      const files = exec(`git stash show --name-only "stash@{${id}}"`).trim()
+      return files || "(empty checkpoint)"
+    }
+    return out
+  }
+  throw new Error(`Unknown checkpoint action: ${sub}. Use: list | create | rewind | cat`)
 }
