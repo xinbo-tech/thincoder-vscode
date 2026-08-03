@@ -318,7 +318,8 @@ describe("bash — git destructive-command protection (CLI parity)", () => {
     writeFileSync(join(cwd, "app.js"), "const v = 1\n")
     execSync("git add app.js && git commit -qm init", { cwd })
 
-    for (const cmd of ["git status", "git log --oneline", "git checkout --help", "git branch"]) {
+    // 注意：不用 git checkout --help 验证——git 的 --help 会打开系统浏览器（Windows），测试不得触发
+    for (const cmd of ["git status", "git log --oneline", "git checkout -b tmp-branch", "git branch"]) {
       const r = await bashTool.execute({ command: cmd }, { cwd })
       assert.ok(!r.includes("[auto-protection]"), `${cmd} 不应触发保护`)
     }

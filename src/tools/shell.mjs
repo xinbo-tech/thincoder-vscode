@@ -54,6 +54,14 @@ function gitGuardSnapshot(command, cwd) {
     if (!insideGitRepo(cwd)) return null
     const id = `thincoder-auto-${Date.now()}`
     execSync(`git stash push --include-untracked -m "${id}"`, { cwd, encoding: "utf8", timeout: 10000 })
+    // Bound the stash list (20 max) — guard snapshots must not accumulate on disk
+    try {
+      const list = execSync("git stash list", { cwd, encoding: "utf8", timeout: 5000 })
+      const count = list.trim() ? list.trim().split("\n").length : 0
+      for (let i = count; i > 20; i--) {
+        execSync(`git stash drop "stash@{${i - 1}}"`, { cwd, encoding: "utf8", stdio: "ignore", timeout: 5000 })
+      }
+    } catch { /* pruning is best-effort */ }
     return {
       id,
       notice: `[auto-protection] Destructive git command detected — snapshot ${id} created BEFORE execution (git stash, includes untracked). If this command destroyed uncommitted work, restore it: git stash apply "stash@{0}"`,
