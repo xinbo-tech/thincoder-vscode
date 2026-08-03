@@ -126,6 +126,21 @@ describe("proxyFetch — local CONNECT tunnel", () => {
     }
   })
 
+  it("testProxyConnection rejects malformed URI with a friendly message", async () => {
+    const { testProxyConnection } = await import("../src/extension/settings.mjs")
+    // Missing scheme → URL parse fails → clear error, not a raw "Invalid URL"
+    const r = await testProxyConnection("127.0.0.1:7890")
+    assert.equal(r.ok, false)
+    assert.match(r.error, /Invalid proxy URI/)
+    // Unsupported scheme
+    const r2 = await testProxyConnection("ftp://proxy:21")
+    assert.equal(r2.ok, false)
+    assert.match(r2.error, /Unsupported proxy protocol/)
+    // Empty → treated as direct connection (no URI validation error)
+    const r3 = await testProxyConnection("")
+    assert.notEqual(r3.ok, false, "empty URI is not a format error")
+  })
+
   it("no proxy → native fetch (returns an error object for unreachable host, not a throw)", async () => {
     // Unreachable host with no proxy: native fetch rejects — we just assert the call path
     // doesn't crash with a proxy-specific error.

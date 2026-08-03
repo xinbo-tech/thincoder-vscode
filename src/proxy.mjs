@@ -159,8 +159,14 @@ export function streamHttpResponse(sock, urlStr, opts = {}, timeout = FETCH_TIME
  */
 export function tunnelHttps(urlStr, opts, proxyUri, timeout = FETCH_TIMEOUT) {
   return new Promise((resolve, reject) => {
-    const target = new URL(urlStr)
-    const proxy = new URL(proxyUri)
+    let target, proxy
+    try {
+      target = new URL(urlStr)
+      proxy = new URL(proxyUri)
+    } catch {
+      // Friendly error instead of a raw "Invalid URL" leaking to the caller
+      return reject(new Error(`Invalid proxy URI: "${proxyUri}" — expected http://host:port`))
+    }
     const signal = opts?.signal
 
     if (signal?.aborted) return reject(abortError(signal))
@@ -199,7 +205,12 @@ export function tunnelHttps(urlStr, opts, proxyUri, timeout = FETCH_TIMEOUT) {
 /** TCP 直连代理（http:// 目标的经典转发用）：超时/abort/对端关闭都有稳定 reject */
 function tcpConnectProxy(proxyUri, signal, timeout) {
   return new Promise((resolve, reject) => {
-    const proxy = new URL(proxyUri)
+    let proxy
+    try {
+      proxy = new URL(proxyUri)
+    } catch {
+      return reject(new Error(`Invalid proxy URI: "${proxyUri}" — expected http://host:port`))
+    }
     const sock = connect({ host: proxy.hostname, port: Number(proxy.port) || 3128 })
     if (signal?.aborted) { sock.destroy(); return reject(abortError(signal)) }
     const onAbort = () => sock.destroy()

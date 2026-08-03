@@ -99,6 +99,17 @@ export function saveProxySettingsFromPanel(payload) {
 export async function testProxyConnection(uri) {
   const { proxyFetch } = await import("../proxy.mjs")
   const proxyUri = (uri || "").trim() || null
+  // Validate the URI format up front so an empty/blank field isn't tested, and a
+  // malformed URI gets a clear message instead of "Invalid URL" from deep inside.
+  if (proxyUri) {
+    let parsed
+    try { parsed = new URL(proxyUri) } catch {
+      return { ok: false, error: `Invalid proxy URI: "${proxyUri}" — expected http://host:port` }
+    }
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return { ok: false, error: `Unsupported proxy protocol: "${parsed.protocol}" — use http:// or https://` }
+    }
+  }
   try {
     const res = await Promise.race([
       proxyFetch("https://www.gstatic.com/generate_204", { headers: { "User-Agent": "ThinCoder" } }, proxyUri),
