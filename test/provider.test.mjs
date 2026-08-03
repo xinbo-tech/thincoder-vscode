@@ -5,7 +5,6 @@
  */
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
-import { specForModel } from "../src/config.mjs"
 
 // ─── OpenAI format parser ───────────────────────────────────────
 
@@ -201,14 +200,12 @@ describe("token estimation", () => {
 /** Create a mock Response with a readable stream from SSE string array */
 function createMockResponse(sseLines) {
   const encoder = new TextEncoder()
-  let closed = false
   const stream = new ReadableStream({
     start(controller) {
       for (const line of sseLines) {
         controller.enqueue(encoder.encode(line))
       }
       controller.close()
-      closed = true
     },
   })
   return {

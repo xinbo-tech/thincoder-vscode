@@ -17,6 +17,7 @@ export default [
         process: "readonly", console: "readonly", Buffer: "readonly",
         TextDecoder: "readonly", TextEncoder: "readonly", URL: "readonly",
         WebSocket: "readonly", Headers: "readonly", Response: "readonly", Request: "readonly",
+        ReadableStream: "readonly", // Node 18+ global (used by provider.test.mjs SSE mocks)
       },
     },
     rules: {

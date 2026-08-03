@@ -3,7 +3,7 @@
  * Extracted from extension.mjs to keep the entry point lean.
  */
 import * as vscode from "vscode"
-import { readFileSync, existsSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { runAgent } from "../agent.mjs"
@@ -403,8 +403,6 @@ export class ChatPanel {
     try {
       const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath
       const base = cwd || wsFolder || process.cwd()
-      const dir = join(base, query.startsWith("@") ? query.slice(1).split("/").slice(0, -1).join("/") : "")
-      const searchBase = existsSync(dir) ? dir : base
       const pattern = query.startsWith("@") ? query.slice(1) : query
       const uris = await vscode.workspace.findFiles(
         `**/${pattern}*`,
