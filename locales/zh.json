@@ -128,5 +128,13 @@
   "command.placeholder": "例如：添加一个 README",
   "msg.editTitle": "编辑此消息（从此处重写）",
   "msg.deleteTitle": "删除此消息及其后全部内容",
-  "msg.deleteConfirm": "删除此消息及其后的全部内容？"
+  "msg.deleteConfirm": "删除此消息及其后的全部内容？",
+  "tool": {
+    "error": "错误"
+  },
+  "status": {
+    "currentTool": "工具",
+    "turns": "轮",
+    "elapsed": "耗时"
+  }
 }

@@ -128,5 +128,13 @@
   "command.placeholder": "e.g. Add a README",
   "msg.editTitle": "Edit this message (rewrites from here)",
   "msg.deleteTitle": "Delete this message and everything after",
-  "msg.deleteConfirm": "Delete this message and everything after it?"
+  "msg.deleteConfirm": "Delete this message and everything after it?",
+  "tool": {
+    "error": "error"
+  },
+  "status": {
+    "currentTool": "tool",
+    "turns": "turns",
+    "elapsed": "elapsed"
+  }
 }

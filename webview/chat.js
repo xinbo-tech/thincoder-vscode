@@ -51,6 +51,9 @@ let _planActive = false
 let _subagentMap = {}
 let _goalInfo = null
 let _toolPanels = {}
+let _currentTool = null  // name of the tool currently executing (CLI status parity)
+let _llmCalls = 0        // LLM calls this turn (CLI turn-count parity)
+let _turnStart = null    // ms timestamp of the current turn (elapsed parity)
 
 // ─── Init ──────────────────────────────────────
 
@@ -294,6 +297,8 @@ function autoCleanPanels() {
   }
   renderSubagentPanel()
   renderToolPanels()
+  // Refresh elapsed seconds while a turn is running (CLI 1s ticker parity)
+  if (_turnStart) renderStatusBar()
 }
 
 function renderStatusBar(m) {
@@ -311,6 +316,10 @@ function renderStatusBar(m) {
   if (cachePct !== null) parts.push(`hit${cachePct}%`)
   if (m && m.ctxPct != null) parts.push(`context ${m.ctxPct}%`)
   else if (_lastCtxPct != null) parts.push(`context ${_lastCtxPct}%`)
+  // CLI status parity: current tool, turn count (LLM calls), elapsed seconds
+  if (_currentTool) parts.push(`<span class="status-tool">${t("status.currentTool")}: ${escHtml(_currentTool)}</span>`)
+  if (_llmCalls > 0) parts.push(`${t("status.turns")} ${_llmCalls}`)
+  if (_turnStart) parts.push(`${t("status.elapsed")} ${Math.round((Date.now() - _turnStart) / 1000)}s`)
   const subCount = Object.keys(_subagentMap).length
   if (subCount > 0) parts.push(`<span id="sub-badge" role="button" tabindex="0" aria-label="${subCount} subagents" style="cursor:pointer">sub:${subCount}</span>`)
   if (_taskStatus) parts.push(`<span id="task-badge" role="button" tabindex="0" aria-label="Task progress" style="cursor:pointer">${_taskStatus}</span>`)
@@ -594,8 +603,8 @@ window.addEventListener("message", (e) => {
       break
     }
     case "reasoning":        onReasoning(m.text); break
-    case "toolCall":         addTool(ctx, m.name, m.args, m.id); break
-    case "toolResult":       finishTool(ctx, m.name, m.id, m.text); break
+    case "toolCall":         _currentTool = m.name; addTool(ctx, m.name, m.args, m.id); renderStatusBar(); break
+    case "toolResult":       finishTool(ctx, m.name, m.id, m.text); _currentTool = null; renderStatusBar(); break
     case "toolHistory":      addToolHistory(ctx, m.name, m.text, m.idx); break
     case "loading": {
       if (m.loading) {
@@ -723,6 +732,7 @@ window.addEventListener("message", (e) => {
       break
     case "usage": {
       _lastUsage = m.usage || {}
+      _llmCalls++ // one LLM call per usage report (CLI turn parity)
       if (m.ctxPct != null) _lastCtxPct = m.ctxPct
       renderStatusBar(m)
       break
@@ -795,6 +805,8 @@ function send() {
   if (h[h.length - 1] !== text) h.push(text) // dedupe consecutive repeats
   ctx._historyIdx = -1
   ctx._inputDraft = ""
+  _turnStart = Date.now()
+  _llmCalls = 0
   const w = ctx.messagesEl.querySelector(".welcome")
   if (w) w.remove()
   ctx.inputEl.value = ""
@@ -875,6 +887,8 @@ function finish(aborted) {
   if (ctx.currentBubble) attachCopyButtons(ctx.currentBubble)
   ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
   ctx._toolRefs = {}
+  _currentTool = null
+  _turnStart = null
   setLoading(ctx, false)
   renderStatusBar()
 }
