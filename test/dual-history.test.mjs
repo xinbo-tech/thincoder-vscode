@@ -285,3 +285,57 @@ describe("session rewrite (edit/delete message → truncate + reseed)", () => {
   })
 })
 
+describe("legacy short-hash migration (regression: 12→40 hash change stranded sessions)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("migrates VS Code's historical 16-char hash (LOWERCASE drive letter)", async () => {
+    const { createHash } = await import("node:crypto")
+    const { writeFileSync, mkdirSync, existsSync, rmSync: rm } = await import("node:fs")
+    const { homedir } = await import("node:os")
+    const { slotPath } = await import("../src/extension/session-io.mjs")
+
+    // uri.fsPath on Windows lowercases the drive letter → the legacy 16-char hash
+    // was computed over the lowercase path. The migration must find it.
+    const lower = cwd.replace(/^([A-Z]):/, (_, d) => d.toLowerCase() + ":")
+    const legacy16 = createHash("sha1").update(lower).digest("hex").slice(0, 16)
+    const dir = join(homedir(), ".thincoder", "sessions")
+    mkdirSync(dir, { recursive: true })
+    const legacyBase = join(dir, `${legacy16}.json`)
+    writeFileSync(legacyBase, JSON.stringify({ version: 2, cwd, title: "", history: [{ role: "user", content: "legacy16" }] }))
+    writeFileSync(`${legacyBase}.manifest`, JSON.stringify({ active: 1, slots: {} }))
+    try {
+      slotPath(cwd, 1) // triggers migration (basePath → migrateHashLength)
+      const base40 = join(dir, `${createHash("sha1").update(cwd).digest("hex")}.json`)
+      assert.ok(existsSync(base40), "16-char legacy migrated to 40-char base")
+      assert.ok(!existsSync(legacyBase), "legacy 16-char file renamed away")
+    } finally {
+      const base40 = join(dir, `${createHash("sha1").update(cwd).digest("hex")}.json`)
+      for (const s of ["", ".manifest", ".1"]) { try { rm(base40 + s, { force: true }) } catch {} }
+    }
+  })
+
+  it("migrates the CLI's historical 12-char hash (uppercase drive letter)", async () => {
+    const { createHash } = await import("node:crypto")
+    const { writeFileSync, mkdirSync, existsSync, rmSync: rm } = await import("node:fs")
+    const { homedir } = await import("node:os")
+    const { slotPath } = await import("../src/extension/session-io.mjs")
+
+    const legacy12 = createHash("sha1").update(cwd).digest("hex").slice(0, 12)
+    const dir = join(homedir(), ".thincoder", "sessions")
+    mkdirSync(dir, { recursive: true })
+    const legacyBase = join(dir, `${legacy12}.json`)
+    writeFileSync(legacyBase, JSON.stringify({ version: 2, cwd, title: "", history: [{ role: "user", content: "legacy12" }] }))
+    try {
+      slotPath(cwd, 1) // triggers migration
+      const base40 = join(dir, `${createHash("sha1").update(cwd).digest("hex")}.json`)
+      assert.ok(existsSync(base40), "12-char legacy migrated to 40-char base")
+      assert.ok(!existsSync(legacyBase), "legacy 12-char file renamed away")
+    } finally {
+      const base40 = join(dir, `${createHash("sha1").update(cwd).digest("hex")}.json`)
+      for (const s of ["", ".manifest", ".1"]) { try { rm(base40 + s, { force: true }) } catch {} }
+    }
+  })
+})
+
+
