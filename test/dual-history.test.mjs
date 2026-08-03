@@ -241,3 +241,47 @@ describe("session-io — shared slot format (CLI-compatible)", () => {
     assert.equal(after.history.length, 2, "history line was updated")
   })
 })
+
+describe("session rewrite (edit/delete message → truncate + reseed)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("truncating the human line and re-saving removes messages + syncs the machine line", async () => {
+    const slot = newSlot(cwd)
+    const lines = [
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "u2" },
+      { role: "assistant", content: "a2" },
+      { role: "tool", name: "bash", content: "out" },
+    ]
+    saveSessionToSlot(cwd, slot, { version: 2, cwd, title: "", activeProvider: "p", history: lines, contextHistory: lines })
+
+    // Panel edit/delete semantics: slice at idx, persist both lines (machine reseeded from human)
+    const idx = 2 // delete u2 and everything after
+    const kept = lines.slice(0, idx)
+    saveSessionToSlot(cwd, slot, { version: 2, cwd, title: "t", activeProvider: "p", history: kept, contextHistory: kept })
+
+    const { loadSlot } = await import("../src/extension/session-io.mjs")
+    const data = loadSlot(cwd, slot)
+    assert.deepEqual(data.history.map((m) => m.content), ["u1", "a1"], "human line truncated")
+    assert.deepEqual(data.contextHistory.map((m) => m.content), ["u1", "a1"], "machine line reseeded from human line")
+  })
+
+  it("edit keeps the message's text available for the input box (loadDraft source)", async () => {
+    const slot = newSlot(cwd)
+    const lines = [
+      { role: "user", content: "old question" },
+      { role: "assistant", content: "old answer" },
+    ]
+    saveSessionToSlot(cwd, slot, { version: 2, cwd, title: "", activeProvider: "p", history: lines, contextHistory: lines })
+    // edit message 0: truncate after it, but the text survives in the kept line
+    const kept = lines.slice(0, 1)
+    saveSessionToSlot(cwd, slot, { version: 2, cwd, title: "t", activeProvider: "p", history: kept, contextHistory: kept })
+    const { loadSlot } = await import("../src/extension/session-io.mjs")
+    const data = loadSlot(cwd, slot)
+    assert.equal(data.history[0].content, "old question", "edited message text retained for the input box")
+    assert.equal(data.history.length, 1, "everything after the edited message is gone")
+  })
+})
+

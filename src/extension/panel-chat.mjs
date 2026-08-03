@@ -129,6 +129,14 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
         }),
     }, panel._abortController.signal, c.get("autoApprove", false), { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: collectEditorInjection(cwd) })
   } catch (e) {
+    // Persist the interrupted/errored turn: the user message and any partial output
+    // were already pushed into both lines by runAgent (pushReal). Without this save,
+    // an abort/error loses the whole turn from disk (CLI parity: at most half a turn lost).
+    try {
+      panel._saveLines(fullHistory, history, { activeProvider: providerName })
+    } catch (saveErr) {
+      console.error("[chat-panel] save after abort/error failed:", saveErr.message)
+    }
     if (e.name === "AbortError") {
       panel._panel.webview.postMessage({ type: "aborted" })
     } else {

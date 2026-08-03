@@ -34,20 +34,28 @@ export function showBanner(ctx, text, keyOk) {
 
 // ─── Messages ──────────────────────────────────
 
-export function addUser(ctx, text, timestamp) {
+/** Historical user message (idx set) gets edit + delete buttons; live ones don't. */
+export function addUser(ctx, text, timestamp, idx) {
   const el = document.createElement("div")
   el.className = "message user"
   const ts = timestamp ? fmtTime(new Date(timestamp)) : fmtTime(new Date())
-  el.innerHTML = `<div class="msg-label">❯ ${t("msg.user")}: <span class="msg-time">${ts}</span></div><div class="bubble">${mdInline(esc(text))}</div>`
+  const actions = idx === undefined ? "" :
+    `<span class="msg-actions">
+      <button class="msg-edit-btn" data-idx="${idx}" title="${t("msg.editTitle")}">✎</button>
+      <button class="msg-del-btn" data-idx="${idx}" title="${t("msg.deleteTitle")}">✕</button>
+    </span>`
+  el.innerHTML = `<div class="msg-label">❯ ${t("msg.user")}: <span class="msg-time">${ts}</span>${actions}</div><div class="bubble">${mdInline(esc(text))}</div>`
   ctx.messagesEl.appendChild(el)
   scrollDown(ctx)
 }
 
-export function addAssistantHistory(ctx, text, timestamp) {
+/** Historical assistant message (idx set) gets a delete button; live ones don't. */
+export function addAssistantHistory(ctx, text, timestamp, idx) {
   const el = document.createElement("div")
   el.className = "message assistant"
   const ts = timestamp ? fmtTime(new Date(timestamp)) : ""
-  el.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}: ${ts ? `<span class="msg-time">${ts}</span>` : ""}<button class="msg-copy-btn" title="${t("msg.copyTitle")}">${t("msg.copy")}</button></div><div class="bubble content">${md(text)}</div>`
+  const actions = idx === undefined ? "" : `<button class="msg-del-btn" data-idx="${idx}" title="${t("msg.deleteTitle")}">✕</button>`
+  el.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}: ${ts ? `<span class="msg-time">${ts}</span>` : ""}<button class="msg-copy-btn" title="${t("msg.copyTitle")}">${t("msg.copy")}</button>${actions}</div><div class="bubble content">${md(text)}</div>`
   ctx.messagesEl.appendChild(el)
   scrollDown(ctx)
 }
@@ -119,7 +127,7 @@ export function finishTool(ctx, name, id, text) {
     return
   }
   // Fallback: DOM traversal for any reason the map missed
-  const el = ctx.messagesEl.querySelector(`.tool-call[data-tool-id="${CSS.escape(key)}"] .tool-call-status`)
+  const el = ctx.messagesEl.querySelector(`.tool-call[data-tool-id="${globalThis.CSS.escape(key)}"] .tool-call-status`)
   if (el) {
     el.textContent = t("tool.done")
     el.style.color = "#4ec9b0"
@@ -137,6 +145,42 @@ export function setLoading(ctx, on) {
   ctx.inputEl.disabled = on
   if (!on) ctx.inputEl.focus()
   ctx.isRunning = on
+}
+
+/** Historical tool call rendered from the human line (collapsed card, read-only). */
+export function addToolHistory(ctx, name, text, idx) {
+  const c = document.createElement("div")
+  c.className = "tool-call"
+  c.dataset.toolId = "hist-" + (idx ?? name)
+
+  const h = document.createElement("div")
+  h.className = "tool-call-header"
+  h.tabIndex = 0
+  h.setAttribute("role", "button")
+  h.setAttribute("aria-expanded", "false")
+  h.innerHTML =
+    `<span class="tool-call-icon"></span>` +
+    `<span class="tool-call-name">${esc(name)}</span>` +
+    `<span class="tool-call-status" style="color:#4ec9b0">${t("tool.done")}</span>` +
+    (idx !== undefined ? `<button class="msg-del-btn" data-idx="${idx}" title="${t("msg.deleteTitle")}">✕</button>` : "")
+
+  const b = document.createElement("div")
+  b.className = "tool-call-body"
+  b.setAttribute("role", "region")
+  b.setAttribute("aria-label", `Output of ${name}`)
+  b.textContent = text || ""
+
+  h.addEventListener("click", (e) => {
+    if (e.target.closest(".msg-del-btn")) return
+    h.querySelector(".tool-call-icon").classList.toggle("open")
+    b.classList.toggle("open")
+    h.setAttribute("aria-expanded", String(b.classList.contains("open")))
+  })
+
+  c.appendChild(h)
+  c.appendChild(b)
+  ctx.messagesEl.appendChild(c)
+  scrollDown(ctx)
 }
 
 export function showError(ctx, text, techInfo) {

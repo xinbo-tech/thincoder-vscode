@@ -125,5 +125,8 @@
   "sub.error": "error",
   "paste.images": "${count} image(s) attached",
   "command.prompt": "What to do?",
-  "command.placeholder": "e.g. Add a README"
+  "command.placeholder": "e.g. Add a README",
+  "msg.editTitle": "Edit this message (rewrites from here)",
+  "msg.deleteTitle": "Delete this message and everything after",
+  "msg.deleteConfirm": "Delete this message and everything after it?"
 }

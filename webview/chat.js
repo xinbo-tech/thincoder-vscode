@@ -5,7 +5,7 @@ import { md } from "./md.js"
 import { renderDiff, lineDiff } from "./diff.js"
 import {
   showWelcome, showBanner, addUser, addAssistantHistory, newBlock,
-  addTool, finishTool, setLoading, showError, scrollDown, escHtml,
+  addTool, addToolHistory, finishTool, setLoading, showError, scrollDown, escHtml,
 } from "./ui.js"
 import { setStrings, t } from "./i18n.js"
 import { initAutocomplete } from "./autocomplete.js"
@@ -35,6 +35,9 @@ const ctx = {
   selectedModel: "", selectedProvider: "", selectedReasoning: "max",
   _sessions: [], activeSession: 0,
   _pastedImages: [],
+  _inputHistory: [], // sent inputs (memory, per panel session — CLI parity)
+  _historyIdx: -1,   // -1 = showing the live draft
+  _inputDraft: "",   // stashed in-progress text while navigating history
 }
 
 // ─── Shared mutable state (must be declared before setInterval / event handlers)
@@ -57,6 +60,17 @@ ctx.sendBtn.addEventListener("click", send)
 ctx.abortBtn.addEventListener("click", () => vscode.postMessage({ type: "abort" }))
 ctx.inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() }
+  // Input history navigation (CLI parity): ↑ on the first line recalls previous
+  // inputs; ↓ walks back down; the in-progress draft is stashed and restored.
+  else if (e.key === "ArrowUp" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey &&
+           ctx.inputEl.selectionStart === 0 && !isAtDropdownOpen()) {
+    e.preventDefault()
+    navigateInputHistory(-1)
+  } else if (e.key === "ArrowDown" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey &&
+           ctx.inputEl.selectionStart === ctx.inputEl.value.length && !isAtDropdownOpen()) {
+    e.preventDefault()
+    navigateInputHistory(1)
+  }
 })
 ctx.inputEl.addEventListener("input", () => {
   ctx.inputEl.style.height = "auto"
@@ -81,6 +95,23 @@ const { openSettings, closeSettings, renderMcpList, updateProviderStatus, update
 
 // Auto-clean panel entries (done subagents after 3s, tool panels after 10s)
 setInterval(autoCleanPanels, 2000)
+
+// ─── Historical message edit / delete (delegated — buttons carry data-idx) ──
+
+ctx.messagesEl.addEventListener("click", (e) => {
+  const editBtn = e.target.closest(".msg-edit-btn")
+  if (editBtn) {
+    vscode.postMessage({ type: "editMessage", idx: Number(editBtn.dataset.idx) })
+    return
+  }
+  const delBtn = e.target.closest(".msg-del-btn")
+  if (delBtn) {
+    const idx = Number(delBtn.dataset.idx)
+    const ok = window.confirm(t("msg.deleteConfirm") || "Delete this message and everything after it?")
+    if (ok) vscode.postMessage({ type: "deleteMessage", idx })
+  }
+})
+
 
 // ─── Permission bar ──────────────────────────────
 
@@ -117,7 +148,7 @@ function buildSessionDropdown() {
     item.setAttribute("aria-selected", String(!!s.active))
     if (s.active) item.classList.add("active")
     item.innerHTML = `<span class="session-item-title">${escHtml(s.title)}</span>
-      <span class="session-item-meta">${s.count}msgs${s.updated ? " · " + fmtDate(s.updated) : ""}</span>`
+      <span class="session-item-meta">${s.provider ? escHtml(s.provider) + " · " : ""}${s.count}msgs${s.updated ? " · " + fmtDate(s.updated) : ""}</span>`
     if (ctx._sessions.length > 1) {
       item.innerHTML += `<button class="session-delete" title="${t("session.delete")}" aria-label="${t("session.delete")} ${escHtml(s.title)}">✕</button>`
     }
@@ -548,15 +579,24 @@ window.addEventListener("message", (e) => {
   const m = e.data
   switch (m.type) {
     case "i18n":           setStrings(m.strings); applyI18nToDOM(); break
-    case "userMessage":      addUser(ctx, m.text, m.timestamp); break
-    case "assistantMessage": addAssistantHistory(ctx, m.text, m.timestamp);
+    case "userMessage":      addUser(ctx, m.text, m.timestamp, m.idx); break
+    case "assistantMessage": addAssistantHistory(ctx, m.text, m.timestamp, m.idx);
       attachCopyButtons(ctx.messagesEl.lastElementChild);
       wireMsgCopyButton(ctx.messagesEl.lastElementChild);
       break
     case "token":            onToken(m.text); break
+    case "loadDraft": {
+      // Historical message edit: text was loaded back into the input box
+      ctx.inputEl.value = m.text ?? ""
+      ctx.inputEl.style.height = "auto"
+      ctx.inputEl.style.height = Math.min(ctx.inputEl.scrollHeight, 150) + "px"
+      ctx.inputEl.focus()
+      break
+    }
     case "reasoning":        onReasoning(m.text); break
     case "toolCall":         addTool(ctx, m.name, m.args, m.id); break
     case "toolResult":       finishTool(ctx, m.name, m.id, m.text); break
+    case "toolHistory":      addToolHistory(ctx, m.name, m.text, m.idx); break
     case "loading": {
       if (m.loading) {
         document.getElementById("status-line").innerHTML = _planActive
@@ -727,9 +767,34 @@ window.addEventListener("message", (e) => {
 
 // ─── Send ──────────────────────────────────────
 
+/** Whether the @-autocomplete dropdown is open (input-history keys must not fight it). */
+function isAtDropdownOpen() {
+  return document.getElementById("at-dropdown")?.style.display !== "none"
+}
+
+/** ↑/↓ input history with draft protection (CLI parity). */
+function navigateInputHistory(dir) {
+  const h = ctx._inputHistory
+  if (h.length === 0) return
+  if (ctx._historyIdx === -1) ctx._inputDraft = ctx.inputEl.value // stash live draft once
+  let idx = ctx._historyIdx + dir
+  if (idx >= h.length) idx = h.length - 1
+  if (idx < -1) idx = -1
+  ctx._historyIdx = idx
+  ctx.inputEl.value = idx === -1 ? ctx._inputDraft : h[idx]
+  const len = ctx.inputEl.value.length
+  ctx.inputEl.setSelectionRange(len, len)
+  ctx.inputEl.style.height = "auto"
+  ctx.inputEl.style.height = Math.min(ctx.inputEl.scrollHeight, 150) + "px"
+}
+
 function send() {
   const text = ctx.inputEl.value.trim()
   if (!text || ctx.isRunning) return
+  const h = ctx._inputHistory
+  if (h[h.length - 1] !== text) h.push(text) // dedupe consecutive repeats
+  ctx._historyIdx = -1
+  ctx._inputDraft = ""
   const w = ctx.messagesEl.querySelector(".welcome")
   if (w) w.remove()
   ctx.inputEl.value = ""

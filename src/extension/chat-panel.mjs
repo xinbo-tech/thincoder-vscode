@@ -151,14 +151,45 @@ export class ChatPanel {
   _loadSession() {
     const history = this._activeHistory()
     this._panel?.webview.postMessage({ type: "clearMessages" })
-    for (const m of history) {
+    history.forEach((m, idx) => {
       // Real messages carry role (LLM line); UI-only ones may carry type. Derive the UI kind from either.
       const kind = m.type ?? m.role
-      if (kind === "user" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "userMessage", text: stripEditorInjection(m.content), timestamp: m.timestamp })
-      else if (kind === "assistant" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "assistantMessage", text: m.content, timestamp: m.timestamp })
-      // tool calls/results and multimodal parts are not re-rendered from history (they stream live via callbacks)
-    }
+      if (kind === "user" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "userMessage", text: stripEditorInjection(m.content), timestamp: m.timestamp, idx })
+      else if (kind === "assistant" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "assistantMessage", text: m.content, timestamp: m.timestamp, idx })
+      else if (kind === "tool" && typeof m.content === "string") {
+        // Tool results ARE in the human line (pushReal); render as collapsed cards.
+        this._panel?.webview.postMessage({ type: "toolHistory", name: m.name ?? "tool", text: m.content.slice(0, 2000), idx })
+      }
+    })
     this._pushSessions()
+  }
+
+  /**
+   * Edit a historical user message: load its text into the input box and truncate
+   * the session after it (message + everything after is removed from disk). The user
+   * then edits and resends — a clean "rewrite from here" semantic.
+   */
+  async _editMessage(idx) {
+    const history = this._activeHistory()
+    const m = history[idx]
+    if (!m || (m.type ?? m.role) !== "user" || typeof m.content !== "string") return
+    this._truncateSession(idx)
+    this._panel?.webview.postMessage({ type: "loadDraft", text: stripEditorInjection(m.content) })
+  }
+
+  /** Delete a historical message (and everything after it) from disk + re-render. */
+  async _deleteMessage(idx) {
+    const history = this._activeHistory()
+    if (!history[idx]) return
+    this._truncateSession(idx)
+  }
+
+  /** Persist the truncated lines (machine line reseeded from the human line — user explicitly rewrote history). */
+  _truncateSession(idx) {
+    const history = this._activeHistory()
+    const lines = history.slice(0, idx)
+    this._saveLines(lines, lines, {})
+    this._loadSession()
   }
 
   async _newSession() {
@@ -206,6 +237,7 @@ export class ChatPanel {
       title: s.title || (s.firstMessage ? `"${truncate(s.firstMessage, 40)}"` : "(empty)"),
       count: s.messageCount,
       updated: s.updatedAt,
+      provider: s.activeProvider ?? null,
       active: s.isActive,
     }))
     this._panel?.webview.postMessage({ type: "sessions", sessions, active: this._ensureSlot() })
