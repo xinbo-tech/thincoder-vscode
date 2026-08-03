@@ -20,7 +20,7 @@ import { t, loadLocaleStrings } from "../i18n.mjs"
 import { loadSkills } from "./skills.mjs"
 import { injectAtRefs } from "./file-refs.mjs"
 import { getEmbedder, setVSCodeEmbedder, resetEmbedder } from "../embed-config.mjs"
-import { loadEmbeddingConfig, saveEmbeddingConfig, selectProviderModel } from "../config-io.mjs"
+import { loadEmbeddingConfig, saveEmbeddingConfig, selectProviderModel, resolveProviders } from "../config-io.mjs"
 import { buildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../indexer.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -496,8 +496,16 @@ export class ChatPanel {
   async _chat(text, modelOverride, reasoning, providerName, images) {
     if (!this._panel) { vscode.window.showErrorMessage("_chat: panel is null"); return }
     if (!providerName) {
-      for (const n of providerNames()) {
-        try { if (await getKey(n)) { providerName = n; break } } catch {}
+      // Default provider: activeProvider first (CLI parity) — the settings-panel radio
+      // sets this pointer; fall back to the first provider that has a key.
+      try {
+        const { activeProvider } = resolveProviders()
+        if (activeProvider && await getKey(activeProvider)) providerName = activeProvider
+      } catch {}
+      if (!providerName) {
+        for (const n of providerNames()) {
+          try { if (await getKey(n)) { providerName = n; break } } catch {}
+        }
       }
     }
     if (!providerName) { this._panel.webview.postMessage({ type: "error", text: t("error.provider") }); return }

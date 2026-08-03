@@ -37,6 +37,13 @@ describe("model specs", () => {
     assert.equal(specForModel("grok-4").context, 1_000_000)
   })
 
+  it("qwen3.7-max is text-only (DashScope 400 on images — CLI parity)", () => {
+    // CLI config.mjs marks qwen3.7-max WITHOUT multimodal (it rejects image parts with
+    // DashScope 400 "Unexpected item type in content"). A drift here (multimodal: true)
+    // makes the extension send images to a model that refuses them — every request 400s.
+    assert.equal(specForModel("qwen3.7-max").multimodal, undefined)
+  })
+
   it("2M context model", () => {
     assert.equal(specForModel("gemini-2.5-pro").context, 2_000_000)
   })
