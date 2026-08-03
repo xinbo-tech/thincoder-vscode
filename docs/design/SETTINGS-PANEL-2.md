@@ -1,34 +1,33 @@
 # 配置面板重设计 · 第二部分：MCP / 语义索引 / Agent 设置 / Proxy
 
-> 状态：**设计待评审**。第一部分（Provider 区块，`SETTINGS-PANEL.md`）已获批准。
-> 本文档梳理配置面板其余区块与 CLI 的差距，逐项给出对齐方案。实施需用户批准。
+> 状态：**批次 B（MCP）已实施**（2026-08-03，commit a23ebdc）。批次 C（Agent 设置）待实施。
 
 ## 1. MCP Servers 区块
 
-### 现状问题
+### 现状（批次 B 实施后）
 
-| # | 问题 | 详情 |
+**存储已迁移进共享 config.json**（`mcp.servers[]`，CLI 同格式），旧 `thincoder.mcpServers` settings 由 migrateCore 一次性迁移后清除。UI 支持 env 字段、args 空格分隔、重名校验（错误回显）、连接状态 ●/○ + 工具数、[Reconnect]。CLI 与 VS Code 看到同一份 server 列表。
+
+### 历史问题（均已解决）
+
+| # | 问题 | 解决 |
 |---|------|------|
-| M1 | **存储位置与 CLI 不一致** | VS Code 存 `thincoder.mcpServers`（VS Code settings，dict `{name: config}`）；CLI 存 config.json `mcp.servers[]`（数组，条目带 name）。两端互不可见——CLI 加的 server VS Code 看不到，反之亦然 |
-| M2 | stdio 表单缺 `env` 字段 | CLI addFlow 可输 `KEY=value` 环境变量；VS Code 表单没有 |
-| M3 | 无重连、无连接状态 | CLI `/mcp connect` + `●/○` 状态；VS Code 面板只列配置，看不到是否已连接，也不能重连 |
-| M4 | 重名静默覆盖 | CLI 拒绝重名；VS Code `saveMcpServer` 直接覆盖同名条目 |
-| M5 | 无 AI 辅助添加 | CLI 有 "Describe with AI"（自然语言生成配置）；VS Code 无。**建议不做**——锦上添花，且面板里跑一次 LLM 生成交互链很长 |
-| M6 | args 分隔符不一致 | CLI stdio args 空格分隔；VS Code 逗号分隔。小事，对齐 CLI 即可 |
+| M1 | 存储位置与 CLI 不一致 | 迁移进 config.json `mcp.servers[]`，migrateCore 一次性迁移（CLI 已有条目跳过） |
+| M2 | stdio 表单缺 env 字段 | 表单加 env 输入（KEY=value 空格分隔） |
+| M3 | 无重连、无连接状态 | mcp 模块加 mcpConnectedNames/mcpConnectedToolCounts/mcpDisconnectByName；面板 ●/○ + [Reconnect] |
+| M4 | 重名静默覆盖 | addMcpServer 拒绝重名，错误回显 webview |
+| M5 | AI 辅助添加 | 不做（记录在案） |
+| M6 | args 分隔符不一致 | 改空格分隔（CLI 一致） |
 
-### 方案（对齐 CLI）
+### 实施记录（a23ebdc）
 
-1. **MCP 迁移进共享 config.json**（M1）：`raw.mcp.servers[]`，条目形态与 CLI 完全一致（`{name, command, args?, env?}` / `{name, url, headers?}` / `{name, wsUrl, headers?}`）。一次性迁移逻辑并进 `migrate-settings.mjs`（模式与 providers 迁移相同：读旧 settings → 写 config.json → 清旧键，flag 防重跑）。
-2. 读写入口：`settings.mjs` 的 getMcpServers/saveMcpServer/deleteMcpServer 改走 config-io；`chat-panel._chat` 传给 runAgent 的 mcpServers 改从 config.json 读（形态从 dict 变数组，agent.mjs 的 MCP 注入段同步改，按 CLI 的列表格式渲染）。
-3. **表单补 env 字段**（M2），args 改空格分隔（M6），重名校验拒绝（M4）。
-4. **连接状态与重连**（M3）：`mcp/index.mjs` 暴露 `mcpConnectedNames()`（读内部 `_servers` map）；面板行显示 ●/○ + 工具数；行上加 [Reconnect] 按钮 → 新消息 `reconnectMcp` → disconnect + 重新 connect（连接是 agent 调 mcp 工具时懒建立的，面板重连 = 预热/修复断连）。
-5. **M5 不做**，记录在案。
-
-### 消息协议变化
-
-- `saveMcpServer` / `deleteMcpServer`：保留名字，落盘改 config.json；save 时校验重名（返回错误消息给 webview 提示）。
-- 新增 `reconnectMcp`：`{ name }`。
-- `mcpStatus` 推送：增加每 server 的 `connected`/`toolCount` 字段。
+1. config-io.mjs 新增 `loadMcpServers`/`addMcpServer`（重名拒绝）/`removeMcpServer`
+2. migrateCore 新增 legacyMcpServers/clearLegacyMcp 迁移段
+3. settings.mjs 的 MCP 函数改走 config.json（不再用 VS Code settings）
+4. mcp/index.mjs 新增 `mcpConnectedNames`/`mcpConnectedToolCounts`/`mcpDisconnectByName`
+5. chat-panel：_pushMcpStatus 推送数组（name/desc/connected/toolCount）、路由 reconnectMcp、runAgent 传数组
+6. agent.mjs MCP 注入段改数组渲染（含 wsUrl 分支）
+7. webview：表单加 env、args 空格分隔、行显示 ●/○ + 工具数 + [Reconnect]
 
 ## 2. Semantic Index 区块
 
