@@ -5,7 +5,7 @@
  */
 
 import { PRESETS, providerNames, isProviderConfigured, storeProviderKey, removeProviderKey, buildProvider, providerLabel, readProviders } from "./presets.mjs"
-import { persistRaw, resolveProviders, loadMcpServers, addMcpServer, removeMcpServer } from "../config-io.mjs"
+import { persistRaw, resolveProviders, loadMcpServers, addMcpServer, removeMcpServer, loadAgentSettings, saveAgentSettings } from "../config-io.mjs"
 import { addProviderEntry, removeProviderEntry, setActiveProviderEntry } from "./provider-flows.mjs"
 import { mcpConnectedNames } from "../mcp.mjs"
 import { listModels } from "../provider.mjs"
@@ -50,6 +50,41 @@ export function providerStatus() {
 export function handleAddProvider(payload) { return addProviderEntry(payload) }
 export function handleRemoveProvider(name) { return removeProviderEntry(name) }
 export function handleSetActiveProvider(name) { return setActiveProviderEntry(name) }
+
+/** Agent/Advisor settings snapshot for the panel (from shared config.json). */
+export function agentSettings() {
+  const s = loadAgentSettings()
+  return {
+    maxTurns: s.maxTurns,
+    subagentTurns: s.subagentTurns,
+    compactThreshold: s.compactThreshold, // null = auto
+    verifyGuard: s.verifyGuard,
+    advisor: s.advisor ?? { enabled: false },
+  }
+}
+
+/** Persist agent settings from the panel. payload: { maxTurns?, subagentTurns?, compactThreshold?, verifyGuard?, advisor? } */
+export function saveAgentSettingsFromPanel(payload) {
+  const patch = {}
+  if (payload.maxTurns != null) patch.maxTurns = Number(payload.maxTurns) || undefined
+  if (payload.subagentTurns != null) patch.subagentTurns = Number(payload.subagentTurns) || undefined
+  if (payload.compactThreshold !== undefined) patch.compactThreshold = payload.compactThreshold === "" ? undefined : (Number(payload.compactThreshold) || undefined)
+  if (payload.verifyGuard !== undefined) patch.verifyGuard = !!payload.verifyGuard
+  if (payload.advisor !== undefined) {
+    persistRaw((raw) => {
+      raw.agent = raw.agent && typeof raw.agent === "object" ? raw.agent : {}
+      raw.agent.advisor = {
+        ...(raw.agent.advisor ?? {}),
+        enabled: !!payload.advisor.enabled,
+        guard: payload.advisor.guard !== undefined ? !!payload.advisor.guard : (raw.agent.advisor?.guard ?? true),
+        ...(payload.advisor.provider ? { provider: payload.advisor.provider } : {}),
+        ...(payload.advisor.model ? { model: payload.advisor.model } : {}),
+      }
+    })
+    return
+  }
+  saveAgentSettings(patch)
+}
 
 export async function saveProviderKey(name, key) {
   if (!key || !key.trim()) return

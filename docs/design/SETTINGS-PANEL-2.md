@@ -1,6 +1,6 @@
 # 配置面板重设计 · 第二部分：MCP / 语义索引 / Agent 设置 / Proxy
 
-> 状态：**批次 B（MCP）已实施**（2026-08-03，commit a23ebdc）。批次 C（Agent 设置）待实施。
+> 状态：**批次 B（MCP）已实施**（2026-08-03，commit a23ebdc）。**批次 C（Agent/Advisor 设置）已实施**（2026-08-03）。批次 D（Proxy）待实施。
 
 ## 1. MCP Servers 区块
 
@@ -41,37 +41,26 @@ VS Code 现状（`_saveEmbeddingConfig`/`_resolveEmbedder` 写死 bge-m3 + Silic
 
 不做：模型选择、baseURL 输入、任何 embedding 高级设置。
 
-## 3. Agent 设置区块（新增，目前完全没有）
+## 3. Agent 设置区块（新增，批次 C 已实施）
 
-CLI `/config` 的可配置项，config.json `agent.*`，VS Code 面板**零入口**：
+CLI `/config` 的可配置项，config.json `agent.*`，批次 C 前 VS Code 面板**零入口**：
 
-| 配置项 | CLI | VS Code 现状 |
+| 配置项 | CLI | VS Code 批次 C 后 |
 |--------|-----|--------------|
-| `agent.maxTurns` | /config 可改 | 已接线（agent.mjs 读 config），无 UI |
-| `agent.subagentTurns` | /config 可改 | 已接线，无 UI |
-| `agent.compactThreshold` | /config 可改（auto 标记） | **未接线**（compactHistory 用内部默认），无 UI |
-| `agent.verifyGuard` | /config 开关，默认 off（opt-in） | **无此字段；verify guard 永远开启**——与 CLI 行为不一致 |
-| `advisor.enabled` / `guard` / `provider` / `model` | config + /advisor 命令 | 工具已移植，开关只能手改 config.json |
+| `agent.maxTurns` | /config 可改 | 面板数字输入，落盘 config.json |
+| `agent.subagentTurns` | /config 可改 | 面板数字输入 |
+| `agent.compactThreshold` | /config 可改（auto 标记） | 面板输入（留空=auto），**已接线 compactHistory 第 4 参** |
+| `agent.verifyGuard` | /config 开关，默认 off（opt-in） | 面板 checkbox，**行为已修正为 opt-in**（默认 off 不回推） |
+| `advisor.enabled` / `guard` / `provider` / `model` | config + /advisor 命令 | 面板 Advisor 区块（enabled/guard checkbox + provider/model 文本框） |
 
-### 方案
+### 实施记录（批次 C）
 
-面板新增 **Agent** 区块（对齐 CLI /config）：
-
-```
-AGENT
-  maxTurns        [100    ]        数字输入
-  subagentTurns   [100    ]
-  compactThreshold [auto  ]        留空=auto（按模型 context 算）
-  verifyGuard     [toggle]         对齐 CLI：默认 off
-ADVISOR
-  enabled         [toggle]
-  guard pushback  [toggle]         （guard !== false）
-  provider/model  [文本框，可选]    独立评审模型（留空=主模型）
-```
-
-- 全部落盘 config.json（persistRaw），保存即生效（下一个 runAgent 调用读新值——maxTurns/subagentTurns/verifyGuard/advisor 都是每次 runAgent 开头读的，天然生效）。
-- **verifyGuard 行为修正**：VS Code agent.mjs 的 verify guard 改为 `agent.verifyGuard === true` 才启用（对齐 CLI opt-in 语义）。这是行为变化，默认 off 后 verify guard 不再自动回推——与 CLI 一致。**注意**：此前 VS Code 一直是"永远开"，切换后需测试确认 advisor guard（opt-in）与 verify guard（opt-in）互斥逻辑与 CLI 一致。
-- **compactThreshold 接线**：context.mjs compactHistory 接 config 值（explicit > auto-from-model，CLI resolveCompactThreshold 同款逻辑）。
+1. config-io.mjs 新增 `loadAgentSettings`（扩展 maxTurns/subagentTurns/compactThreshold/verifyGuard/advisor）+ `saveAgentSettings`
+2. **verifyGuard 行为修正**：agent.mjs 的 verify guard 改为 `cfgVerifyGuard === true` 才启用（对齐 CLI opt-in；默认 off 后不再自动回推——与 CLI 一致）
+3. **compactThreshold 接线**：context.mjs `compactHistory` 加第 4 参 explicitThreshold；agent.mjs 读 config 传入（explicit > auto-from-model，CLI resolveCompactThreshold 语义）
+4. settings.mjs 新增 agentSettings/saveAgentSettingsFromPanel（advisor 段合并保留旧字段）
+5. chat-panel 路由 saveAgentSettings/getAgentSettings，_pushSettings 带 agentSettings 推送
+6. webview：Agent 区块（maxTurns/subagentTurns/compactThreshold/verifyGuard）+ Advisor 区块（enabled/guard/provider/model）+ 保存按钮
 
 ## 4. Proxy（能力缺口，不只是 UI）
 

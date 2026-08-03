@@ -32,6 +32,8 @@ function paTypeChanged() {
 
 /** @type {{ built?:boolean, files?:number, chunks?:number } | null} */
 let _indexStatus = null
+/** @type {{ maxTurns?:number, subagentTurns?:number, compactThreshold?:number|null, verifyGuard?:boolean, advisor?:object } | null} */
+let _agentSettings = null
 
 /**
  * Initialize settings panel.
@@ -130,7 +132,7 @@ export function initSettings({ vscode, inputEl, onClose }) {
 
   window._mcpServers = {}
 
-  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus }
+  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings }
 }
 
 function openSettings() {
@@ -242,12 +244,56 @@ function buildSettings() {
       <div id="index-status" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>
       <button id="index-build-btn" class="key-btn" style="margin-top:4px">${t("settings.indexBuild") || "Build Index"}</button>`
 
+    // Agent / Advisor settings section
+    const as = _agentSettings || {}
+    const adv = as.advisor || {}
+    html += `<div class="settings-sep"></div>
+      <h4 class="settings-section-title">${t("settings.agentSection")}</h4>
+      <div class="key-field"><label>${t("settings.maxTurns")}</label><input id="ag-maxturns" type="number" min="1" value="${as.maxTurns ?? 100}"></div>
+      <div class="key-field"><label>${t("settings.subagentTurns")}</label><input id="ag-subturns" type="number" min="1" value="${as.subagentTurns ?? 100}"></div>
+      <div class="key-field"><label>${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>
+      <div class="key-row"><span class="key-label">${t("settings.verifyGuard")}</span>
+        <input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}></div>
+      <h4 class="settings-section-title">${t("settings.advisorSection")}</h4>
+      <div class="key-row"><span class="key-label">${t("settings.advisorEnabled")}</span>
+        <input type="checkbox" id="adv-enabled" ${adv.enabled ? "checked" : ""}></div>
+      <div class="key-row"><span class="key-label">${t("settings.advisorGuard")}</span>
+        <input type="checkbox" id="adv-guard" ${adv.guard !== false ? "checked" : ""}></div>
+      <div class="key-field"><label>${t("settings.advisorProvider")}</label><input id="adv-provider" placeholder="deepseek" value="${escHtml(adv.provider || "")}"></div>
+      <div class="key-field"><label>${t("settings.advisorModel")}</label><input id="adv-model" placeholder="deepseek-chat" value="${escHtml(adv.model || "")}"></div>
+      <button id="ag-save-btn" class="key-btn" style="margin-top:6px">${t("settings.save")}</button>`
+
   body.innerHTML = html
 
   // Bind Add-provider form controls
   document.getElementById("pa-save-btn").addEventListener("click", () => window._paSave())
   document.getElementById("pa-cancel-btn").addEventListener("click", () => window._toggleAddForm(false))
   paTypeChanged()
+
+  // Bind Agent/Advisor settings save
+  const agSave = document.getElementById("ag-save-btn")
+  if (agSave) {
+    agSave.addEventListener("click", () => {
+      const get = (id) => document.getElementById(id)?.value?.trim()
+      const chk = (id) => document.getElementById(id)?.checked ?? false
+      const compactRaw = get("ag-compact")
+      window._vscode.postMessage({
+        type: "saveAgentSettings",
+        settings: {
+          maxTurns: get("ag-maxturns") || undefined,
+          subagentTurns: get("ag-subturns") || undefined,
+          compactThreshold: compactRaw === "" ? "" : (compactRaw || undefined),
+          verifyGuard: chk("ag-verifyguard"),
+          advisor: {
+            enabled: chk("adv-enabled"),
+            guard: chk("adv-guard"),
+            provider: get("adv-provider") || undefined,
+            model: get("adv-model") || undefined,
+          },
+        },
+      })
+    })
+  }
 
   // Bind MCP type toggle
   document.getElementById("mcp-type").addEventListener("change", (e) => {
@@ -360,6 +406,12 @@ function renderMcpList() {
 
 function updateProviderStatus(status) {
   _providerStatus = status
+  const panel = document.getElementById("settings-panel")
+  if (panel && panel.style.display !== "none") buildSettings()
+}
+
+function updateAgentSettings(settings) {
+  _agentSettings = settings
   const panel = document.getElementById("settings-panel")
   if (panel && panel.style.display !== "none") buildSettings()
 }

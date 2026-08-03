@@ -171,10 +171,14 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   // engineering state is per-session (persisted by chat-panel alongside the history lines).
   let advisorCfg = { enabled: false }
   let cfgEngineering = false
+  let cfgVerifyGuard = false
+  let cfgCompactThreshold = null
   try {
     const raw = loadRaw()
     advisorCfg = raw.agent?.advisor ?? { enabled: false }
     cfgEngineering = raw.agent?.engineering ?? false
+    cfgVerifyGuard = raw.agent?.verifyGuard === true // opt-in, CLI parity
+    cfgCompactThreshold = raw.agent?.compactThreshold ?? null // null = auto from model context
   } catch { /* config unreadable — defaults */ }
   const engineering = engState?.enabled ?? cfgEngineering
 
@@ -301,7 +305,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
 
     // Context compaction check
-    const compacted = await compactHistory(history, systemPrompt, provider)
+    const compacted = await compactHistory(history, systemPrompt, provider, cfgCompactThreshold)
     if (compacted) {
       history.length = 0
       history.push(...compacted)
@@ -383,8 +387,9 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           continue
         }
 
-        // Verify guard — push model to verify mutated files before completion
-        if (agent._touchedFiles.length > 0 && !agent._verifiedThisRun && guardPushbacks < MAX_VERIFY_PUSHBACKS) {
+        // Verify guard — OPT-IN (config agent.verifyGuard === true, CLI parity). When off
+        // the agent is not pushed back to verify before finishing.
+        if (cfgVerifyGuard && agent._touchedFiles.length > 0 && !agent._verifiedThisRun && guardPushbacks < MAX_VERIFY_PUSHBACKS) {
           guardPushbacks++
           pushReal(history, fullHistory, { role: "assistant", content: response.content })
           history.push({

@@ -16,6 +16,7 @@ import {
   selectProviderModel, providerNamesInConfig,
   loadEmbeddingConfig, saveEmbeddingConfig, migrateCore,
   loadMcpServers, addMcpServer, removeMcpServer,
+  loadAgentSettings, saveAgentSettings,
 } from "../src/config-io.mjs"
 
 let tmpDir
@@ -451,5 +452,37 @@ describe("MCP server CRUD", () => {
     assert.equal(removeMcpServer("gone"), null)
     assert.equal(loadMcpServers().some((s) => s.name === "gone"), false)
     assert.match(removeMcpServer("gone"), /No MCP server/)
+  })
+})
+
+// ─── Agent settings (batch C) ───────────────────────────────────
+
+describe("agent settings", () => {
+  it("loadAgentSettings defaults: maxTurns 100, verifyGuard off, compactThreshold auto", () => {
+    const s = loadAgentSettings()
+    assert.equal(s.maxTurns, 100)
+    assert.equal(s.subagentTurns, 100)
+    assert.equal(s.verifyGuard, false)
+    assert.equal(s.compactThreshold, null)
+  })
+
+  it("saveAgentSettings persists and round-trips; empty deletes (auto)", () => {
+    saveAgentSettings({ maxTurns: 50, verifyGuard: true, compactThreshold: 200000 })
+    let s = loadAgentSettings()
+    assert.equal(s.maxTurns, 50)
+    assert.equal(s.verifyGuard, true)
+    assert.equal(s.compactThreshold, 200000)
+    // empty string -> auto (delete key)
+    saveAgentSettings({ compactThreshold: "" })
+    s = loadAgentSettings()
+    assert.equal(s.compactThreshold, null)
+    assert.equal(s.maxTurns, 50, "other fields untouched")
+  })
+
+  it("verifyGuard reads truthy === true (not just present)", () => {
+    writeCfg({ agent: { verifyGuard: false } })
+    assert.equal(loadAgentSettings().verifyGuard, false)
+    writeCfg({ agent: { verifyGuard: true } })
+    assert.equal(loadAgentSettings().verifyGuard, true)
   })
 })

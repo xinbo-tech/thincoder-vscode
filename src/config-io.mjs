@@ -220,7 +220,21 @@ export function loadAgentSettings() {
   return {
     maxTurns: a?.maxTurns ?? 100,
     subagentTurns: a?.subagentTurns ?? 100,
+    compactThreshold: a?.compactThreshold ?? null, // null = auto (from model context)
+    verifyGuard: a?.verifyGuard ?? false,
+    advisor: a?.advisor ?? { enabled: false },
   }
+}
+
+/** Persist agent.* settings (merge; undefined/empty deletes the key — compactThreshold '' = auto). */
+export function saveAgentSettings(patch) {
+  persistRaw((raw) => {
+    raw.agent = raw.agent && typeof raw.agent === "object" ? raw.agent : {}
+    for (const [k, v] of Object.entries(patch ?? {})) {
+      if (v === undefined || v === null || v === "") delete raw.agent[k]
+      else raw.agent[k] = v
+    }
+  })
 }
 
 // ─── MCP servers (shared config.json mcp.servers[] — CLI parity) ───

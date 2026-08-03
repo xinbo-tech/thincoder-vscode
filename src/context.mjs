@@ -74,9 +74,10 @@ function estimateTokens(messages) {
  * Compact history with LLM summarization for old messages.
  * Returns a new history array or null if no compaction needed.
  * @param {object} provider - provider config for the summarization LLM call
+ * @param {number|null} [explicitThreshold] - config agent.compactThreshold override (null = auto from model)
  */
-export async function compactHistory(history, systemPrompt, provider) {
-  const threshold = compactionThreshold(provider)
+export async function compactHistory(history, systemPrompt, provider, explicitThreshold = null) {
+  const threshold = explicitThreshold != null ? explicitThreshold : compactionThreshold(provider)
   const systemTokens = Math.ceil(systemPrompt.length / TOKEN_ESTIMATE_CHARS)
   const total = systemTokens + estimateTokens(history)
   if (total < threshold) return null

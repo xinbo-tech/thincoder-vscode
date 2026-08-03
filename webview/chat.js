@@ -75,7 +75,7 @@ const { showAtDropdown, closeAtDropdown } = _ac
 
 // ─── Settings panel (init early so openSettings is available for toolbar binding) ──
 const _settings = initSettings({ vscode, inputEl: ctx.inputEl, onClose: () => ctx.inputEl.focus() })
-const { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus } = _settings
+const { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings } = _settings
 
 // ─── Session bar ───────────────────────────────
 
@@ -623,6 +623,9 @@ window.addEventListener("message", (e) => {
       autoBtn.classList.toggle("active", _autoApprove)
       autoBtn.classList.toggle("warning", _autoApprove)
       autoBtn.textContent = _autoApprove ? "⚠ AUTO" : "AUTO"
+      break
+    case "agentSettings":
+      updateAgentSettings(m.settings || {})
       break
     case "permissionRequest": {
       const el = document.createElement("div")
