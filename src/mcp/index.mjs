@@ -1,19 +1,19 @@
 /**
  * mcp/index.mjs — MCP client lifecycle (connect, list, call, disconnect)
  *
- * Connects to MCP servers via stdio or HTTP transports, manages server
- * registry, and provides an agent tool (mcpTool) for AI-driven MCP use.
+ * Connects to MCP servers via stdio, HTTP or WS transports, manages a server
+ * registry, and expands each server's tools into native agent tools
+ * (CLI parity — see thincoder docs/design/MCP.md).
  *
  * Exports:
- *   mcpConnect(serverConfig)  → client { id, send, notify, close, serverName }
- *   mcpListTools(client)      → [{ name, description, inputSchema }]
- *   mcpCallTool(client, toolName, args) → result string
- *   mcpDisconnect(client)     — close one connection
- *   closeAllMcp()             — close all connections
- *   mcpTool                   — agent tool definition for MCP interaction
+ *   mcpConnect(serverConfig)        → client { id, serverName, tools } (idempotent per server name)
+ *   connectMcpServersExpanded(cfgs) → { tools, warnings } — batch idempotent connect + expansion
+ *   buildMcpTools(serverEntry)      → expanded native tools (CLI buildTools parity)
+ *   mcpListTools(client) / mcpCallTool(client, name, args) / mcpDisconnect(client)
+ *   closeAllMcp() / mcpConnectedNames() / mcpConnectedToolCounts() / mcpDisconnectByName(name)
  */
 
-import { withTimeout, INIT_TIMEOUT_MS } from "./utils.mjs"
+import { withTimeout, INIT_TIMEOUT_MS, sanitizeToolName } from "./utils.mjs"
 import { stdioTransport } from "./stdio.mjs"
 import { httpTransport } from "./http.mjs"
 import { wsTransport } from "./ws.mjs"
@@ -45,17 +45,35 @@ const _servers = new Map()
 let _serverSeq = 0
 
 /**
- * Connect to an MCP server. Supports stdio and HTTP transports.
- * @param {{ type: "stdio"|"http", command?: string, args?: string[], url?: string, name?: string, headers?: Record<string,string> }} config
+ * Connect to an MCP server. Supports stdio, HTTP and WS transports.
+ * IDEMPOTENT per server name: an already-connected server with the same name
+ * is reused (runAgent re-assembles the tool table every turn — repeated calls
+ * must not leak transports).
+ * @param {{ command?: string, args?: string[], url?: string, wsUrl?: string, name?: string, headers?: Record<string,string> }} config
  * @returns {Promise<{ id: string, serverName: string, tools: Array<{name:string, description:string, inputSchema:object}> }>}
  */
 export async function mcpConnect(config) {
   if (!config || (!config.command && !config.url && !config.wsUrl))
     throw new Error("MCP server config needs 'command' (stdio), 'url' (http), or 'wsUrl' (ws)")
 
-  let transport
   const serverName = config.name || (config.command ? config.command : (config.wsUrl || config.url))
 
+  // Idempotent: reuse an existing connection with the same server name.
+  for (const [id, s] of _servers) {
+    if (s.serverName === serverName) {
+      return {
+        id,
+        serverName,
+        tools: s.tools.map((t) => ({
+          name: t.name,
+          description: t.description ?? `MCP tool: ${t.name}`,
+          inputSchema: t.inputSchema ?? { type: "object", properties: {} },
+        })),
+      }
+    }
+  }
+
+  let transport
   if (config.wsUrl) {
     transport = wsTransport(config.wsUrl, config.headers ?? {})
     await transport.connect()
@@ -87,6 +105,52 @@ export async function mcpConnect(config) {
     transport.close()
     throw error
   }
+}
+
+/**
+ * Expand a registry server entry into NATIVE agent tools (CLI buildTools parity).
+ * Each MCP tool becomes an independent tool with `{server}_{tool}` prefix and its
+ * full input schema — the model calls it directly, no gateway routing (MCP.md D1).
+ */
+export function buildMcpTools(server) {
+  const prefix = server.config?.name ? `${server.config.name}_` : "mcp_"
+  return server.tools.map((t) => ({
+    name: sanitizeToolName(prefix + t.name),
+    description: t.description ?? `MCP tool: ${t.name}`,
+    parameters: t.inputSchema ?? { type: "object", properties: {} },
+    readonly: false,
+    async execute(args) {
+      const resp = await server.transport.send("tools/call", { name: t.name, arguments: args })
+      if (resp.error) throw new Error(`MCP tool "${t.name}": ${resp.error.message}`)
+      const content = resp.result?.content ?? []
+      return content
+        .map((c) => (c.type === "text" ? c.text : c.type === "resource" ? `[resource: ${c.resource?.uri}]` : JSON.stringify(c)))
+        .join("\n") || "(no output)"
+    },
+    _mcpTransport: server.transport,
+    _mcpName: server.config?.name,
+  }))
+}
+
+/**
+ * Batch idempotent connect + expansion for the agent tool table (MCP.md D2).
+ * Failures never block: each failing server produces a warning entry instead.
+ * @returns {Promise<{ tools: object[], warnings: string[] }>}
+ */
+export async function connectMcpServersExpanded(configs) {
+  const tools = []
+  const warnings = []
+  for (const cfg of configs) {
+    try {
+      const client = await mcpConnect(cfg)
+      const server = _servers.get(client.id)
+      if (server) tools.push(...buildMcpTools(server))
+    } catch (e) {
+      const label = cfg.name || cfg.command || cfg.url || cfg.wsUrl || "(unnamed)"
+      warnings.push(`MCP server "${label}" failed to connect: ${e.message}`)
+    }
+  }
+  return { tools, warnings }
 }
 
 /**
@@ -175,102 +239,3 @@ export function mcpDisconnectByName(name) {
   }
 }
 
-// ─── agent tool ─────────────────────────────────────────────────
-
-/**
- * MCP agent tool — lets the model discover, connect to, and call MCP tools.
- *
- * Sub-commands:
- *   connect  — connect to an MCP server (stdio or http)
- *   list     — list tools on a connected server
- *   call     — call a tool on a connected server
- *   disconnect — close a server connection
- */
-export const mcpTool = {
-  name: "mcp",
-  readonly: false,
-  description:
-    "Connect to MCP (Model Context Protocol) servers and call their tools. " +
-    "MCP servers provide external tools (database queries, API clients, file system tools, etc.) " +
-    "that the agent can use. Use 'connect' first to establish a connection, then 'list' to see " +
-    "available tools, then 'call' to invoke them.\n\n" +
-    "Parameters:\n" +
-    "- action (required): \"connect\" | \"list\" | \"call\" | \"disconnect\"\n" +
-    "- config: (for connect) { type: \"stdio\"|\"http\"|\"ws\", command?, args?, url?, wsUrl?, name?, headers? }\n" +
-    "  - stdio example: { type: \"stdio\", command: \"npx\", args: [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/path\"], name: \"fs\" }\n" +
-    "  - http example:  { type: \"http\",  url: \"http://localhost:3000/mcp\", name: \"my-server\" }\n" +
-    "- serverId: (for list, call, disconnect) the id returned by connect\n" +
-    "- tool: (for call) the tool name to invoke\n" +
-    "- arguments: (for call) the tool arguments object",
-  parameters: {
-    type: "object",
-    properties: {
-      action: {
-        type: "string",
-        enum: ["connect", "list", "call", "disconnect"],
-        description: "The MCP action to perform",
-      },
-      config: {
-        type: "object",
-        description: "Server config for connect: { type: \"stdio\"|\"http\", command?, args?, url?, name?, headers? }",
-      },
-      serverId: {
-        type: "string",
-        description: "Server ID returned by a previous connect action",
-      },
-      tool: {
-        type: "string",
-        description: "Tool name to call (for action=call)",
-      },
-      arguments: {
-        type: "object",
-        description: "Arguments to pass to the tool (for action=call)",
-      },
-    },
-    required: ["action"],
-  },
-  async execute({ action, config, serverId, tool, arguments: args }) {
-    switch (action) {
-      case "connect": {
-        if (!config) return "Error: 'config' is required for connect"
-        const result = await mcpConnect({
-          type: config.type || (config.command ? "stdio" : config.wsUrl ? "ws" : config.url ? "http" : undefined),
-          command: config.command,
-          args: config.args,
-          url: config.url,
-          wsUrl: config.wsUrl,
-          name: config.name,
-          headers: config.headers,
-        })
-        return (
-          `Connected to MCP server "${result.serverName}" (id: ${result.id}).\n` +
-          `Available tools (${result.tools.length}):\n` +
-          result.tools.map((t) => `  - ${t.name}: ${t.description}`).join("\n")
-        )
-      }
-
-      case "list": {
-        if (!serverId) return "Error: 'serverId' is required for list"
-        const tools = mcpListTools({ id: serverId })
-        if (tools.length === 0) return "No tools available on this server."
-        return `Tools on server ${serverId} (${tools.length}):\n` +
-          tools.map((t) => `  - ${t.name}: ${t.description}`).join("\n")
-      }
-
-      case "call": {
-        if (!serverId) return "Error: 'serverId' is required for call"
-        if (!tool) return "Error: 'tool' is required for call"
-        return await mcpCallTool({ id: serverId }, tool, args ?? {})
-      }
-
-      case "disconnect": {
-        if (!serverId) return "Error: 'serverId' is required for disconnect"
-        mcpDisconnect({ id: serverId })
-        return `Disconnected from server ${serverId}.`
-      }
-
-      default:
-        return `Error: unknown action "${action}". Use connect, list, call, or disconnect.`
-    }
-  },
-}

@@ -201,7 +201,7 @@ user input
 | 功能 | 状态 | 备注 |
 |------|------|------|
 | Memory 三层体系 | ✅ 基础 | JSON 文件存储（put/search/list/remove），Type/tag/title/content 结构化。暂不依赖 better-sqlite3 |
-| MCP 支持 | ✅ | stdio + HTTP transport，`mcpTool` 统一入口（connect/list/call/disconnect）。配置项 `thincoder.mcpServers` 注入上下文 |
+| MCP 支持 | ✅ | stdio + HTTP/WS transport，工具**动态展开为原生工具**（`{server}_{tool}` 前缀，CLI parity——统一规范见 thincoder `docs/design/MCP.md`；旧 `mcpTool` 网关已废弃）。配置项 `thincoder.mcpServers` 注入上下文 |
 | Checkpoint (git snapshot) | ✅ | git stash 快照 + list/create/rewind/cat，支持单文件恢复 |
 | Image input | ❌ | `readImageTool` 已注册，但 webview 无粘贴/选择图片 UI |
 | Skill 系统 | ✅ | 读取 `.thincoder/skills/` 目录下的 .md 文件，列表注入上下文 |

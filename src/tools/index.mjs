@@ -17,7 +17,6 @@ import { readImageTool } from "./read_image.mjs"
 import { codeSearchTool, docSearchTool } from "./code.mjs"
 import { repoOutlineTool } from "../repomap.mjs"
 import { memoryPutTool, memorySearchTool } from "../memory.mjs"
-import { mcpTool } from "../mcp.mjs"
 
 export { readTool, writeTool, editTool }
 export { globTool, grepTool }
@@ -44,7 +43,7 @@ export const builtinTools = [
   websearchTool, fetchTool, questionTool,
   repoOutlineTool, codeSearchTool, docSearchTool,
   lspTool, executeTool,
-  memoryPutTool, memorySearchTool, mcpTool,
+  memoryPutTool, memorySearchTool,
 ]
 
 /** Convert a tool definition to OpenAI function schema */

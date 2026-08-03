@@ -65,12 +65,26 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       ? [taskTool, recentChangesTool, planTool, timerTool, advisorTool, verifyTool] // eng-coder: design review + verify gates
       : [taskTool, recentChangesTool] // subagents get fewer meta-tools
 
+  // MCP tools: idempotent connect + expand into NATIVE tools (CLI parity, MCP.md D1/D2).
+  // Top level only; failures never block — each warning is injected as a reminder.
+  let mcpTools = []
+  const mcpWarnings = []
+  if (depth === 0 && Array.isArray(mcpServers) && mcpServers.length > 0) {
+    try {
+      const { connectMcpServersExpanded } = await import("./mcp.mjs")
+      const r = await connectMcpServersExpanded(mcpServers)
+      mcpTools = r.tools
+      mcpWarnings.push(...r.warnings)
+    } catch { /* expansion failure is non-fatal — the model just lacks MCP tools this turn */ }
+  }
+
   // Subagent role-based tool filtering: explore/plan get read-only tools only
   const isReadOnlyRole = depth > 0 && (role === "explore" || role === "plan")
   const tools = [
     ...(isReadOnlyRole ? builtinTools.filter((t) => t.readonly) : builtinTools),
     ...(specForModel(provider.model).multimodal ? [readImageTool] : []),
     ...agentTools,
+    ...mcpTools,
   ]
   const toolSchemas = tools.map(toOpenAISchema)
   const toolByName = new Map(tools.map((t) => [t.name, t]))
@@ -150,14 +164,19 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const freshMachineLine = history.length === 0
   if (depth === 0 && freshMachineLine) {
     injectContext(history, cwd, input)
-    // MCP server config
-    // MCP server config (array of { name, command?, args?, env?, url?, wsUrl?, headers? } — shared config.json)
+    // MCP server config (array of { name, command?, args?, env?, url?, wsUrl?, headers? } — shared config.json).
+    // Tools are EXPANDED into the tool table (MCP.md D1) — this is informational only.
     if (mcpServers && mcpServers.length > 0) {
       const list = mcpServers.map((cfg) => {
         const desc = cfg.wsUrl ? cfg.wsUrl : cfg.url ? cfg.url : `stdio (${cfg.command} ${(cfg.args ?? []).join(" ")})`
         return `  - ${cfg.name}: ${desc}`
       }).join("\n")
-      history.push({ role: "user", content: `[System: configured MCP servers (use mcp tool to connect):\n${list}]` })
+      const toolCount = mcpTools.length
+      history.push({ role: "user", content: `[System: MCP servers configured (${toolCount} tools expanded into your toolset — call them directly):\n${list}]` })
+    }
+    // MCP connection warnings (failures never block — MCP.md D6)
+    for (const w of mcpWarnings) {
+      history.push({ role: "user", content: `[System reminder: ${w}]` })
     }
     // Skills from .thincoder/skills/
     if (skills && skills.length > 0) {
