@@ -9,7 +9,7 @@ import assert from "node:assert/strict"
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { compactHistory, truncateFallback, shrinkOversized } from "../src/context.mjs"
+import { compactHistory, truncateFallback, shrinkOversized } from "../src/compact.mjs"
 import { specForModel } from "../src/config.mjs"
 
 // ─── Helpers ────────────────────────────────────────────────────

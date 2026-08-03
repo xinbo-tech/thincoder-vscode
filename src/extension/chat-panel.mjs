@@ -6,27 +6,19 @@ import * as vscode from "vscode"
 import { readFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import { runAgent } from "../agent.mjs"
 import { closeAllMcp, mcpConnectedToolCounts, mcpConnect, mcpDisconnectByName } from "../mcp.mjs"
-import { providerNames, getKey, buildProvider } from "./presets.mjs"
-import { listSlots, loadSlot, saveSessionToSlot, newSlot, switchToSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, saveModelPrefs } from "./session-io.mjs"
-import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, proxySettings, saveProxySettingsFromPanel, testProxyConnection } from "./settings.mjs"
+import { listSlots, loadSlot, saveSessionToSlot, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs } from "./session-io.mjs"
+import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, agentSettings, proxySettings } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
-import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
 import { generateTitle } from "./generate-title.mjs"
-import { injectEditorContext } from "./editor-context.mjs"
-import { specForModel } from "../specs.mjs"
-import { t, loadLocaleStrings } from "../i18n.mjs"
-import { loadSkills } from "./skills.mjs"
-import { injectAtRefs } from "./file-refs.mjs"
+import { loadLocaleStrings } from "../i18n.mjs"
 import { getEmbedder, setVSCodeEmbedder, resetEmbedder } from "../embed-config.mjs"
-import { loadEmbeddingConfig, saveEmbeddingConfig, selectProviderModel, resolveProviders } from "../config-io.mjs"
+import { handlePanelMessage, _cwd } from "./panel-messages.mjs"
+import { runPanelChat } from "./panel-chat.mjs"
+import { loadEmbeddingConfig, saveEmbeddingConfig } from "../config-io.mjs"
 import { buildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../indexer.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-
-/** Workspace cwd used to key sessions (shared with the CLI — same cwd hash → same session files). */
-const _cwd = () => vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
 
 export class ChatPanel {
   /** @param {vscode.ExtensionContext} context */
@@ -80,115 +72,7 @@ export class ChatPanel {
     webviewView.webview.postMessage({ type: "i18n", strings: loadLocaleStrings(vscode.env.language) })
 
     webviewView.webview.onDidReceiveMessage((msg) => {
-      (async () => {
-      switch (msg.type) {
-        case "userMessage": {
-          const text = msg.text || ""
-          this._chat(text, msg.model, msg.reasoning, msg.provider, msg.images)
-          break
-        }
-        case "selectModel": {
-          const prefs = this._loadModelPrefs()
-          prefs.model = msg.model
-          prefs.provider = msg.provider || ""
-          saveModelPrefs(this._context.workspaceState, prefs)
-          // Persist into the shared config.json too (CLI selectModel semantics): the CLI
-          // resumes this session with activeProvider/activeModel, so the selection must
-          // survive the panel, not just the workspaceState prefs.
-          if (msg.provider && msg.model) {
-            try { selectProviderModel(msg.provider, msg.model) } catch {}
-          }
-          break
-        }
-        case "selectReasoning": {
-          const prefs = this._loadModelPrefs()
-          prefs.reasoning = msg.reasoning
-          saveModelPrefs(this._context.workspaceState, prefs)
-          break
-        }
-        case "newSession": this._newSession(); break
-        case "switchSession": {
-          switchToSlot(_cwd(), msg.slot)  // persists the shared active pointer for CLI interop
-          this._slot = msg.slot           // bind this panel to the chosen slot
-          await this._loadSession()
-          break
-        }
-        case "deleteSession": await this._deleteSession(msg.slot); break
-        case "retry": {
-          const history = this._activeHistory()
-          const lastUser = [...history].reverse().find((m) => (m.type ?? m.role) === "user")
-          if (lastUser) this._chat(lastUser.content, lastUser.provider, undefined, lastUser.provider)
-          break
-        }
-        case "abort": this._abortController?.abort(); break
-        case "setAutoApprove": await this._setAutoApprove(!!msg.value); break
-        case "atComplete": await this._atComplete(msg.query, msg.cwd); break
-        case "permissionResponse": {
-          const entry = this._permissionQueue.shift()
-          if (msg.approved === "approveAll") {
-            this._permissionQueue.forEach((e) => e.resolve(true))
-            this._permissionQueue.length = 0
-            await this._setAutoApprove(true)
-            this._panel?.webview.postMessage({ type: "autoApprove", value: true })
-          }
-          entry?.resolve(msg.approved === "approveAll" ? true : !!msg.approved)
-          break
-        }
-        case "settings": await this._pushSettings(); break
-        case "saveProviderKey": await this._saveProviderKey(msg.name, msg.key); break
-        case "saveCustomProvider": await this._saveCustomProvider(msg.config); break
-        case "deleteProviderKey": await this._deleteProviderKey(msg.name); break
-        case "saveMcpServer": await this._saveMcpServer(msg.name, msg.config); break
-        case "deleteMcpServer": await this._deleteMcpServer(msg.name); break
-        case "addProvider":
-          // Payload form (settings panel [+ Add] form): persist directly.
-          // No payload (model dropdown shortcut): interactive QuickPick flow.
-          if (msg.preset || msg.custom) {
-            const err = handleAddProvider({ preset: msg.preset, custom: msg.custom, key: msg.key })
-            if (err) this._panel?.webview.postMessage({ type: "providerError", text: err })
-            this._pushSettings()
-          } else {
-            await addProviderFlow(() => this._pushSettings())
-          }
-          break
-        case "removeProvider":
-          if (msg.name) {
-            const err = handleRemoveProvider(msg.name)
-            if (err) this._panel?.webview.postMessage({ type: "providerError", text: err })
-            this._pushSettings()
-          } else {
-            await removeProviderFlow(() => this._pushSettings())
-          }
-          break
-        case "setProviderProxy": {
-          handleSetProviderProxy(msg.name, msg.proxy === true)
-          this._pushSettings()
-          break
-        }
-        case "setKey": await setKeyFlow(() => this._pushSettings()); break
-        case "saveEmbeddingConfig": await this._saveEmbeddingConfig(msg.config); break
-        case "saveEmbedKey": await this._saveEmbeddingConfig({ apiKey: msg.key }); break
-        case "deleteEmbedKey": await this._saveEmbeddingConfig({ apiKey: "" }); break
-        case "buildIndex": await this._buildIndex(); break
-        case "getMcpStatus": this._pushMcpStatus(); break
-        case "saveAgentSettings": {
-          saveAgentSettingsFromPanel(msg.settings ?? {})
-          this._pushSettings()
-          break
-        }
-        case "getAgentSettings": this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() }); break
-        case "saveProxySettings": {
-          saveProxySettingsFromPanel(msg.settings ?? {})
-          this._pushSettings()
-          break
-        }
-        case "testProxy": {
-          const result = await testProxyConnection(msg.uri)
-          this._panel?.webview.postMessage({ type: "proxyTestResult", result })
-          break
-        }
-      }
-      })()  // end async IIFE
+      handlePanelMessage(this, msg).catch((e) => console.error("[chat-panel] message handler:", e.message))
     })
 
     this._status()
@@ -537,128 +421,7 @@ export class ChatPanel {
   // ─── Chat ─────────────────────────────────────
 
   async _chat(text, modelOverride, reasoning, providerName, images) {
-    if (!this._panel) { vscode.window.showErrorMessage("_chat: panel is null"); return }
-    if (!providerName) {
-      // Default provider: activeProvider first (CLI parity) — the settings-panel radio
-      // sets this pointer; fall back to the first provider that has a key.
-      try {
-        const { activeProvider } = resolveProviders()
-        if (activeProvider && await getKey(activeProvider)) providerName = activeProvider
-      } catch {}
-      if (!providerName) {
-        for (const n of providerNames()) {
-          try { if (await getKey(n)) { providerName = n; break } } catch {}
-        }
-      }
-    }
-    if (!providerName) { this._panel.webview.postMessage({ type: "error", text: t("error.provider") }); return }
-    let p
-    try {
-      p = await buildProvider(providerName)
-    } catch (e) {
-      console.error("[chat-panel] buildProvider failed:", e.message)
-      this._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }) })
-      return
-    }
-    if (!p) { this._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }) }); return }
-    if (modelOverride) p = { ...p, model: modelOverride }
-    if (reasoning === "enabled") {
-      const spec = specForModel(p.model)
-      const thinkVal = spec.thinkEnabledValue || "enabled"
-      p = { ...p, thinking: { type: thinkVal }, ...(spec.thinkApi === "effort" ? { reasoningEffort: null } : {}) }
-    } else if (reasoning && reasoning !== "off") {
-      p = { ...p, reasoningEffort: reasoning }
-    } else if (reasoning === "off") {
-      p = { ...p, thinking: null, reasoningEffort: null }
-    }
-
-    const c = vscode.workspace.getConfiguration("thincoder")
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
-
-    text = injectEditorContext(text, cwd)
-    text = injectAtRefs(text, cwd)
-
-    // Load BOTH persisted lines. fullHistory = human line (never-compacted, all real messages —
-    // user/assistant text carries BOTH role+type so it feeds the LLM via role AND the UI via type).
-    // history = machine line (compaction shrinks it); old sessions fall back to the human line.
-    // runAgent appends this turn's real messages (user input, assistant replies, tool results) to
-    // both lines via its internal pushReal — chat-panel only supplies the lines and persists them.
-    const { fullHistory, contextHistory } = this._activeLines()
-    const history = Array.isArray(contextHistory) ? contextHistory : [...fullHistory]
-    const isFirstMessage = fullHistory.filter((m) => (m.type ?? m.role) === "user").length === 0
-
-    // Restore the session-scoped design token (persists across turns within a session; the
-    // `engineering` flag and advisor convergence budget live elsewhere — the flag in config.json,
-    // the budget resets per run, CLI parity).
-    const sessionData = this._activeData() ?? {}
-    const engState = {
-      engDesignToken: sessionData.engDesignToken ?? null,
-    }
-
-    // Persist model selection
-    const prefs = { model: modelOverride || p.model, provider: providerName, reasoning: reasoning || "" }
-    saveModelPrefs(this._context.workspaceState, prefs)
-
-    this._panel.webview.postMessage({ type: "loading", loading: true })
-    this._abortController?.abort()
-    this._abortController = new AbortController()
-
-    // Token stream is forwarded live to the webview; the assistant reply is persisted by runAgent's
-    // pushReal into fullHistory (no separate accumulation needed here).
-    // Accumulate token usage across all LLM calls in this turn (matches CLI)
-    const totalUsage = { prompt_tokens: 0, completion_tokens: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 }
-    try {
-      await runAgent(p, cwd, text, {
-        onToken: (t) => { this._panel?.webview.postMessage({ type: "token", text: t }) },
-        onReasoning: (r) => { this._panel?.webview.postMessage({ type: "reasoning", text: r }) },
-        onTaskUpdate: (tasks) => {
-          const done = tasks.filter((t) => t.status === "done").length
-          const inProgress = tasks.filter((t) => t.status === "in_progress").length
-          const pending = tasks.filter((t) => t.status === "pending").length
-          this._panel?.webview.postMessage({ type: "taskProgress", done, inProgress, pending, total: tasks.length, items: tasks })
-        },
-        onPlanMode: (active) => this._panel?.webview.postMessage({ type: "planMode", active }),
-        onSubagent: (info) => this._panel?.webview.postMessage({ type: "subagent", ...info }),
-        onGoal: (info) => this._panel?.webview.postMessage({ type: "goal", ...info }),
-        onUsage: (u) => {
-          totalUsage.prompt_tokens += u.prompt_tokens ?? 0
-          totalUsage.completion_tokens += u.completion_tokens ?? 0
-          totalUsage.prompt_cache_hit_tokens += u.prompt_cache_hit_tokens ?? 0
-          totalUsage.prompt_cache_miss_tokens += u.prompt_cache_miss_tokens ?? 0
-          const ctxWin = specForModel(p.model)?.contextWindow ?? 128000
-          const ctxPct = u.prompt_tokens ? Math.round((u.prompt_tokens / ctxWin) * 100) : null
-          this._panel?.webview.postMessage({ type: "usage", usage: { ...totalUsage }, ctxPct })
-        },
-        onToolCall: (n, a, id) => this._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
-        onToolResult: (n, r, id) => this._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 2000), id }),
-        onToolPanel: (name, text) => this._panel?.webview.postMessage({ type: "toolPanel", name, text }),
-        onComplete: (content, agentState) => {
-          // runAgent already appended the real messages to both lines via pushReal; just persist them.
-          // agentState carries the engineering/advisor bookkeeping (CLI session fields:
-          // engineering / engDesignToken / advisorRound).
-          this._saveLines(fullHistory, history, { activeProvider: providerName, ...agentState })
-          this._panel?.webview.postMessage({ type: "complete" })
-          this._pushSessions()
-        },
-        onPermissionRequired: c.get("autoApprove", false) ? undefined : (toolName, args, diffInfo) =>
-          new Promise((resolve) => {
-            this._permissionQueue.push({ resolve, toolName })
-            this._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
-          }),
-      }, this._abortController.signal, c.get("autoApprove", false), { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState })
-    } catch (e) {
-      if (e.name === "AbortError") {
-        this._panel.webview.postMessage({ type: "aborted" })
-      } else {
-        console.error("[chat-panel] runAgent failed:", e.message, "provider:", p.baseURL, "model:", p.model)
-        const techInfo = `→ Provider: ${p.baseURL}\n→ Model: ${p.model}`
-        this._panel.webview.postMessage({ type: "error", text: `${e.message || String(e)}`, techInfo })
-      }
-    } finally {
-      this._panel.webview.postMessage({ type: "loading", loading: false })
-    }
-    // Generate session title from first message (after agent completes)
-    if (isFirstMessage) await this._generateTitle()
+    await runPanelChat(this, { text, modelOverride, reasoning, providerName, images })
   }
 
   // ─── HTML ─────────────────────────────────────

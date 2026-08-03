@@ -5,7 +5,7 @@
 
 import { chat } from "./provider.mjs"
 import { specForModel } from "./specs.mjs"
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { builtinTools, toOpenAISchema, readImageTool } from "./tools.mjs"
@@ -14,10 +14,16 @@ import {
   planTool, goalTool, skillTool, verifyTool, timerTool,
   advisorTool, engTool,
 } from "./agent-tools.mjs"
-import { compactHistory, injectContext, truncateFallback, COMPRESS_FAILURE_LIMIT } from "./context.mjs"
-import { loadAgentSettings, loadRaw, normalizeProxy } from "./config-io.mjs"
-import { isDocFile } from "./advisor/repos.mjs"
+import { compactHistory, truncateFallback, COMPRESS_FAILURE_LIMIT } from "./compact.mjs"
+import { injectContext } from "./context.mjs"
+import { loadRaw, normalizeProxy } from "./config-io.mjs"
 import * as os from "node:os"
+import {
+  MAX_ADVISOR_PUSHBACKS, MAX_VERIFY_PUSHBACKS, MAX_VERIFY_RETRIES, MAX_EMPTY_RETRIES,
+  configuredMaxTurns, loadEngineeringPrompt, hasCodeMutations,
+  pushReal, agentState, reinjectAfterCompaction,
+} from "./agent/run-helpers.mjs"
+import { executeToolBatches } from "./agent/execute-tools.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SYSTEM_PROMPT = readFileSync(join(__dirname, "prompts", "system.md"), "utf8")
@@ -39,164 +45,12 @@ export const ENG_ON_REMINDER =
   "subagents only. Advisor calls are NOT per-turn-mandatory — call only at " +
   "flow nodes or when the user asks.]"
 
-/** File-modifying tools — the engineering design gate blocks these before review passes (CLI parity). */
-const FILE_MUTATORS = new Set(["write", "edit", "insert_after", "apply_patch", "delete", "hashline_edit"])
-const MAX_ADVISOR_PUSHBACKS = 3
-
-const DEFAULT_MAX_TURNS = 100
-
-/** Top-level turn limit from the shared config.json (CLI agent.maxTurns), with local default fallback. */
-function configuredMaxTurns() {
-  try {
-    return loadAgentSettings().maxTurns
-  } catch { return DEFAULT_MAX_TURNS }
-}
-const STALL_WINDOW = 5
-const STALL_THRESHOLD = 3
-const MAX_VERIFY_PUSHBACKS = 2
-const MAX_VERIFY_RETRIES = 3
-const MAX_EMPTY_RETRIES = 2 // empty-response retry budget (CLI parity, IK60QP)
-
-/** Task re-injection reminder prefix — stale copies are filtered before re-injecting (CLI parity D7). */
-const TASK_REINJECT_PREFIX = "[System reminder: your current task list after compaction:"
-
-/**
- * Build the engineering-mode prompt fragment: engineering template + project METHODOLOGY.md
- * (CLI setup.mjs buildEngineeringPrompt parity). Returns { prompt, templateMissing, methodologyMissing }.
- */
-function loadEngineeringPrompt(cwd, role) {
-  const engTemplate = role === "eng-coder" ? _ENG_SUB : _ENG_MAIN
-  let methodology = ""
-  try { methodology = readFileSync(join(cwd, "METHODOLOGY.md"), "utf8") } catch { /* no methodology */ }
-  const templateMissing = !engTemplate
-  const methodologyMissing = !methodology
-  const prompt = engTemplate
-    ? (methodology ? `${engTemplate}\n\n---\n\n## Project METHODOLOGY.md\n\n${methodology}` : engTemplate)
-    : (methodology ? `[ENGINEERING MODE]\n\nFollow this methodology strictly:\n\n${methodology}` : null)
-  return { prompt, templateMissing, methodologyMissing }
-}
-
-/**
- * True when this run mutated at least one CODE file (CLI hasCodeMutations parity).
- * Doc-only changes (docs/, *.md, LICENSE…) must NOT trigger the advisor guard.
- * _touchedFiles stores absolute paths; the src/ check matches a path component.
- */
-function hasCodeMutations(agent) {
-  const files = agent._touchedFiles ?? []
-  if (files.length === 0) return agent._mutatedThisRun
-  return files.some((p) => /(?:^|[\\/])src[\\/]/.test(p) || !isDocFile(p))
-}
-const MAX_TOOL_RESULT = 16000 // chars — large results saved to disk instead of truncated (aligns with CLI)
-const TOOL_RESULT_PREVIEW = 2000 // chars shown inline when offloaded (aligns with CLI)
-const MAX_PARALLEL_SUBAGENTS = 3
-
 /** Typed error for turn-limit exhaustion — consumers can detect and offer "Continue?" prompt */
 export class ContinueError extends Error {
   constructor(turns) { super(`Agent reached max turns (${turns}).`); this.turns = turns }
 }
 
-/** Run async tasks with a concurrency limit */
-async function runWithLimit(items, fn, limit) {
-  const results = new Array(items.length)
-  let idx = 0
-  async function worker() {
-    while (idx < items.length) {
-      const i = idx++
-      results[i] = await fn(items[i])
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()))
-  return results
-}
-
-/** Save large tool results to disk so the agent can read them with the read tool */
-function offloadToolResult(cwd, text) {
-  if (text.length <= MAX_TOOL_RESULT) return text
-  try {
-    if (!existsSync(join(cwd, ".thincoder", "tmp"))) mkdirSync(join(cwd, ".thincoder", "tmp"), { recursive: true })
-    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-    const path = join(cwd, ".thincoder", "tmp", `tool-${id}.txt`)
-    writeFileSync(path, text, "utf8")
-    return `[Large output saved. Read the full result with the read tool: ${path}]\n\n${text.slice(0, TOOL_RESULT_PREVIEW)}...`
-  } catch {
-    // If saving fails (disk full, permissions), fall back to truncation
-    return text.slice(0, MAX_TOOL_RESULT) + `\n... (truncated ${text.length - MAX_TOOL_RESULT} chars)`
-  }
-}
-
 export { builtinTools } from "./tools.mjs"
-
-/**
- * pushReal — the single entry point for REAL conversation messages.
- * A real message (user input, assistant reply, tool result, multimodal image) is appended to BOTH the
- * machine line (history) and the human line (fullHistory). Machine-only injections ([System reminder:...],
- * compaction notes, task/plan reminders) are pushed to history directly and never enter fullHistory.
- * Mirrors thincoder/src/context.mjs:pushReal — the two lines are written independently at the source.
- */
-function pushReal(history, fullHistory, msg) {
-  fullHistory.push(msg)
-  history.push(msg)
-}
-
-/** Extract the persisted engineering/advisor state for the session file (CLI session.mjs fields).
- *  Only the design token is session-scoped — engineering lives in config.json and the advisor
- *  convergence budget resets per run (CLI parity). */
-function agentState(agent) {
-  return {
-    engineering: agent.config?.agent?.engineering ?? false,
-    engDesignToken: agent._engDesignToken ?? null,
-  }
-}
-
-/**
- * Re-inject state reminders after the machine line was rewritten by compaction or truncation.
- * Task list is the single source of truth: stale re-injections are filtered FIRST, then the
- * latest version is appended (CLI parity D7 — otherwise old copies accumulate and grow stale).
- */
-function reinjectAfterCompaction(history, agent, autoApprove) {
-  for (let i = history.length - 1; i >= 0; i--) {
-    const m = history[i]
-    if (m.role === "user" && typeof m.content === "string" && m.content.startsWith(TASK_REINJECT_PREFIX)) {
-      history.splice(i, 1)
-    }
-  }
-
-  // Re-inject task list after compaction (single source of truth)
-  if (agent._tasks?.length > 0) {
-    const pending = agent._tasks.filter((t) => t.status !== "done")
-    const done = agent._tasks.filter((t) => t.status === "done")
-    const taskSummary = [
-      ...pending.map((t) => `- [${t.status}] ${t.title}`),
-      ...done.slice(0, 3).map((t) => `- [done] ${t.title}`),
-    ].join("\n")
-    history.push({
-      role: "user",
-      content: `[System reminder: your current task list after compaction:\n${taskSummary}\nContinue from where you left off.]`,
-    })
-  }
-
-  // Re-inject plan mode if active
-  if (agent._planMode) {
-    history.push({
-      role: "user",
-      content: "[System reminder: plan mode is active. Explore the codebase read-only, design your solution, then call plan with action='exit' to present it for user approval.]",
-    })
-  }
-
-  // Re-inject permission mode reminder
-  if (autoApprove) {
-    history.push({
-      role: "user",
-      content: "[System reminder: AUTO mode is active — all tool calls are automatically approved without asking.]",
-    })
-  } else {
-    history.push({
-      role: "user",
-      content: "[System reminder: Permission mode — confirm with the user before making changes. Describe what you plan to modify and wait for approval before executing file-changing tools.]",
-    })
-  }
-}
-
 
 /**
  * Run the agent loop.
@@ -535,207 +389,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         : {}),
     })
 
-    // Group tool calls into batches — consecutive readonly tools run in parallel,
-    // consecutive subagent calls also run in parallel (each has its own agent).
-    // sideEffectExempt tools (like subagent) don't block readonly merging.
-    const batches = []
-    let pendingReadonly = []
-    for (const tc of response.toolCalls) {
-      const tool = toolByName.get(tc.name)
-      if (tool?.readonly) {
-        pendingReadonly.push({ tc, tool })
-      } else {
-        // Flush pending readonly batch before this mutation
-        if (pendingReadonly.length > 0) { batches.push(pendingReadonly); pendingReadonly = [] }
-        if (tool?.name === "subagent") {
-          // Subagents run in parallel with each other
-          const last = batches[batches.length - 1]
-          if (last?.length > 0 && last[0]?.tool?.name === "subagent") {
-            last.push({ tc, tool })
-          } else {
-            batches.push([{ tc, tool }])
-          }
-        } else {
-          batches.push([{ tc, tool }])
-        }
-      }
-    }
-    if (pendingReadonly.length > 0) batches.push(pendingReadonly)
-
-    // Execute batches in order (parallel within batch, serial between batches)
-    for (const batch of batches) {
-      const runOne = async ({ tc, tool }) => {
-        const toolName = tc.name
-        let args
-        try { args = JSON.parse(tc.arguments || "{}") } catch {
-          return { tool_call_id: tc.id, toolName, content: "Error: invalid JSON", meta: null }
-        }
-
-        // Plan mode guard
-        if (agent._planMode && tool && !tool.readonly) {
-          return { tool_call_id: tc.id, toolName, content: "Error: plan mode active", meta: null }
-        }
-
-        // Engineering coder hard gate: no file modification before the design review passed (CLI dispatch.mjs parity).
-        if (agent._role === "eng-coder" && agent.config?.agent?.engineering
-            && !agent._engDesignReviewed && FILE_MUTATORS.has(toolName)) {
-          return { tool_call_id: tc.id, toolName, content: "Error: engineering design gate — call advisor with type='design' to review the design document before any file modification. If the review found issues, report them to the parent agent.", meta: null }
-        }
-
-        // Engineering mode PARENT gate: no code-file writes before the design review passed.
-        // Docs/** and root-level docs are exempt (writing them IS the design step); everything
-        // under src/ (incl. src/prompts/*.md) is product code and needs a design token.
-        if (agent.config?.agent?.engineering && depth === 0 && !agent._engDesignToken
-            && FILE_MUTATORS.has(toolName)) {
-          const paths = tool.touchedPaths ? tool.touchedPaths(args) : [args.path]
-          // Unknown/missing paths are treated as code — block conservatively.
-          const touchesCode = paths.some((p) => typeof p !== "string" || /^src[\\/]/.test(p) || !isDocFile(p))
-          if (touchesCode) {
-            return { tool_call_id: tc.id, toolName, content: "Error: engineering design gate — write the design document in docs/ first, then call advisor with type='design' to review it, and wait for user approval. Implementation is done by eng-coder subagents.", meta: null }
-          }
-        }
-
-        // Permission gate: any non-readonly tool at depth 0 in manual mode
-        if (!autoApprove && tool && !tool.readonly && depth === 0 && callbacks.onPermissionRequired) {
-          // Compute diff preview for file-based tools
-          let diffInfo = null
-          if (toolName !== "bash" && args.path) {
-            try {
-              const abs = join(cwd, args.path)
-              const oldContent = existsSync(abs) ? readFileSync(abs, "utf8") : ""
-              let newContent = ""
-              if (toolName === "write") {
-                newContent = args.content || ""
-              } else if (toolName === "edit") {
-                if (args.replace_all) {
-                  newContent = oldContent.replaceAll(args.old_string, args.new_string)
-                } else {
-                  newContent = oldContent.replace(args.old_string, args.new_string)
-                }
-              } else if (toolName === "insert_after") {
-                const lines = oldContent.split("\n")
-                let target = (args.after_line != null) ? args.after_line : lines.length
-                if (target < 0) target = 0
-                if (target > lines.length) target = lines.length
-                lines.splice(target, 0, args.content || "")
-                newContent = lines.join("\n")
-              } else if (toolName === "delete") {
-                newContent = "" // deletion — show all as removed
-              }
-              // apply_patch — too complex to preview inline, skip diff
-              if (newContent !== oldContent) {
-                diffInfo = { old: oldContent, new: newContent, path: args.path }
-              }
-            } catch { /* best-effort — permission still works without diff */ }
-          }
-          const approved = await callbacks.onPermissionRequired(toolName, args, diffInfo)
-          if (!approved) return { tool_call_id: tc.id, toolName, content: "Denied by user (permission mode).", meta: null }
-        }
-
-        if (depth === 0) callbacks.onToolCall?.(toolName, args, tc.id)
-
-        let result
-        if (!tool) {
-          result = `Error: unknown tool "${toolName}"`
-        } else {
-          try {
-            const raw = await tool.execute(args, { cwd, agent, callbacks, signal })
-            result = String(raw)
-
-            // Multimodal tools
-            if (tool.multimodal) {
-              try {
-                const parsed = JSON.parse(result)
-                if (parsed.images?.length) {
-                  return { tool_call_id: tc.id, toolName, content: parsed.text, multimodal: { text: parsed.text, images: parsed.images } }
-                }
-              } catch { /* fall through */ }
-            }
-          } catch (e) {
-            result = `Error: ${e.message}`
-          }
-        }
-
-        // Truncate large results: save to disk so agent can read with read tool
-        result = offloadToolResult(cwd, result)
-
-        return {
-          tool_call_id: tc.id, toolName, content: result,
-          meta: { args, tool, tc },
-        }
-      }
-
-      // Concurrency limit for subagent batches
-      const isSubagentBatch = batch.length > 0 && batch[0]?.tool?.name === "subagent"
-      const results = isSubagentBatch
-        ? await runWithLimit(batch, runOne, MAX_PARALLEL_SUBAGENTS)
-        : await Promise.all(batch.map(runOne))
-
-      for (const r of results) {
-        const { tool_call_id, toolName, content, multimodal, meta } = r
-
-        if (multimodal) {
-          pushReal(history, fullHistory, { role: "tool", tool_call_id, content: multimodal.text })
-          pushReal(history, fullHistory, { role: "user", content: [{ type: "text", text: multimodal.text }, ...multimodal.images] })
-          if (depth === 0) callbacks.onToolResult?.(toolName, multimodal.text, tool_call_id)
-        } else {
-          pushReal(history, fullHistory, { role: "tool", tool_call_id, content })
-          if (depth === 0) callbacks.onToolResult?.(toolName, content, tool_call_id)
-        }
-
-        // Track mutations + advisor/verify bookkeeping (CLI parity)
-        if (meta) {
-          const { args, tool } = meta
-          if (tool && !tool.readonly && !tool.sideEffectExempt) {
-            // Side-effect tools (bash, git, …) invalidate prior review/verify —
-            // the environment changed even if no code file did.
-            if (agent._calledAdvisorThisRun) agent._calledAdvisorThisRun = false
-            if (agent._verifiedThisRun) {
-              agent._verifiedThisRun = false
-              agent._verifyPassed = undefined
-            }
-          }
-          if (toolName === "verify") agent._verifiedThisRun = true
-          if (toolName === "advisor") {
-            agent._calledAdvisorThisRun = true
-            // Design reviews are a separate gate with no convergence protocol —
-            // they must not consume code-review rounds. A failed/interrupted review
-            // still counts as an attempt (next retry uses the next round's prompt).
-            try {
-              if (args.type !== "design") agent._advisorRound++
-            } catch {
-              agent._advisorRound++
-            }
-          }
-          if (FILE_MUTATORS.has(toolName)) {
-            agent._mutatedThisRun = true
-            const paths = tool.touchedPaths ? tool.touchedPaths(args) : [args?.path]
-            for (const p of paths) {
-              if (typeof p !== "string") continue
-              const abs = join(cwd, p)
-              if (!agent._touchedFiles.includes(abs)) agent._touchedFiles.push(abs)
-            }
-          }
-        }
-
-        // Stall detection (stable serialization)
-        try {
-          const sig = `${toolName}:${meta?.args ? JSON.stringify(meta.args, Object.keys(meta.args).sort()) : ""}`
-          recentSigs.push(sig)
-          if (recentSigs.length > STALL_WINDOW) recentSigs.shift()
-          if (recentSigs.length >= STALL_THRESHOLD) {
-            const tail = recentSigs.slice(-STALL_THRESHOLD)
-            if (tail[0] === tail[1] && tail[1] === tail[2]) {
-              history.push({
-                role: "user",
-                content: `[System reminder: identical call (${sig.slice(0, 100)}) 3× in a row — you may be stuck. Change approach.]`,
-              })
-              recentSigs.length = 0
-            }
-          }
-        } catch { /* */ }
-      }
-    }
+    await executeToolBatches(agent, { response, history, fullHistory, toolByName, autoApprove, callbacks, signal, cwd, recentSigs, depth })
 
     // Expired timers — inject reminders when the thinking budget is up (ported from CLI post-turn)
     if (agent._pendingTimers.length > 0) {
