@@ -6,6 +6,16 @@
 import { validateDesignToken } from "./advisor.mjs"
 
 /**
+ * Effective subagent model override for a role (CLI parity):
+ * priority — subagent tool `model` arg > config.agent.subagentModels[role] > config.agent.subagentModel > null (inherit parent).
+ */
+export function effectiveSubagentModel(parent, role, modelArg) {
+  if (modelArg) return modelArg
+  const cfg = parent.config?.agent ?? {}
+  return cfg.subagentModels?.[role] ?? cfg.subagentModel ?? null
+}
+
+/**
  * Resolve the sub-agent's provider from a model override string (CLI parity).
  * "provider:model" → named provider + model; "provider" → named provider;
  * "model" → parent's provider with a different model; null → parent's provider.
@@ -65,8 +75,8 @@ export const subagentTool = {
       throw new Error("Engineering mode is not active — use role='coder' for implementation tasks.")
     }
 
-    // Provider/model override: subagent `model` arg > agent.subagentModel config > parent provider (CLI parity)
-    const provider = resolveChildProvider(parent, model ?? parent.config?.agent?.subagentModel ?? null)
+    // Provider/model override: tool `model` arg > subagentModels[role] > subagentModel > parent provider (CLI parity)
+    const provider = resolveChildProvider(parent, effectiveSubagentModel(parent, role, model))
 
     // eng-coder token gate: the design review must have passed and the caller must
     // present the exact token advisor issued — otherwise the child is not authorized to code.

@@ -98,6 +98,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   let cfgProxy = undefined
   let cfgShell = null
   let cfgSubagentModel = null
+  let cfgSubagentModels = null
   let cfgSubagentTurns = 100
   let cfgMaxTurns = 100
   let cfgProviders = []
@@ -110,6 +111,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     cfgProxy = normalizeProxy(raw.proxy) // web tools consult agent.config.proxy (resolveWebProxy)
     cfgShell = typeof raw.shell === "string" && raw.shell ? raw.shell : null // bash tool shell override (CLI parity)
     cfgSubagentModel = raw.agent?.subagentModel ?? null // default subagent model override (CLI parity)
+    cfgSubagentModels = raw.agent?.subagentModels ?? {} // per-type subagent model overrides (CLI parity)
     cfgSubagentTurns = raw.agent?.subagentTurns ?? 100 // subagent turn cap (CLI parity)
     cfgMaxTurns = raw.agent?.maxTurns ?? 100
     cfgProviders = resolveProviders().providers // for subagent model overrides
@@ -135,7 +137,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     _lastEngState: engineering, _pendingReminders: [],
     config: {
       advisor: advisorCfg,
-      agent: { engineering, subagentModel: cfgSubagentModel, subagentTurns: cfgSubagentTurns, maxTurns: cfgMaxTurns, verifyGuard: cfgVerifyGuard, compactThreshold: cfgCompactThreshold },
+      agent: { engineering, subagentModel: cfgSubagentModel, subagentModels: cfgSubagentModels, subagentTurns: cfgSubagentTurns, maxTurns: cfgMaxTurns, verifyGuard: cfgVerifyGuard, compactThreshold: cfgCompactThreshold },
       proxy: cfgProxy, shell: cfgShell, providersList: cfgProviders,
     },
   }
