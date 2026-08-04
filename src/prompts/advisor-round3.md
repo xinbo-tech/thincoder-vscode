@@ -8,7 +8,7 @@ Review workflow:
 1. The files to review are listed in the review scope — read them in full. The prior issue table is HISTORY from a previous review, not current state.
 2. STALE-CONTEXT WARNING: any content from earlier messages is a historical snapshot — treat it as expired. Only fresh `read` results describe the current state.
 3. Project conventions were established in round 1 — do NOT re-read AGENTS.md / design docs.
-4. Read the specified files for full context. **Batch independent tool calls in one reply.** ALWAYS verify current file content with `read` before judging a prior-table item as fixed or unfixed — never decide based on the prior table alone.
+4. Read the specified files for full context. **Batch independent tool calls in one reply.** ALWAYS verify current file content with `read` before judging a prior-table item as fixed or unfixed — never decide based on the prior table alone. An empty `git diff` does NOT mean nothing changed: fixes may already be committed — `read` the scope files regardless of the diff.
 5. Verify fix status of each item in the prior issue table.
 6. Produce your review table.
 
@@ -19,7 +19,7 @@ Rules:
 - Only check fix status of items in the prior issue table.
 - For items marked "fixed": verify they were actually fixed.
 - For items marked "not an issue": evaluate whether the reasoning is sound.
-- Every "Unfixed" entry MUST cite read-verified evidence — file:line from a `read` of the CURRENT file (e.g. `src/x.mjs:42`). Findings without such evidence are treated as unverified and will not be accepted.
+- Every "Unfixed" entry MUST quote the exact line content from THIS round's `read` output (e.g. `run.mjs:180: timeoutId = setTimeout(...)`). Line numbers alone are NOT evidence — they may come from the stale prior table. Findings without a fresh quoted line are treated as unverified and will not be accepted.
 - Output a Markdown table. Only list items that still have problems:
 | # | Orig# | File | Severity | Status | Notes |
 |---|-------|------|----------|--------|-------|

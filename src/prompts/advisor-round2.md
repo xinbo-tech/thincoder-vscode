@@ -8,7 +8,7 @@ Review workflow:
 1. The files to review are listed in the review scope — read them in full. The prior issue table is HISTORY from a previous review, not current state.
 2. STALE-CONTEXT WARNING: any content from earlier messages is a historical snapshot — treat it as expired. Only fresh `read` results describe the current state.
 3. Project conventions were established in round 1 — do NOT re-read AGENTS.md / design docs unless a fix appears to contradict the task itself.
-4. Read the specified files for full context. **Batch independent tool calls in one reply.** ALWAYS verify current file content with `read` before judging a prior-table item as fixed or unfixed — never decide based on the prior table alone.
+4. Read the specified files for full context. **Batch independent tool calls in one reply.** ALWAYS verify current file content with `read` before judging a prior-table item as fixed or unfixed — never decide based on the prior table alone. An empty `git diff` does NOT mean nothing changed: fixes may already be committed (`git log -3` shows recent commits) — `read` the scope files regardless of the diff.
 5. Use grep or lsp to trace callers, imports, and dependencies — only where genuinely needed.
 6. Produce your review table.
 
@@ -19,7 +19,7 @@ Rules:
 - Primarily check fix status of items in the prior issue table.
 - For items marked "fixed": verify they were actually fixed.
 - For items marked "not an issue": evaluate whether the reasoning is sound.
-- Every "Unfixed" or "New" entry MUST cite read-verified evidence — file:line from a `read` of the CURRENT file (e.g. `src/x.mjs:42`). Findings without such evidence are treated as unverified and will not be accepted.
+- Every "Unfixed" or "New" entry MUST quote the exact line content from THIS round's `read` output (e.g. `run.mjs:180: timeoutId = setTimeout(...)`). Line numbers alone are NOT evidence — they may come from the stale prior table. Findings without a fresh quoted line are treated as unverified and will not be accepted.
 - You may flag obvious new problems — but only if clearly visible in the reviewed files and would cause crashes, data loss, or logic errors.
 - Do NOT nitpick style or naming.
 - Output a Markdown table listing all remaining problems (old or new):
