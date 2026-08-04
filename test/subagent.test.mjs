@@ -9,7 +9,7 @@ test("resolveChildProvider: provider:model / provider name / model name / null",
   const parent = {
     _provider: { name: "glm", baseURL: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.2", apiKey: "glm-key" },
     config: {
-      providers: [
+      providersList: [
         { name: "glm", baseURL: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.2", apiKey: "glm-key" },
         { name: "deepseek", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro", apiKey: "ds-key" },
       ],
