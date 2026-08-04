@@ -2,7 +2,9 @@
  * advisor/main.mjs — advisor system-prompt selection, follow-up building, session assembly.
  * VS Code port of thincoder CLI src/advisor.mjs (kept in sync with the CLI).
  * User-message building in advisor/messages.mjs; execution in advisor/run.mjs;
- * git discovery/collection in advisor/repos.mjs; history extraction in advisor/history.mjs.
+ * git discovery/collection in advisor/repos.mjs (design-review diffs only —
+ * code-review follow-ups deliberately inject NO git information);
+ * history extraction in advisor/history.mjs.
  *
  * Convergence protocol / session memory semantics — see the CLI file header.
  */

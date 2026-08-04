@@ -5,6 +5,7 @@
  */
 import { randomUUID, createHmac } from "node:crypto"
 import { runAdvisorReview } from "../advisor/run.mjs"
+import { isDocFile } from "../advisor/repos.mjs"
 
 const TOKEN_EXPIRY_MS = 3600000 // 1 hour
 const TOKEN_SECRET = process.env.THINCODER_TOKEN_SECRET || "thincoder-default-secret"
@@ -95,12 +96,11 @@ export const advisorTool = {
 
     // Code review must have a scope — no implicit fallback.
     if (reviewType !== "design" && !paths && !documents) {
-      return "Advisor: no review scope specified. Provide paths (files/directories to review) or documents (acceptance criteria — code diff is still used)."
+      return "Advisor: no review scope specified. Provide paths (files/directories to review) or documents (acceptance criteria for code review)."
     }
 
     // Design review: validate that documents are in docs/ or are recognized doc files
     if (reviewType === "design" && documents) {
-      const { isDocFile } = await import("../advisor/repos.mjs")
       const invalidDocs = documents.filter((doc) => {
         if (doc.startsWith("docs/") || doc.startsWith("docs\\")) return false
         return !isDocFile(doc)
