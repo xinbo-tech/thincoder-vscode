@@ -118,7 +118,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     // convergence budget is per-run (runAgent resets it in the CLI), never persisted.
     _role: role,
     _advisorRound: 0,
-    _advisorSession: null, _advisorLastSnapshotHash: null,
+    _advisorSession: null,
     _engDesignToken: engState?.engDesignToken ?? null,
     _engDesignReviewed: engDesignReviewed === true, // eng-coder children arrive pre-authorized
     _calledAdvisorThisRun: false, _mutatedThisRun: false,

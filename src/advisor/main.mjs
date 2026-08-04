@@ -9,8 +9,6 @@
 import { readFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import { createHash } from "node:crypto"
-import { findReviewRepos, collectRepoSnapshots } from "./repos.mjs"
 import { extractPriorIssueTable, extractAgentResponseTable } from "./history.mjs"
 import { buildAdvisorUserMessage } from "./messages.mjs"
 
@@ -44,7 +42,10 @@ export function buildAdvisorSystemPrompt(agent, _prior, reviewType) {
 
 /**
  * Build a follow-up user message for round 2+ — the agent's response table +
- * the refreshed diff, without re-sending the full round-1 context.
+ * round-aware instructions, without re-sending the full round-1 context.
+ * Deliberately NO git information injected (no diff snapshot, no git context):
+ * git output misled re-reviews — committed fixes never show in `git diff HEAD`,
+ * so the model read "no changes" as "no fixes". Verification is `read`-only.
  */
 export function buildAdvisorFollowUp(agent, _prior) {
   const prior = _prior ?? extractPriorIssueTable(agent.history)
@@ -67,28 +68,15 @@ export function buildAdvisorFollowUp(agent, _prior) {
     "## Instructions",
     round === 2
       ? "Verify each item in the prior table. Flag any obvious NEW issues introduced by the fixes (crashes, data loss, logic errors — not style). Produce a verification table."
-      : "Strictly verify ONLY the items in the prior table against the current diff. Do NOT look for new issues.",
+      : "Strictly verify ONLY the items in the prior table against the CURRENT FILE STATE (use `read` — an empty diff does not mean the fixes are absent). Do NOT look for new issues.",
     "",
-    "IMPORTANT: in any embedded diff, `-` lines are REMOVED content (no longer in the file), `+` lines are ADDED. The prior issue table is HISTORY — always verify current file state with `read` before judging an item as fixed or unfixed.",
+    "IMPORTANT: the prior issue table is HISTORY — always verify current file state with `read` before judging an item as fixed or unfixed.",
     // Round-aware evidence rule: "New" entries only exist in round 2 (round 3+ forbids them).
-    `STALE-CONTEXT WARNING: all diffs in earlier messages (including round 1) are historical snapshots — files have changed since. Only THIS message's "Current Changes" section and fresh \`read\` results are authoritative. Any "Unfixed" entry${round === 2 ? ' (and any "New" entry)' : ""} MUST cite read-verified evidence (file:line from a \`read\` of the current file); uncited findings are unverified and will be ignored.`,
+    `STALE-CONTEXT WARNING: only fresh \`read\` results describe the current state — never judge from earlier snapshots or from \`git diff\` (committed fixes never show in \`git diff HEAD\`). Read the files to verify. Any "Unfixed" entry${round === 2 ? ' (and any "New" entry)' : ""} MUST quote the exact line content from THIS round's \`read\` output (e.g. \`run.mjs:180: timeoutId = setTimeout(...)\`); line numbers alone are NOT evidence (they may come from the stale prior table). Uncited findings are unverified and will be ignored.`,
     "",
-    "Do NOT re-read AGENTS.md / design docs or re-run git status/diff (current changes are below) — you already have full context from previous rounds.",
+    "Do NOT re-read AGENTS.md / design docs. Verify fix status with `read` only — do not rely on git output: a clean working tree does not mean fixes are absent (they may be committed).",
     "",
   ]
-  const snapshots = collectRepoSnapshots(findReviewRepos(agent), agent.cwd)
-  const snapshotText = snapshots.join("\n")
-  const snapshotHash = snapshotText ? createHash("sha1").update(snapshotText).digest("hex") : null
-  // Skip re-pushing an identical diff (e.g. advisor re-run without any file changes) —
-  // the previous snapshot is already in the conversation, duplicating it wastes tokens.
-  if (snapshots.length === 0) {
-    parts.push("## Current Changes", "(No git repository or no changes detected.)")
-  } else if (snapshotHash && snapshotHash === agent._advisorLastSnapshotHash) {
-    parts.push("## Current Changes", "(No changes since your previous review — the diff snapshot is identical, so the one from your last round remains valid for this round.)")
-  } else {
-    parts.push("## Current Changes (git status + git diff HEAD, refreshed)", ...snapshots)
-  }
-  agent._advisorLastSnapshotHash = snapshotHash
   return parts.join("\n")
 }
 
@@ -116,7 +104,6 @@ export function prepareAdvisorMessages(agent, reviewType, designToken = null, do
     // a follow-up "Verify Prior Table" would be meaningless; start a fresh full review
     if (!prior) {
       agent._advisorSession = null
-      agent._advisorLastSnapshotHash = null
       // Only reset the round counter on a truly fresh start (no prior reviews at all).
       // If _advisorRound > 0, there WAS a prior review — it just passed (all-clear).
       if (!agent._advisorRound) agent._advisorRound = 0
@@ -134,7 +121,6 @@ export function prepareAdvisorMessages(agent, reviewType, designToken = null, do
   ]
   // Fresh session. Only reset round if this is truly the first review.
   if (!agent._advisorRound) agent._advisorRound = 0
-  agent._advisorLastSnapshot = null
   if (!prior) {
     // Tell the advisor why no prior issue table is present
     session[1] = {

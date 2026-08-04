@@ -57,7 +57,6 @@ export function buildAdvisorUserMessage(agent, _prior, reviewType, designToken =
       }
 
       // Pre-collected changes — the design doc diff.
-      // _advisorLastSnapshot is only consumed by code-review convergence — skip the write here.
       const snapshots = collectRepoSnapshots(repos, agent.cwd)
       if (snapshots.length > 0) {
         parts.push("## Design Document (git diff)")
@@ -164,10 +163,11 @@ export function buildAdvisorUserMessage(agent, _prior, reviewType, designToken =
   parts.push("## Instructions")
   parts.push("1. IMPORTANT: in the diff, `-` lines are REMOVED content (no longer in the file), `+` lines are ADDED. The prior issue table (if any) is HISTORY — always verify current file state with `read` before judging an item.")
   if (isReReview) {
-    parts.push("2. STALE-CONTEXT WARNING: any diff embedded in earlier messages is a historical snapshot — treat it as expired. Only the \"Current Changes\" section above and fresh `read` results describe the current state. Never quote a `-` line from any diff as if it were live code.")
-    parts.push("3. Do NOT re-read AGENTS.md / design docs — conventions were established in round 1. Focus on verifying the prior issue table against the current diff.")
-    parts.push("4. `read` only the files touched by the fixes. Batch independent reads/greps in a single reply.")
-    parts.push("5. Produce your verification table. Do not re-read content you already have.")
+    parts.push("2. STALE-CONTEXT WARNING: any diff or file content embedded in earlier messages is a historical snapshot — treat it as expired. Only fresh `read` results describe the current state. Never quote a `-` line from an earlier diff as if it were live code.")
+    parts.push("3. Verify the prior issue table against the CURRENT FILE STATE — use `read`, never `git diff` alone. Fixes may already be committed: an empty `git diff` does NOT mean nothing changed. `git log -3` shows recent commits.")
+    parts.push("4. `read` the files in the Review Scope in full — ALWAYS, regardless of what `git diff` shows. Batch reads/greps in a single reply.")
+    parts.push("5. Evidence rule: every 'Unfixed'/'New' finding MUST quote the exact line content from THIS round's `read` output (e.g. `run.mjs:180: timeoutId = setTimeout(...)`). Line numbers alone are NOT evidence — they may come from the stale prior table. Findings without a fresh quoted line are treated as unverified and will not be accepted.")
+    parts.push("6. Produce your verification table. Do not re-read content you already have.")
   } else {
     parts.push("2. Read `AGENTS.md` / design docs only if they exist (check once; do not re-probe with multiple patterns).")
     parts.push("3. `read` changed files for full context beyond the diff. Batch independent reads/greps in a single reply instead of one call per round-trip.")

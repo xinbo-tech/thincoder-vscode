@@ -102,5 +102,4 @@ function mergeEngCoderMutations(parent, sink) {
   }
   parent._advisorRound = 0
   parent._advisorSession = null
-  parent._advisorLastSnapshotHash = null
 }
