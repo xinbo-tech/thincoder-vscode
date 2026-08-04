@@ -15,8 +15,8 @@ test("resolveChildProvider: provider:model / provider name / model name / null",
       ],
     },
   }
-  // null → inherit parent
-  assert.equal(resolveChildProvider(parent, null), parent._provider)
+  // null → inherit parent (shallow copy)
+  assert.deepEqual(resolveChildProvider(parent, null), parent._provider)
   // provider:model → named provider + named model
   const pm = resolveChildProvider(parent, "deepseek:deepseek-v4-flash")
   assert.equal(pm.name, "deepseek")
@@ -34,4 +34,24 @@ test("resolveChildProvider: provider:model / provider name / model name / null",
   assert.equal(mn.apiKey, "glm-key")
   // unknown provider name in provider:model → throw
   assert.throws(() => resolveChildProvider(parent, "nope:model"), /unknown provider/)
+})
+
+
+test("resolveChildProvider: env key fallback when provider has no apiKey", async () => {
+  const { resolveChildProvider } = await import("../src/agent-tools/subagent.mjs")
+  const parent = {
+    _provider: { name: "glm", baseURL: "x", model: "glm-5.2", apiKey: "k" },
+    config: {
+      providersList: [{ name: "deepseek", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro" }],
+    },
+  }
+  const prev = process.env.DEEPSEEK_API_KEY
+  process.env.DEEPSEEK_API_KEY = "env-key"
+  try {
+    const p = resolveChildProvider(parent, "deepseek")
+    assert.equal(p.apiKey, "env-key")
+  } finally {
+    if (prev === undefined) delete process.env.DEEPSEEK_API_KEY
+    else process.env.DEEPSEEK_API_KEY = prev
+  }
 })

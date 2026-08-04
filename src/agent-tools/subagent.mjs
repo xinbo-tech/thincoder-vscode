@@ -5,8 +5,6 @@
  */
 import { validateDesignToken } from "./advisor.mjs"
 
-let _subIdCounter = 0
-
 /**
  * Resolve the sub-agent's provider from a model override string (CLI parity).
  * "provider:model" → named provider + model; "provider" → named provider;
@@ -14,8 +12,8 @@ let _subIdCounter = 0
  * Keys follow the config fallback order (CLI parity via config-io resolveKey).
  */
 export function resolveChildProvider(parent, modelArg) {
-  if (!modelArg) return parent._provider
-  const providers = parent.config?.providers ?? []
+  if (!modelArg) return { ...parent._provider }
+  const providers = parent.config?.providersList ?? []
   const withKey = (p) => {
     if (p.apiKey?.trim()) return { ...p, apiKey: p.apiKey.trim() }
     if (process.env.THINCODER_API_KEY) return { ...p, apiKey: process.env.THINCODER_API_KEY }
@@ -34,7 +32,6 @@ export function resolveChildProvider(parent, modelArg) {
   if (byName) return withKey(byName)
   return { ...parent._provider, model: modelArg }
 }
-
 
 export const subagentTool = {
   name: "subagent",
@@ -80,8 +77,12 @@ export const subagentTool = {
       }
     }
 
-    const maxTurns = role === "explore" ? 30 : 50
-    const subId = ++_subIdCounter
+    // Turn cap from shared config (CLI parity); explore stays capped lower (read-only search)
+    const maxTurns = role === "explore"
+      ? Math.min(30, parent.config?.agent?.subagentTurns ?? 100)
+      : parent.config?.agent?.subagentTurns ?? 100
+    parent._subIdCounter = (parent._subIdCounter ?? 0) + 1
+    const subId = parent._subIdCounter
 
     ctx.callbacks?.onSubagent?.({ id: subId, role, status: "started", startedAt: Date.now() })
 

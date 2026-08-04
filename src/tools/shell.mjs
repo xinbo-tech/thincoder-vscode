@@ -22,6 +22,8 @@ SAFE_ENV.GIT_PAGER = "cat"
 SAFE_ENV.PAGER = "cat"
 SAFE_ENV.EDITOR = "true"
 SAFE_ENV.TERM = "dumb"
+// Windows: force UTF-8 for Python child output (CLI parity — cmd GBK would garble)
+if (process.platform === "win32") SAFE_ENV.PYTHONIOENCODING = "utf-8"
 
 // ─── git destructive-command protection (CLI parity) ─────────────
 
