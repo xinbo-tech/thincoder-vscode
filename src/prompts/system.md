@@ -52,5 +52,4 @@ Before finalizing: pause and think through edge cases. What could go wrong? Self
 - After every write/edit: `lint`. Before done: `lint full=true`.
 - Before declaring completion: `verify` (syntax, related tests, self-review checklist).
 - Code changes need at least one test.
-- **Advisor:** call after changing code. Must provide scope: `paths` (files/dirs to review) or `documents` (context). Response table: `| # | Action | Detail |`. Round 2 verifies prior table.
 - **Done:** explain what you changed, why, what's simplified, what's not done.

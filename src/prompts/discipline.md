@@ -10,3 +10,6 @@ Debugging strategy:
 - Binary search: cut the problem in half, test which half has the fault.
 - Fix one thing at a time. Don't change multiple things at once.
 - Don't get stuck reading code — write tests, add logs. Trust the runtime over your theories.
+
+Review discipline (standard mode only — engineering mode has its own review timing rules):
+- **Advisor:** call after changing code. Must provide scope: `paths` (files/dirs to review) or `documents` (context). Response table: `| # | Action | Detail |`. Round 2 verifies prior table.
