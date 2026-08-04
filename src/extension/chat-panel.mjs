@@ -8,7 +8,7 @@ import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { closeAllMcp, mcpConnectedToolCounts, mcpConnect, mcpDisconnectByName } from "../mcp.mjs"
 import { listSlots, loadSlot, saveSessionToSlot, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs } from "./session-io.mjs"
-import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, agentSettings, proxySettings } from "./settings.mjs"
+import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, agentSettings, proxySettings, shellCandidates } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { generateTitle } from "./generate-title.mjs"
 import { loadLocaleStrings } from "../i18n.mjs"
@@ -16,7 +16,7 @@ import { getEmbedder, setVSCodeEmbedder, resetEmbedder } from "../embed-config.m
 import { handlePanelMessage, _cwd } from "./panel-messages.mjs"
 import { runPanelChat } from "./panel-chat.mjs"
 import { stripEditorInjection } from "./editor-context.mjs"
-import { loadEmbeddingConfig, saveEmbeddingConfig } from "../config-io.mjs"
+import { loadEmbeddingConfig, saveEmbeddingConfig, loadRaw } from "../config-io.mjs"
 import { buildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../indexer.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -296,6 +296,7 @@ export class ChatPanel {
     fullStatus(this._panel)
     this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
     this._panel?.webview.postMessage({ type: "proxySettings", settings: proxySettings() })
+    this._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates(), current: loadRaw().shell ?? null })
     this._pushMcpStatus()
     this._pushIndexStatus()
   }

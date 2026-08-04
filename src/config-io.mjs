@@ -10,6 +10,7 @@
  */
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -246,6 +247,88 @@ export function saveAgentSettings(patch) {
       else if (typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) delete raw.agent[k]
       else raw.agent[k] = v
     }
+  })
+}
+
+/** Panel persistence: build the agent.* patch from a webview payload (CLI-parity field names).
+ *  Single write channel — all fields (incl. advisor) go through one saveAgentSettings(patch);
+ *  an early return for advisor would silently discard non-advisor fields (reported bug).
+ *  Pure function of payload + current config; lives here (no vscode dependency) so it is testable. */
+export function saveAgentSettingsFromPanel(payload) {
+  const patch = {}
+  if (payload.maxTurns != null) patch.maxTurns = Number(payload.maxTurns) || undefined
+  if (payload.subagentTurns != null) patch.subagentTurns = Number(payload.subagentTurns) || undefined
+  // "in payload" guards let explicit undefined (cleared field) flow through as deletion
+  if ("subagentModel" in payload) patch.subagentModel = payload.subagentModel || undefined
+  if ("subagentModels" in payload) {
+    // Per-type overrides: only non-empty values kept; empty object deletes the whole key
+    const m = {}
+    for (const [role, v] of Object.entries(payload.subagentModels ?? {})) {
+      if (v && typeof v === "string" && v.trim()) m[role] = v.trim()
+    }
+    patch.subagentModels = Object.keys(m).length > 0 ? m : undefined
+  }
+  if (payload.compactThreshold !== undefined) patch.compactThreshold = payload.compactThreshold === "" ? undefined : (Number(payload.compactThreshold) || undefined)
+  if (payload.verifyGuard !== undefined) patch.verifyGuard = !!payload.verifyGuard
+  if (payload.advisor !== undefined) {
+    // Merge with existing advisor values; "in" guards allow clearing provider/model
+    const adv = payload.advisor ?? {}
+    const current = loadAgentSettings().advisor ?? {}
+    patch.advisor = {
+      enabled: !!adv.enabled,
+      guard: adv.guard !== undefined ? !!adv.guard : (current.guard ?? true),
+      ...("provider" in adv ? (adv.provider ? { provider: adv.provider } : undefined) : {}),
+      ...("model" in adv ? (adv.model ? { model: adv.model } : undefined) : {}),
+    }
+  }
+  saveAgentSettings(patch)
+}
+
+// ─── Shell candidates (platform-aware, cached once per session — CLI /shell parity) ───
+
+let _shellCandidatesCache = null
+
+/** Detect available shells for this platform. Cached: shell availability does not
+ *  change during a session, and spawnSync on every panel open would freeze the UI. */
+export function shellCandidates() {
+  if (_shellCandidatesCache !== null) return _shellCandidatesCache
+  const win = process.platform === "win32"
+  const commandExists = (cmd) => {
+    try {
+      // 'command -v' is a POSIX shell builtin; sh -c runs it (Windows uses `where`)
+      const r = spawnSync(win ? "where" : "sh", win ? [cmd] : ["-c", `command -v ${cmd}`], { encoding: "utf8", timeout: 3000 })
+      return r.status === 0 && r.stdout.trim().length > 0
+    } catch { return false }
+  }
+  const GIT_BASH_PATHS = [
+    "C:\\Program Files\\Git\\bin\\bash.exe",
+    "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+    `${process.env.LOCALAPPDATA ?? ""}\\Programs\\Git\\bin\\bash.exe`,
+  ]
+  const candidates = []
+  // System default always first
+  candidates.push({ name: "System default", value: null, detect: () => true })
+  if (win) {
+    candidates.push({ name: "PowerShell (pwsh)", value: "pwsh", detect: () => commandExists("pwsh") })
+    candidates.push({ name: "Windows PowerShell (powershell)", value: "powershell", detect: () => commandExists("powershell") })
+    const gb = GIT_BASH_PATHS.find((p) => existsSync(p))
+    if (gb) candidates.push({ name: `Git Bash (${gb})`, value: gb, detect: () => true })
+    candidates.push({ name: "WSL bash (wsl)", value: "wsl", detect: () => commandExists("wsl") })
+  } else {
+    for (const sh of ["bash", "zsh", "fish"]) {
+      candidates.push({ name: sh, value: sh, detect: () => commandExists(sh) })
+    }
+  }
+  _shellCandidatesCache = candidates.filter((c) => c.detect())
+  return _shellCandidatesCache
+}
+
+/** Persist shell setting from the panel. value: string path/command, '' or null = system default. */
+export function saveShellSettingsFromPanel(value) {
+  const v = typeof value === "string" ? value.trim() : ""
+  persistRaw((raw) => {
+    if (!v) delete raw.shell
+    else raw.shell = v
   })
 }
 

@@ -291,13 +291,18 @@ function buildSettings() {
       <div id="px-test-result" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>
       <div class="settings-sep"></div>
       <h4 class="settings-section-title">${t("settings.shellSection")}</h4>
+      ${(() => {
+        const cands = _shellCandidates || []
+        // Custom path active when config.shell is set and not among the candidates
+        const shellIsCustom = _shellValue !== null && !cands.some((c) => (c.value ?? null) === _shellValue)
+        return `
       <div class="key-field"><label>${t("settings.shellSelect")}</label><select id="sh-select">
-        <option value="">${t("settings.shellDefault")}</option>
-        ${(_shellCandidates || []).map((c) => `<option value="${escHtml(c.value || "")}" ${(c.value ?? null) === _shellValue ? "selected" : ""}>${escHtml(c.name)}</option>`).join("")}
-        <option value="__custom__">${t("settings.shellCustom")}</option>
+        ${cands.map((c) => `<option value="${escHtml(c.value || "")}" ${!shellIsCustom && (c.value ?? null) === _shellValue ? "selected" : ""}>${escHtml(c.name)}</option>`).join("")}
+        <option value="__custom__" ${shellIsCustom ? "selected" : ""}>${t("settings.shellCustom")}</option>
       </select></div>
-      <div class="key-field"><label>${t("settings.shellPath")}</label><input id="sh-custom" placeholder="C:\\Program Files\\Git\\bin\\bash.exe" value="${escHtml(_shellValue || "")}"></div>
+      <div class="key-field"><label>${t("settings.shellPath")}</label><input id="sh-custom" placeholder="C:\\Program Files\\Git\\bin\\bash.exe" value="${shellIsCustom ? escHtml(_shellValue || "") : ""}" ${shellIsCustom ? "" : "disabled"}></div>
       <button id="sh-save-btn" class="key-btn" style="margin-top:4px">${t("settings.save")}</button>`
+      })()}`
 
   body.innerHTML = html
 
@@ -361,9 +366,20 @@ function buildSettings() {
   // Bind Shell save: select (default/candidate/custom) + custom path input
   const shSave = document.getElementById("sh-save-btn")
   if (shSave) {
+    // Custom path input enables only when the dropdown is on "Custom path…"
+    const shSelect = document.getElementById("sh-select")
+    const shCustom = document.getElementById("sh-custom")
+    const syncShCustom = () => {
+      const isCustom = shSelect?.value === "__custom__"
+      if (shCustom) {
+        shCustom.disabled = !isCustom
+        if (!isCustom) shCustom.value = ""
+      }
+    }
+    if (shSelect) shSelect.addEventListener("change", syncShCustom)
     shSave.addEventListener("click", () => {
-      const sel = document.getElementById("sh-select")?.value ?? ""
-      const custom = document.getElementById("sh-custom")?.value?.trim() ?? ""
+      const sel = shSelect?.value ?? ""
+      const custom = shCustom?.value?.trim() ?? ""
       const value = sel === "__custom__" ? custom : sel
       window._vscode.postMessage({ type: "saveShellSettings", value })
     })
