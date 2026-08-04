@@ -16,7 +16,7 @@ import {
 } from "./agent-tools.mjs"
 import { compactHistory, truncateFallback, COMPRESS_FAILURE_LIMIT } from "./compact.mjs"
 import { injectContext } from "./context.mjs"
-import { loadRaw, normalizeProxy } from "./config-io.mjs"
+import { loadRaw, normalizeProxy, resolveProviders } from "./config-io.mjs"
 import * as os from "node:os"
 import {
   MAX_ADVISOR_PUSHBACKS, MAX_VERIFY_PUSHBACKS, MAX_VERIFY_RETRIES, MAX_EMPTY_RETRIES,
@@ -96,6 +96,9 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   let cfgVerifyGuard = false
   let cfgCompactThreshold = null
   let cfgProxy = undefined
+  let cfgShell = null
+  let cfgSubagentModel = null
+  let cfgProviders = []
   try {
     const raw = loadRaw()
     advisorCfg = raw.agent?.advisor ?? { enabled: false }
@@ -103,6 +106,9 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     cfgVerifyGuard = raw.agent?.verifyGuard === true // opt-in, CLI parity
     cfgCompactThreshold = raw.agent?.compactThreshold ?? null // null = auto from model context
     cfgProxy = normalizeProxy(raw.proxy) // web tools consult agent.config.proxy (resolveWebProxy)
+    cfgShell = typeof raw.shell === "string" && raw.shell ? raw.shell : null // bash tool shell override (CLI parity)
+    cfgSubagentModel = raw.agent?.subagentModel ?? null // default subagent model override (CLI parity)
+    cfgProviders = resolveProviders().providers // for subagent model overrides
   } catch { /* config unreadable — defaults */ }
   const engineering = engState?.enabled ?? cfgEngineering
 
@@ -123,7 +129,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     _engDesignReviewed: engDesignReviewed === true, // eng-coder children arrive pre-authorized
     _calledAdvisorThisRun: false, _mutatedThisRun: false,
     _lastEngState: engineering, _pendingReminders: [],
-    config: { advisor: advisorCfg, agent: { engineering }, proxy: cfgProxy },
+    config: { advisor: advisorCfg, agent: { engineering, subagentModel: cfgSubagentModel }, proxy: cfgProxy, shell: cfgShell, providers: cfgProviders },
   }
 
   // Live state channel for the parent (eng-coder mutation merge) — the caller gets a

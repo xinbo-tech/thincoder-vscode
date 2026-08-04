@@ -105,11 +105,19 @@ export const bashTool = {
         ctx.callbacks?.onToolPanel?.("bash", out)
         resolve(guard ? `${guard.notice}\n\n${out}` : out)
       }
-      const child = exec(command, {
+      // Shell override from config (CLI parity). Windows + default cmd: force UTF-8
+      // code page for this child — cmd emits GBK bytes otherwise, which the UTF-8
+      // capture turns into mojibake (reported win11 encoding pain).
+      const shell = ctx.agent?.config?.shell ?? null
+      const effectiveCommand = process.platform === "win32" && !shell
+        ? `chcp 65001 >nul && ${command}`
+        : command
+      const child = exec(effectiveCommand, {
         cwd: ctx.cwd,
         timeout: timeout || BASH_TIMEOUT_MS,
         env: SAFE_ENV,
         maxBuffer: 2 * 1024 * 1024,
+        ...(shell ? { shell } : {}),
       }, (error, stdout, stderr) => {
         if (error && error.killed) {
           finish(`(killed — timeout ${timeout || BASH_TIMEOUT_MS}ms)`)
