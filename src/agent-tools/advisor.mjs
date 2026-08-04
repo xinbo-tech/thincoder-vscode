@@ -61,8 +61,8 @@ export const advisorTool = {
     "Run an independent review on your work. " +
     "Use type='design' to review design documents before implementation — pass documents=[...] with the explicit list of doc paths to review; use documents in code review too (the task's Docs involved list). " +
     "Use type='code' (default) to review code changes after implementation — pass paths=[...] to specify which files or directories to review, or documents=[...] for acceptance criteria context. " +
-    "The advisor is an independent read-only sub-agent that explores the codebase, runs git diff, " +
-    "reads files, and traces callers via grep. " +
+    "The advisor is an independent read-only sub-agent that explores the codebase, " +
+    "reads files, and traces callers via grep/lsp. " +
     "For code review: round 1 does a full review, round 2 verifies the prior table, " +
     "round 3+ strictly checks only the prior table — convergence, not divergence. " +
     "For design review: single-pass review against methodology and requirements. " +
