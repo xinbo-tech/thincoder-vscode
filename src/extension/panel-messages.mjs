@@ -4,9 +4,9 @@
  */
 import * as vscode from "vscode"
 import { saveModelPrefs, switchToSlot } from "./session-io.mjs"
-import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection } from "./settings.mjs"
+import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection, shellCandidates, saveShellSettingsFromPanel } from "./settings.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
-import { selectProviderModel } from "../config-io.mjs"
+import { selectProviderModel, loadRaw } from "../config-io.mjs"
 
 /** Current workspace folder (or process cwd) — shared with chat-panel. */
 export const _cwd = () => vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
@@ -114,6 +114,12 @@ export async function handlePanelMessage(panel, msg) {
       break
     }
     case "getAgentSettings": panel._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() }); break
+    case "getShellCandidates": panel._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates(), current: loadRaw().shell ?? null }); break
+    case "saveShellSettings": {
+      saveShellSettingsFromPanel(msg.value)
+      panel._pushSettings()
+      break
+    }
     case "saveProxySettings": {
       saveProxySettingsFromPanel(msg.settings ?? {})
       panel._pushSettings()

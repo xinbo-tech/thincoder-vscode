@@ -487,4 +487,19 @@ describe("agent settings", () => {
     writeCfg({ agent: { verifyGuard: true } })
     assert.equal(loadAgentSettings().verifyGuard, true)
   })
+
+  it("loadAgentSettings: subagentModel/subagentModels round-trip (CLI parity)", () => {
+    saveAgentSettings({ subagentModel: "deepseek:deepseek-v4-flash", subagentModels: { coder: "glm:glm-5.2", explore: "deepseek-v4-flash" } })
+    const s = loadAgentSettings()
+    assert.equal(s.subagentModel, "deepseek:deepseek-v4-flash")
+    assert.deepEqual(s.subagentModels, { coder: "glm:glm-5.2", explore: "deepseek-v4-flash" })
+    // per-type delete: removing the last key deletes the whole subagentModels key
+    saveAgentSettings({ subagentModel: undefined, subagentModels: {} })
+    const s2 = loadAgentSettings()
+    assert.equal(s2.subagentModel, null)
+    assert.deepEqual(s2.subagentModels, {}, "empty object = no type overrides")
+    const raw = loadRaw()
+    assert.ok(!("subagentModels" in (raw.agent ?? {})), "empty subagentModels object removed from config")
+  })
+
 })

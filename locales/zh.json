@@ -136,5 +136,13 @@
     "currentTool": "工具",
     "turns": "轮",
     "elapsed": "耗时"
-  }
+  },
+  "settings.submodelSection": "子代理模型",
+  "settings.submodelGlobal": "全局默认",
+  "settings.submodelInherit": "继承父 provider（provider:model | provider | model）",
+  "settings.shellSection": "Shell（bash 工具）",
+  "settings.shellSelect": "Shell",
+  "settings.shellDefault": "系统默认（Windows: cmd + UTF-8 / 其他: /bin/sh）",
+  "settings.shellCustom": "自定义路径…",
+  "settings.shellPath": "自定义路径"
 }

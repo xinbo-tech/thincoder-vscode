@@ -34,6 +34,10 @@ function paTypeChanged() {
 let _indexStatus = null
 /** @type {{ maxTurns?:number, subagentTurns?:number, compactThreshold?:number|null, verifyGuard?:boolean, advisor?:object } | null} */
 let _agentSettings = null
+/** @type {{ name:string, value:string|null }[] | null} — detected shells (extension sends once) */
+let _shellCandidates = null
+/** @type {string|null} — current config.shell value */
+let _shellValue = null
 /** @type {{ uri?:string, web?:boolean, model?:boolean } | null} */
 let _proxySettings = null
 
@@ -133,8 +137,10 @@ export function initSettings({ vscode, inputEl, onClose }) {
   window._delEmbedKey = function() { window._vscode.postMessage({ type: "deleteEmbedKey" }) }
 
   window._mcpServers = {}
+  // Request detected shells once (extension caches the detection — CLI /shell parity)
+  window._vscode.postMessage({ type: "getShellCandidates" })
 
-  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateProxySettings, updateProxyTestResult }
+  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateShellCandidates, updateProxySettings, updateProxyTestResult }
 }
 
 function openSettings() {
@@ -255,6 +261,10 @@ function buildSettings() {
       <h4 class="settings-section-title">${t("settings.agentSection")}</h4>
       <div class="key-field"><label>${t("settings.maxTurns")}</label><input id="ag-maxturns" type="number" min="1" value="${as.maxTurns ?? 100}"></div>
       <div class="key-field"><label>${t("settings.subagentTurns")}</label><input id="ag-subturns" type="number" min="1" value="${as.subagentTurns ?? 100}"></div>
+      <h4 class="settings-section-title">${t("settings.submodelSection")}</h4>
+      <div class="key-field"><label>${t("settings.submodelGlobal")}</label><input id="ag-submodel-global" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModel || "")}"></div>
+      ${["explore", "plan", "coder", "eng-coder"].map((role) => `
+        <div class="key-field"><label>${role}</label><input id="ag-submodel-${role}" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModels?.[role] || "")}"></div>`).join("")}
       <div class="key-field"><label>${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>
       <div class="key-row"><span class="key-label">${t("settings.verifyGuard")}</span>
         <input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}></div>
@@ -278,7 +288,16 @@ function buildSettings() {
         <input type="checkbox" id="px-model" ${px.model ? "checked" : ""}></div>
       <button id="px-save-btn" class="key-btn" style="margin-top:4px">${t("settings.save")}</button>
       <button id="px-test-btn" class="key-btn" style="margin-top:4px">${t("settings.proxyTest")}</button>
-      <div id="px-test-result" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>`
+      <div id="px-test-result" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>
+      <div class="settings-sep"></div>
+      <h4 class="settings-section-title">${t("settings.shellSection")}</h4>
+      <div class="key-field"><label>${t("settings.shellSelect")}</label><select id="sh-select">
+        <option value="">${t("settings.shellDefault")}</option>
+        ${(_shellCandidates || []).map((c) => `<option value="${escHtml(c.value || "")}" ${(c.value ?? null) === _shellValue ? "selected" : ""}>${escHtml(c.name)}</option>`).join("")}
+        <option value="__custom__">${t("settings.shellCustom")}</option>
+      </select></div>
+      <div class="key-field"><label>${t("settings.shellPath")}</label><input id="sh-custom" placeholder="C:\\Program Files\\Git\\bin\\bash.exe" value="${escHtml(_shellValue || "")}"></div>
+      <button id="sh-save-btn" class="key-btn" style="margin-top:4px">${t("settings.save")}</button>`
 
   body.innerHTML = html
 
@@ -314,11 +333,18 @@ function buildSettings() {
       const get = (id) => document.getElementById(id)?.value?.trim()
       const chk = (id) => document.getElementById(id)?.checked ?? false
       const compactRaw = get("ag-compact")
+      const subModels = {}
+      for (const role of ["explore", "plan", "coder", "eng-coder"]) {
+        const v = get(`ag-submodel-${role}`)
+        if (v) subModels[role] = v
+      }
       window._vscode.postMessage({
         type: "saveAgentSettings",
         settings: {
           maxTurns: get("ag-maxturns") || undefined,
           subagentTurns: get("ag-subturns") || undefined,
+          subagentModel: get("ag-submodel-global") || undefined,
+          subagentModels: subModels,
           compactThreshold: compactRaw === "" ? "" : (compactRaw || undefined),
           verifyGuard: chk("ag-verifyguard"),
           advisor: {
@@ -329,6 +355,17 @@ function buildSettings() {
           },
         },
       })
+    })
+  }
+
+  // Bind Shell save: select (default/candidate/custom) + custom path input
+  const shSave = document.getElementById("sh-save-btn")
+  if (shSave) {
+    shSave.addEventListener("click", () => {
+      const sel = document.getElementById("sh-select")?.value ?? ""
+      const custom = document.getElementById("sh-custom")?.value?.trim() ?? ""
+      const value = sel === "__custom__" ? custom : sel
+      window._vscode.postMessage({ type: "saveShellSettings", value })
     })
   }
 
@@ -449,6 +486,13 @@ function updateProviderStatus(status) {
 
 function updateAgentSettings(settings) {
   _agentSettings = settings
+  const panel = document.getElementById("settings-panel")
+  if (panel && panel.style.display !== "none") buildSettings()
+}
+
+function updateShellCandidates(payload) {
+  _shellCandidates = payload?.candidates || []
+  _shellValue = payload?.current ?? null
   const panel = document.getElementById("settings-panel")
   if (panel && panel.style.display !== "none") buildSettings()
 }

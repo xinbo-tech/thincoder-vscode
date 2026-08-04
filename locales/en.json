@@ -136,5 +136,13 @@
     "currentTool": "tool",
     "turns": "turns",
     "elapsed": "elapsed"
-  }
+  },
+  "settings.submodelSection": "Subagent models",
+  "settings.submodelGlobal": "Global default",
+  "settings.submodelInherit": "inherit: parent provider (provider:model | provider | model)",
+  "settings.shellSection": "Shell (bash tool)",
+  "settings.shellSelect": "Shell",
+  "settings.shellDefault": "System default (cmd + UTF-8 on Windows / /bin/sh elsewhere)",
+  "settings.shellCustom": "Custom path…",
+  "settings.shellPath": "Custom path"
 }

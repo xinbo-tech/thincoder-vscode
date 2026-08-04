@@ -228,18 +228,22 @@ export function loadAgentSettings() {
   return {
     maxTurns: a?.maxTurns ?? 100,
     subagentTurns: a?.subagentTurns ?? 100,
+    subagentModel: a?.subagentModel ?? null, // default subagent model override (CLI parity)
+    subagentModels: a?.subagentModels ?? {}, // per-type overrides: explore/plan/coder/eng-coder (CLI parity)
     compactThreshold: a?.compactThreshold ?? null, // null = auto (from model context)
     verifyGuard: a?.verifyGuard ?? false,
     advisor: a?.advisor ?? { enabled: false },
   }
 }
 
-/** Persist agent.* settings (merge; undefined/empty deletes the key — compactThreshold '' = auto). */
+/** Persist agent.* settings (merge; undefined/empty deletes the key — compactThreshold '' = auto).
+ *  Empty subagentModels object deletes the whole key (no leftover "subagentModels": {} in config). */
 export function saveAgentSettings(patch) {
   persistRaw((raw) => {
     raw.agent = raw.agent && typeof raw.agent === "object" ? raw.agent : {}
     for (const [k, v] of Object.entries(patch ?? {})) {
       if (v === undefined || v === null || v === "") delete raw.agent[k]
+      else if (typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) delete raw.agent[k]
       else raw.agent[k] = v
     }
   })
