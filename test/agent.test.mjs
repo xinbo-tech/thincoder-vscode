@@ -399,3 +399,54 @@ describe("tool edge cases", () => {
     assert.ok(result.includes("hello"), "should contain echo output: " + result.slice(0, 50))
   })
 })
+
+describe("pending-task pushback fires at most once (CLI parity)", () => {
+  it("one reminder per task-list state, then the model finishes", async () => {
+    const http = await import("node:http")
+    const { runAgent } = await import("../src/agent.mjs")
+    const cwd = setupTempDir()
+    const taskArgs = JSON.stringify({ items: [{ title: "T1", status: "pending" }] })
+    const responses = [
+      // Turn 1: model creates a pending task via the task tool
+      [
+        { choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "task", arguments: taskArgs } }] } }] },
+        { choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+      ],
+      // Turn 2: model declares done → first pushback
+      [
+        { choices: [{ index: 0, delta: { content: "done" } }] },
+        { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+      ],
+      // Turn 3: model declares done again → allowed to finish
+      [
+        { choices: [{ index: 0, delta: { content: "done" } }] },
+        { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+      ],
+    ]
+    const server = http.createServer((req, res) => {
+      let body = ""
+      req.on("data", (c) => (body += c))
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "text/event-stream" })
+        const chunks = responses.shift() ?? []
+        res.end(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n")
+      })
+    })
+    await new Promise((r) => server.listen(0, "127.0.0.1", r))
+    const port = server.address().port
+    const history = []
+    try {
+      const result = await runAgent(
+        mockProvider("deepseek-v4-pro", port), cwd, "do it", {}, undefined, true,
+        { history, fullHistory: [] },
+      )
+      assert.equal(result, "done", "final reply surfaces")
+      const reminders = history.filter((m) => typeof m.content === "string" && m.content.includes("you still have pending tasks"))
+      assert.equal(reminders.length, 1, "pushed back exactly once: " + JSON.stringify(reminders))
+      assert.ok(reminders[0].content.includes("only reminder"), "copy says it is the only reminder")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+})

@@ -29,6 +29,7 @@ export const taskTool = {
   },
   async execute({ items }, ctx) {
     ctx.agent._tasks = items
+    ctx.agent._taskPushbacks = 0 // task list changed — the completion gate earns a fresh reminder (CLI parity)
     ctx.callbacks?.onTaskUpdate?.(items)
     const done = items.filter((t) => t.status === "done").length
     const total = items.length

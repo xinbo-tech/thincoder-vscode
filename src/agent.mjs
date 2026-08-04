@@ -336,14 +336,17 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         }
       }
 
-      // Pending tasks check (top-level only)
+      // Pending tasks check (top-level only). Pushed back AT MOST ONCE per task-list
+      // state (CLI parity): an unbounded loop stranded the model when a pending item
+      // could not be resolved. Updating the list via the task tool resets the budget.
       if (depth === 0) {
         const pending = agent._tasks?.filter((t) => t.status === "pending")
-        if (pending?.length) {
+        if (pending?.length && (agent._taskPushbacks ?? 0) < 1) {
+          agent._taskPushbacks = (agent._taskPushbacks ?? 0) + 1
           pushReal(history, fullHistory, { role: "assistant", content: response.content })
           history.push({
             role: "user",
-            content: `[System reminder: you still have pending tasks: ${pending.map((t) => t.title).join(", ")}. Update their status before finishing — if done, mark done; if not applicable, remove them.]`,
+            content: `[System reminder: you still have pending tasks: ${pending.map((t) => t.title).join(", ")}. Update their status before finishing — if done, mark done; if not applicable, remove them. (This is your only reminder — if you choose not to, finish anyway.)]`,
           })
           continue
         }
