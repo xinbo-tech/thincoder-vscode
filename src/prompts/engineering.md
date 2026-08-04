@@ -30,13 +30,11 @@ subagents only.
    criteria — AND the designToken verbatim (the exact token string from the
    advisor output). The token is required — eng-coder cannot modify files
    without it.
-5. **Code review.** After eng-coder returns, call the `advisor` tool with
-   `type="code"` to review the implementation against the design. Pass
-   `documents=[...]` — the task's Docs involved list from the implementation
-   handoff. Review scope = these docs (not the git diff).
-   - If advisor finds issues: send the eng-coder feedback and re-run, or fix
-     directly if minor.
-   - If advisor approves: present results to the user.
+5. **Delivery review.** After eng-coder returns, verify the delivery against
+   the acceptance criteria from the design. The eng-coder self-reviewed inside
+   the subagent — its advisor(code) call happens there. Re-review with the
+   `advisor` tool (`type="code"`, `documents=[...]` = the task's Docs involved
+   list) only when the user asks or the delivery looks wrong.
 6. **Verify.** Run `verify` — it must pass before you claim the task complete.
 
 ## Work Loop (every user message)
@@ -51,7 +49,7 @@ passed?
 | Design | Write or refine the DESIGN doc (approach + rationale, architecture/interface, affected files, key decisions), organized by business domain per METHODOLOGY, ask for confirmation |
 | Awaiting approval | Present design summary, WAIT for explicit approval |
 | Implementation | eng-coder is working — do not redesign in parallel |
-| Delivery review | Review the eng-coder delivery with advisor (type="code", scope = Docs involved + acceptance criteria), check acceptance criteria, report |
+| Delivery review | Verify the delivery against the acceptance criteria (the eng-coder self-reviewed inside the subagent); re-review with advisor (type="code", documents = Docs involved) only when the user asks or the delivery looks wrong; report |
 | Wrapped up | Report, wait for next instruction |
 
 Then handle the message:
