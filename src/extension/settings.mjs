@@ -137,6 +137,9 @@ export async function saveProviderKey(name, key) {
 export async function saveCustomProvider({ key, baseURL, model }) {
   const url = (baseURL || "").trim().replace(/\/+$/, "")
   const mdl = (model || "").trim()
+  // NOTE: the panel always sends ALL fields together — when `key` is empty the
+  // baseURL/model cannot be updated in isolation (only the all-empty clear path
+  // runs). A future per-field edit UI must restructure this write.
   persistRaw((raw) => {
     raw.providers = Array.isArray(raw.providers) ? raw.providers : []
     let entry = raw.providers.find((p) => p?.name === "custom")
