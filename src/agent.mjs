@@ -23,6 +23,7 @@ import {
   configuredMaxTurns, loadEngineeringPrompt, hasCodeMutations,
   pushReal, agentState, reinjectAfterCompaction,
 } from "./agent/run-helpers.mjs"
+import { MAX_ADVISOR_ROUNDS } from "./advisor/run.mjs"
 import { executeToolBatches } from "./agent/execute-tools.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -404,11 +405,15 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
 
         // Advisor guard (CLI completion.mjs parity): OPT-IN via advisor.enabled + guard!==false,
         // NEVER in engineering mode (engineering has its own mandatory gates).
+        // Cap sync (CLI b74e413): beyond MAX_ADVISOR_ROUNDS the advisor tool
+        // refuses reviews (run.mjs convergence cap) — pushing back further
+        // would loop forever (fix → pushback → cap-refused call → fix …).
         const advisorCfg = agent.config?.advisor
         const advisorReview = advisorCfg?.enabled && advisorCfg?.guard !== false
         if (advisorReview && !agent.config?.agent?.engineering
             && agent._mutatedThisRun && !agent._calledAdvisorThisRun && hasCodeMutations(agent)
-            && advisorPushbacks < MAX_ADVISOR_PUSHBACKS) {
+            && advisorPushbacks < MAX_ADVISOR_PUSHBACKS
+            && (agent._advisorRound || 0) < MAX_ADVISOR_ROUNDS) {
           advisorPushbacks++
           pushReal(history, fullHistory, { role: "assistant", content: response.content })
           history.push({

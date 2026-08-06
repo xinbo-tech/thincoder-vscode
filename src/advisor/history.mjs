@@ -6,8 +6,10 @@ import { join } from "node:path"
 
 export const ADVISOR_MD_PATH = ".thincoder/advisor.md"
 export const ADVISOR_TABLE_HEADER = "| # | File | Severity | Issue | Suggestion |"
-export const CONVERGENCE_TABLE_HEADER = "| # | Orig# | File | Severity | Status | Notes |"
-export const AGENT_RESPONSE_HEADER = "| # | Action | Detail |"
+// Design-review table header (advisor-design.md round 1): | # | Category | Severity | Issue | Suggestion |
+const DESIGN_TABLE_HEADER = "| # | Category | Severity | Issue | Suggestion |"
+const CONVERGENCE_TABLE_HEADER = "| # | Orig# | File | Severity | Status | Notes |"
+const AGENT_RESPONSE_HEADER = "| # | Action | Detail |"
 export const LEGACY_ADVISOR_HEADER = "| # | 文件 | 严重程度 | 问题描述 | 建议修复 |"
 
 const DEFAULT_CRITERIA = `Review the code changes, focusing on:
@@ -25,11 +27,19 @@ const DEFAULT_CRITERIA = `Review the code changes, focusing on:
  * Returns null when: no advisor call, empty output, or the last review is
  * all-clear (nothing to follow up on).
  */
+// All-clear phrases the prompts instruct the advisor to use on a clean review.
+// Used ONLY by extractPriorIssueTable (issue-table verdict — a phrase-free
+// issue table with rows is never all-clear). The round-reset guard no longer
+// depends on model output at all: prepareAdvisorMessages decides by the
+// deterministic _mutatedThisRun flag (user decision 2026-08-05). "no new
+// issues" is DELIBERATELY absent — verification-table outputs (round 2+)
+// commonly conclude with it (round 3+ instructions even SAY "do not look for
+// new issues"); treating it as all-clear would reset the convergence budget
+// after every round-2 review (the observed "always round 2" bug: prior → null
+// → _advisorRound reset → 1→2→1…).
+const ALL_CLEAR_PHRASES = ["no 🔴", "all clear", "全部通过", "review passed", "no issues found", "everything is fine"]
+
 export function extractPriorIssueTable(history) {
-  // allClear: exact phrases the prompts instruct the advisor to use on a clean review.
-  // NOTE: "已修复" (Fixed) is NOT here — it's a per-row Status value in convergence tables,
-  // and a mixed table must continue convergence even if some rows are Fixed.
-  const allClear = ["no 🔴", "all clear", "全部通过", "review passed", "no issues found", "no new issues"]
   // Negative signals: a table listing SOME items as unfixed is NOT all-clear.
   // Applied when the message carries a Status column (English or Chinese convergence
   // format) — "failed"/"❌" in a round-1 Issue description must NOT trigger it.
@@ -44,6 +54,7 @@ export function extractPriorIssueTable(history) {
     // header constants' own source code (e.g. history.mjs), producing a phantom
     // "prior issue table" and re-opening convergence rounds against stale data.
     if (!lineHasHeader(m.content, ADVISOR_TABLE_HEADER)
+      && !lineHasHeader(m.content, DESIGN_TABLE_HEADER)
       && !lineHasHeader(m.content, CONVERGENCE_TABLE_HEADER)
       && !lineHasHeader(m.content, LEGACY_ADVISOR_HEADER)) continue
     const text = m.content
@@ -52,8 +63,16 @@ export function extractPriorIssueTable(history) {
     // column) — Chinese legacy tables lack it, but they are issue tables, not convergence.
     const hasStatusColumn = lineHasHeader(text, CONVERGENCE_TABLE_HEADER)
       || /Status|状态/.test(text.slice(0, text.indexOf("\n") + 1))
-    if (hasStatusColumn && partiallyFixedRe.test(lower)) return { text, sinceIdx: i }
-    if (allClear.some((s) => lower.includes(s))) return null
+    if (hasStatusColumn) {
+      // Convergence/verification table: pass/fail is row-level — free-text
+      // phrases like "no new issues found" / "review passed" are partial or
+      // boilerplate statements in verification outputs. Some row unfixed →
+      // convergence continues; every row fixed → all clear (fresh cycle).
+      if (partiallyFixedRe.test(lower)) return { text, sinceIdx: i }
+      return null
+    }
+    // Issue table (round 1 / design): phrase-based all-clear detection.
+    if (ALL_CLEAR_PHRASES.some((s) => lower.includes(s))) return null
     // sinceIdx = the advisor call's own index; extractAgentResponseTable skips it (role !== assistant)
     return { text, sinceIdx: i }
   }

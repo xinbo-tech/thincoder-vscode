@@ -10,7 +10,8 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 import { extractPriorIssueTable, extractAgentResponseTable, extractConversationBackground } from "../src/advisor/history.mjs"
-import { buildAdvisorSystemPrompt, prepareAdvisorMessages } from "../src/advisor/main.mjs"
+import { buildAdvisorSystemPrompt, prepareAdvisorMessages, escapeLiteralEscapes } from "../src/advisor/main.mjs"
+import { verifyCitations, appendCitationReport, extractCitations } from "../src/advisor/citations.mjs"
 import { buildAdvisorUserMessage } from "../src/advisor/messages.mjs"
 import { isDocFile } from "../src/advisor/repos.mjs"
 import { validateDesignToken, extractTokenUUID } from "../src/agent-tools/advisor.mjs"
@@ -310,5 +311,92 @@ describe("isDocFile", () => {
     assert.equal(isDocFile("src/main.mjs"), false)
     assert.equal(isDocFile("src/prompts/system.md") && false, false) // extension matches; src/ exclusion is the caller's job
     assert.equal(isDocFile("package.json"), false)
+  })
+})
+
+
+// ────────────────────────────────────────
+// CLI parity additions (2026-08-06): escapeLiteralEscapes, citations, fresh-session
+// ────────────────────────────────────────
+
+describe("escapeLiteralEscapes (CLI parity — hex-escape 400 defense)", () => {
+  const cases = [
+    ["\\x（单反斜杠）", "\\\\x（单反斜杠）"], // \x + non-hex → doubled
+    ["末尾\\x", "末尾\\\\x"], // \x at end → doubled
+    ["\\x1b[31m", "\\x1b[31m"], // \x + 2 hex → untouched
+    ["\\x1b3", "\\x1b3"], // \x + 3+ hex → \x1b valid + literal 3 → untouched
+    ["\\x1后跟", "\\\\x1后跟"], // \x + 1 hex (truncated) → doubled
+    ["\\u12中文", "\\\\u12中文"], // \u + <4 hex → doubled
+    ["\\uFFFF", "\\uFFFF"], // \u + 4 hex → untouched
+    ["\\uFFFF1", "\\uFFFF1"], // \u + 5 hex → untouched
+    ["\\n字面", "\\n字面"], // non-hex escapes untouched
+    ["\\\\x", "\\\\x"], // already-doubled backslash untouched
+    [null, ""], // null → coerced
+    [undefined, ""], // undefined → coerced
+  ]
+  it("doubles invalid literal \\x/\\u, passes valid ones through", () => {
+    for (const [input, expected] of cases) {
+      assert.equal(escapeLiteralEscapes(input), expected, JSON.stringify(input))
+    }
+  })
+})
+
+describe("citations (CLI parity — host-verified evidence)", () => {
+  it("extractCitations pulls file:line: content references", () => {
+    const out = extractCitations("see run.mjs:12: import { chat }")
+    assert.equal(out.length, 1)
+    assert.equal(out[0].file, "run.mjs")
+    assert.equal(out[0].line, 12)
+  })
+  it("verifyCitations matches real file content, flags stale/missing citations", () => {
+    const res = verifyCitations("run.mjs:2: * advisor/run.mjs — advisor execution", "src/advisor")
+    assert.equal(res.total, 1)
+    assert.equal(res.matched.length, 1, "real line content matches")
+    const stale = verifyCitations("run.mjs:99999: this line does not exist anywhere in the file", "src/advisor")
+    assert.equal(stale.total, 1)
+    assert.equal(stale.matched.length, 0)
+    assert.equal(stale.failed.length, 1, "stale line flagged")
+  })
+  it("verifyCitations rejects path traversal (never reads outside cwd)", () => {
+    const res = verifyCitations("../../package.json:1: some content that is long enough", "src/advisor")
+    assert.equal(res.total, 1)
+    assert.equal(res.failed.length, 1)
+    assert.equal(res.failed[0].reason, "path traversal")
+  })
+  it("appendCitationReport appends N/M report only when citations exist", () => {
+    const withReport = appendCitationReport("x\nrun.mjs:2: * advisor/run.mjs — advisor execution", "src/advisor")
+    assert.ok(withReport.includes("[host-verified]"), "report appended")
+    const plain = appendCitationReport("no citations here", "src/advisor")
+    assert.equal(plain, "no citations here", "no citations → unchanged")
+  })
+})
+
+describe("prepareAdvisorMessages: fresh session every round (CLI parity — d698434)", () => {
+  it("ignores a stale _advisorSession — every call builds fresh [system, user]", () => {
+    const agent = {
+      history: [{ role: "tool", content: "| # | File | Severity | Issue | Suggestion |\n| 1 | a.mjs | 🔴 | bug | x |" }],
+      _advisorRound: 1,
+      _mutatedThisRun: true,
+      _advisorSession: [{ role: "system", content: "STALE_SESSION_MARKER" }, { role: "user", content: "STALE_SESSION_MARKER" }], // legacy field — must NOT be reused
+      config: { agent: {}, advisor: {} },
+      cwd: process.cwd(),
+    }
+    const messages = prepareAdvisorMessages(agent, "code", null, null, ["src/a.mjs"])
+    assert.equal(messages.length, 2, "fresh two-message session")
+    assert.ok(!JSON.stringify(messages).includes("STALE_SESSION_MARKER"), "stale session content never surfaces")
+    // Convergence follow-up messages START with "## Round N" — bracket reminders
+    // only appear mid-content (server-side '['-probing concerns only the LEADING char).
+    assert.ok(!messages[1].content.startsWith("["), "message does not START with a bracket")
+  })
+  it("no-prior round-1 user message starts with a PLAIN 'System reminder:' (not '[')", () => {
+    const agent = {
+      history: [],
+      _advisorRound: 0,
+      _mutatedThisRun: false,
+      config: { agent: {}, advisor: {} },
+      cwd: process.cwd(),
+    }
+    const messages = prepareAdvisorMessages(agent, "code", null, null, ["src/a.mjs"])
+    assert.ok(messages[1].content.startsWith("System reminder:"), messages[1].content.slice(0, 60))
   })
 })

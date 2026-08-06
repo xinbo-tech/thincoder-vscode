@@ -1,18 +1,55 @@
 /**
  * advisor/main.mjs — advisor system-prompt selection, follow-up building, session assembly.
  * VS Code port of thincoder CLI src/advisor.mjs (kept in sync with the CLI).
- * User-message building in advisor/messages.mjs; execution in advisor/run.mjs;
- * git discovery/collection in advisor/repos.mjs (design-review diffs only —
- * code-review follow-ups deliberately inject NO git information);
- * history extraction in advisor/history.mjs.
+ * User-message building lives in advisor/messages.mjs; execution (tool loop, provider
+ * resolution, review entry) in advisor/run.mjs; history extraction in advisor/history.mjs.
+ * repos.mjs still hosts the doc-file classifier (isDocFile) used by mutation tracking.
  *
- * Convergence protocol / session memory semantics — see the CLI file header.
+ * The advisor runs as a read-only exploration sub-agent with tools
+ * (read, glob, grep, ls, lsp, code_search) — ZERO git, every round. The change
+ * surface comes from the review scope (paths / _touchedFiles), never from git;
+ * verification is `read`-only with quoted-line evidence (7d49a52, d3be613).
+ *
+ * Config:
+ *   { advisor: { enabled: true, provider: "deepseek", model: "deepseek-chat" } }
+ *   provider + model are optional — defaults to the main agent's provider/model.
+ *
+ * Convergence protocol:
+ *   Round 1: full review → produces a numbered issue table.
+ *   Agent responds with a response table per issue (fix claims).
+ *   Round 2: semi-convergence — verifies the prior table + can flag obvious new issues.
+ *   Round 3+: strict convergence — only checks the prior issue table.
+ *   The prior issue table IS injected into rounds 2+ (decision 2026-08-05,
+ *   reversed) — it is the ONLY complete verification list: the agent response
+ *   table covers only issues the agent chose to answer, so skipped issues would
+ *   silently escape convergence without it. The fix-claim table travels as a
+ *   focus reference only. Restatement risk is handled mechanically:
+ *   host-verified citations reject references that do not match the current
+ *   disk state, and fresh sessions exclude old read data.
+ *   Each round replaces the system prompt (ROUND1 → ROUND2 → ROUND3) so the
+ *   round-1 full-scope mandate can't bleed into later rounds, plus a mechanical
+ *   cap (MAX_ADVISOR_ROUNDS in run.mjs) refuses a 6th review call outright.
+ *   Rounds 2+ also declare all earlier diffs STALE and require read-verified
+ *   file:line evidence for any unfixed/new finding — see docs/design/ADVISOR-CONVERGENCE.md.
+ *
+ * Session memory (agent._advisorSession):
+ *   RETAINED for initialization compatibility but NEVER read (decision d698434):
+ *   every review round builds a fresh [system, user] session — round 2+ must not
+ *   reuse round 1's messages, because the old read outputs are the anchoring
+ *   source of re-review false reports and a token sink. Convergence data (prior
+ *   issue table + agent response table) travels via buildAdvisorFollowUp.
+ *   The field is reset by runAgent; the write sites are harmless leftovers.
+ *
+ * Project customisation: .thincoder/advisor.md in the project root.
  */
 import { readFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { extractPriorIssueTable, extractAgentResponseTable } from "./history.mjs"
-import { buildAdvisorUserMessage } from "./messages.mjs"
+import { buildAdvisorUserMessage, buildConvergenceInstructions, resolveScopeFiles } from "./messages.mjs"
+// Re-export for run.mjs and tests (keeps their imports from "../advisor.mjs" stable)
+export { ADVISOR_MD_PATH, extractPriorIssueTable, extractAgentResponseTable, extractConversationBackground } from "./history.mjs"
+export { buildAdvisorUserMessage } from "./messages.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -20,27 +57,64 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // Prompt files — loaded at module init
 // ────────────────────────────────────────
 
-const ADVISOR_ROUND1 = readFileSync(join(__dirname, "..", "prompts", "advisor-round1.md"), "utf8")
-const ADVISOR_ROUND2 = readFileSync(join(__dirname, "..", "prompts", "advisor-round2.md"), "utf8")
-const ADVISOR_ROUND3 = readFileSync(join(__dirname, "..", "prompts", "advisor-round3.md"), "utf8")
+function loadPrompt(file, name) {
+  try {
+    return readFileSync(join(__dirname, "..", "prompts", file), "utf8")
+  } catch {
+    throw new Error(`${name} missing from the installation (prompts/${file}) — reinstall thincoder or restore the file`)
+  }
+}
+
+const ADVISOR_ROUND1 = loadPrompt("advisor-round1.md", "advisor-round1.md")
+// ROUND2/3 are used whenever a convergence round (round 2+) is being built:
+// in-run session continuation replaces the system prompt with them, and a
+// rebuilt fresh session (e.g. after a failed review) also selects them via
+// buildAdvisorSystemPrompt when _advisorRound > 0.
+const ADVISOR_ROUND2 = loadPrompt("advisor-round2.md", "advisor-round2.md")
+const ADVISOR_ROUND3 = loadPrompt("advisor-round3.md", "advisor-round3.md")
+// Fallback when advisor-design.md is missing — keep in sync with the real
+// file (table format + workflow steps; a drifted fallback would also break
+// extractPriorIssueTable's DESIGN_TABLE_HEADER matching).
+const ADVISOR_DESIGN_FALLBACK = `You are an independent design reviewer for an engineering-mode project. Review the design document in the changes below. Evaluate: completeness, feasibility, clarity, scope, acceptance criteria. Read METHODOLOGY.md if provided. Produce a review table with | # | Category | Severity | Issue | Suggestion | format.`
 let ADVISOR_DESIGN = ""
-try { ADVISOR_DESIGN = readFileSync(join(__dirname, "..", "prompts", "advisor-design.md"), "utf8") } catch { /* design review unavailable */ }
+// Design review is OPTIONAL (engineering mode only) — silent fallback to the
+// in-code constant is intentional, unlike the mandatory round prompts which
+// must exist for every review (loadPrompt throws a descriptive error there).
+try { ADVISOR_DESIGN = readFileSync(join(__dirname, "..", "prompts", "advisor-design.md"), "utf8") } catch { /* fallback below */ }
+
+// ────────────────────────────────────────
+// System prompt building
+// ────────────────────────────────────────
 
 /**
  * Build the system prompt for an advisor review session.
  * @param {Object} agent — the parent agent
- * @param {Object|null} [_prior] — prior issue table (from extractPriorIssueTable)
+ * @param {Object|null} [prior] — prior issue table (from extractPriorIssueTable)
  * @param {string} [reviewType] — "design" for design review, undefined/"code" for code review
+ * @returns {string} the system prompt
  */
-export function buildAdvisorSystemPrompt(agent, _prior, reviewType) {
-  // Design review: dedicated prompt, no convergence rounds
-  if (reviewType === "design") return ADVISOR_DESIGN || `You are an independent design reviewer for an engineering-mode project. Review the design document in the changes below. Evaluate: completeness, feasibility, clarity, scope, acceptance criteria. Read METHODOLOGY.md if provided. Produce a review table with | # | Category | Severity | Issue | Suggestion | format.`
-  const prior = _prior ?? extractPriorIssueTable(agent.history)
-  if (!prior || (agent._advisorRound || 0) === 0) return ADVISOR_ROUND1
+export function buildAdvisorSystemPrompt(agent, prior, reviewType) {
+  // Design review: round 1 uses the dedicated design-review prompt (full scope +
+  // approval token); rounds 2+ converge like code reviews (verify agent fix claims).
+  if (reviewType === "design") {
+    const p = prior ?? extractPriorIssueTable(agent.history)
+    if (!p || (agent._advisorRound || 0) === 0) {
+      return ADVISOR_DESIGN || ADVISOR_DESIGN_FALLBACK
+    }
+    const round = (agent._advisorRound || 0) + 1
+    if (round === 2) return ADVISOR_ROUND2
+    return ADVISOR_ROUND3
+  }
+  const p = prior ?? extractPriorIssueTable(agent.history)
+  if (!p || (agent._advisorRound || 0) === 0) return ADVISOR_ROUND1
   const round = (agent._advisorRound || 0) + 1
   if (round === 2) return ADVISOR_ROUND2
   return ADVISOR_ROUND3
 }
+
+// ────────────────────────────────────────
+// Follow-up building (round 2+)
+// ────────────────────────────────────────
 
 /**
  * Build a follow-up user message for round 2+ — the agent's response table +
@@ -48,87 +122,186 @@ export function buildAdvisorSystemPrompt(agent, _prior, reviewType) {
  * Deliberately NO git information injected (no diff snapshot, no git context):
  * git output misled re-reviews — committed fixes never show in `git diff HEAD`,
  * so the model read "no changes" as "no fixes". Verification is `read`-only.
+ * NOTE: the caller (prepareAdvisorMessages) applies escapeLiteralEscapes to
+ * the return value — direct callers must do the same (the prior table and
+ * agent response can quote literal "\x"/"\u" sequences).
+ * @param {Object} agent — the parent agent (history used for the response table)
+ * @param {Object|null} prior — prior issue table (extracted from history when null)
+ * @param {string[]|null} [scopeFiles] — review surface for the no-response fallback (cwd-relative)
+ * @returns {string} the follow-up user message — or a plain "System reminder: …"
+ *   fresh-review fallback (NO brackets — some OpenAI-compatible servers parse
+ *   '['-prefixed content as structured data / expand escapes) when no prior
+ *   review exists at all (caller misuse; the response-table extraction would
+ *   otherwise scan history from index 0 and could match an unrelated stale table)
  */
-export function buildAdvisorFollowUp(agent, _prior) {
-  const prior = _prior ?? extractPriorIssueTable(agent.history)
-  const response = extractAgentResponseTable(agent.history, prior?.sinceIdx ?? 0)
-    || "(Agent did not provide a response table — re-evaluate each issue)"
+export function buildAdvisorFollowUp(agent, prior, scopeFiles = null) {
+  // Convergence follow-up REQUIRES a prior review record. The caller usually
+  // passes it; fall back to extracting it from history (compat for direct
+  // callers/tests). If there is genuinely no prior review, a nullish table
+  // would make the response-table extraction scan from index 0 and possibly
+  // match an unrelated stale table — return a round-1-style message instead.
+  const p = prior ?? extractPriorIssueTable(agent.history)
+  if (!p) {
+    // Plain "System reminder:" prefix (no brackets) — same convention as the
+    // round-1 path (some OpenAI-compatible servers parse '['-prefixed content
+    // as structured data / expand escapes; see prepareAdvisorMessages).
+    return "System reminder: convergence follow-up requested without a prior review — perform a fresh full review."
+  }
+  // Convergence semantics require round >= 2 (round 1 is the full review, not
+  // verification). A direct caller with _advisorRound 0 would otherwise get a
+  // meaningless "Round 1 — Strict Verification".
+  if ((agent._advisorRound || 0) < 1) {
+    return "System reminder: convergence follow-up requested at round 1 — a full review is already in progress; no prior verification exists yet."
+  }
+  const noResponseFallback = scopeFiles?.length
+    ? "(Agent did not provide a response table — perform a fresh review of: " + scopeFiles.slice(0, 10).join(", ") + ")"
+    : "(Agent did not provide a response table — perform a fresh full review; the review surface is unknown, ask the user for the file list)"
+  const response = extractAgentResponseTable(agent.history, p.sinceIdx) || noResponseFallback
   const round = (agent._advisorRound || 0) + 1
   const label = round === 2 ? "Verify Prior Table + Flag New Issues" : "Strict Verification"
 
+  const reminder = round === 2
+    ? "verify every item in the prior issue table and flag only obvious new issues introduced by the fixes"
+    : "strictly verify only the prior issue table — do NOT look for new issues"
   const parts = [
     `## Round ${round} — ${label}`,
     "",
-    `[System reminder: this is round ${round} of the convergence protocol. The system prompt for this round has already narrowed the review scope — follow it: ${round === 2 ? "verify the prior table and flag only obvious new issues introduced by the fixes" : "strictly verify only the prior table — do NOT look for new issues"}.]`,
+    `[System reminder: this is round ${round} of the convergence protocol. ` +
+      `The system prompt for this round has already narrowed the review scope — follow it: ${reminder}.]`,
     "",
-    "## Prior Issue Table",
-    prior?.text ?? "(no prior table — review from scratch)",
+    // Prior issue table IS in the context (decision 2026-08-05, reversed):
+    // it is the ONLY complete verification list — the agent response table
+    // covers only issues the agent chose to answer, so issues the agent
+    // skipped would silently escape convergence. Restatement risk is handled
+    // mechanically: host-verified citations reject references that do not
+    // match the CURRENT disk state, and fresh sessions exclude old read data.
+    // The agent response table stays as a focus aid ("I fixed X"), not as the
+    // to-verify list.
+    "## Prior Issue Table (verify every item)",
+    p.text,
     "",
-    "## Agent Response",
+    "## Agent Response (fix claims — reference only)",
     response,
     "",
     "## Instructions",
-    round === 2
-      ? "Verify each item in the prior table. Flag any obvious NEW issues introduced by the fixes (crashes, data loss, logic errors — not style). Produce a verification table."
-      : "Strictly verify ONLY the items in the prior table against the CURRENT FILE STATE (use `read` — an empty diff does not mean the fixes are absent). Do NOT look for new issues.",
-    "",
-    "IMPORTANT: the prior issue table is HISTORY — always verify current file state with `read` before judging an item as fixed or unfixed.",
-    // Round-aware evidence rule: "New" entries only exist in round 2 (round 3+ forbids them).
-    `STALE-CONTEXT WARNING: only fresh \`read\` results describe the current state — never judge from earlier snapshots or from \`git diff\` (committed fixes never show in \`git diff HEAD\`). Read the files to verify. Any "Unfixed" entry${round === 2 ? ' (and any "New" entry)' : ""} MUST quote the exact line content from THIS round's \`read\` output (e.g. \`run.mjs:180: timeoutId = setTimeout(...)\`); line numbers alone are NOT evidence (they may come from the stale prior table). Uncited findings are unverified and will be ignored.`,
-    "",
-    "Do NOT re-read AGENTS.md / design docs. Verify fix status with `read` only — do not rely on git output: a clean working tree does not mean fixes are absent (they may be committed).",
+    ...buildConvergenceInstructions(round, scopeFiles),
     "",
   ]
   return parts.join("\n")
 }
 
 /**
- * Build or continue the advisor conversation for this run.
- * First call in a run: fresh [system, user] session. Later calls: append a
- * follow-up to the existing session so the advisor keeps its context.
- * @param {string[]|null} [paths] — code review only: explicit list of file/dir paths to review
+ * Resolve the review surface for the convergence fallback — moved to
+ * messages.mjs so the legacy path shares it (see there).
+ */
+
+/**
+ * Neutralize literal backslash escape sequences ("\x", "\u") that some
+ * OpenAI-compatible servers interpret inside message content ("unexpected end
+ * of hex escape" → 400 — observed 2026-08-06 when the conversation background
+ * quoted "\x" literals). Only sequences that would be INVALID when expanded
+ * are doubled ("\\x" → literal "\x" after server expansion); well-formed
+ * "\xNN" / "\uNNNN" pass through untouched (they expand to a byte/codepoint).
+ */
+export function escapeLiteralEscapes(text) {
+  // (?<!\\) — only a SINGLE backslash counts ("\\x" already doubles the
+  // escape and must pass through untouched); lookbehind is fine on Node 24.
+  // Known limitation (documented, accepted): an ODD backslash run of 3+ (e.g.
+  // "\\\x") leaves the trailing "\x" un-doubled — vanishingly rare in real
+  // conversation text, and the sequence is still valid JSON either way.
+  // The lookahead treats "\x" followed by AT LEAST 2 hex as valid (servers
+  // expand only the first two: "\x1b3" → ESC + "3"); only truncated runs
+  // ("\x" + <2 hex) are doubled.
+  text = String(text ?? "")
+  return text
+    .replace(/(?<!\\)\\(x)(?![0-9a-fA-F]{2})/g, "\\\\$1")
+    .replace(/(?<!\\)\\(u)(?![0-9a-fA-F]{4})/g, "\\\\$1")
+}
+
+
+/**
+ * Build the advisor conversation for this run.
+ * EVERY call builds a fresh [system, user] session (decision d698434) — no
+ * session reuse across rounds: round 1 = full scope (ROUND1 prompt), rounds
+ * 2+ = convergence (ROUND2/ROUND3 prompt + fix-claims follow-up).
+ * @param {Object} agent — the parent agent
  * @param {string} [reviewType] — "design" or "code" (default)
  * @param {string|null} [designToken] — design-review approval token (design only)
- * @param {string[]|null} [documents] — design review only: explicit list of doc paths to review
+ * @param {string[]|null} [documents] — design review only: explicit list of doc paths to review (passed through to buildAdvisorUserMessage)
+ * @param {string[]|null} [paths] — code review only: explicit list of file/dir paths to review
  */
 export function prepareAdvisorMessages(agent, reviewType, designToken = null, documents = null, paths = null) {
   const prior = extractPriorIssueTable(agent.history)
-  // Design review: always fresh session, no convergence
-  if (reviewType === "design") {
+
+  // Design review round 1: the dedicated full-scope review with the approval
+  // token (an independent gate — it runs even when a prior table exists, e.g.
+  // after a failed design review). Fresh session.
+  if (reviewType === "design" && (agent._advisorRound || 0) === 0) {
     return [
       { role: "system", content: buildAdvisorSystemPrompt(agent, prior, reviewType) },
-      { role: "user", content: buildAdvisorUserMessage(agent, prior, reviewType, designToken, documents, paths) },
+      { role: "user", content: escapeLiteralEscapes(buildAdvisorUserMessage(agent, prior, reviewType, designToken, documents, paths)) },
     ]
   }
-  let session = agent._advisorSession
-  if (session) {
-    // Session exists but no prior table (last review was all-clear or none) —
-    // a follow-up "Verify Prior Table" would be meaningless; start a fresh full review
-    if (!prior) {
-      agent._advisorSession = null
-      // Only reset the round counter on a truly fresh start (no prior reviews at all).
-      // If _advisorRound > 0, there WAS a prior review — it just passed (all-clear).
-      if (!agent._advisorRound) agent._advisorRound = 0
-    } else {
-      // Convergence rounds (2+): replace the system prompt so the round-1
-      // "full-scope review" mandate cannot override the follow-up's narrowed scope.
-      session[0] = { role: "system", content: buildAdvisorSystemPrompt(agent, prior, reviewType) }
-      session.push({ role: "user", content: buildAdvisorFollowUp(agent, prior) })
-      return session
+
+  // Every round is a FRESH session (decision d698434): round 2+ must NOT reuse
+  // round 1's messages — the old read outputs are the top anchoring source of
+  // re-review false reports (the model quoted pre-fix file content instead of
+  // re-reading) and a token sink. The agent response table (fix claims) is
+  // injected through buildAdvisorFollowUp instead; the system prompt carries
+  // the round (ROUND2/ROUND3) via buildAdvisorSystemPrompt.
+  // Guard matches buildAdvisorSystemPrompt's ROUND1 condition
+  // (`!prior || _advisorRound === 0`): a stale prior table with _advisorRound 0
+  // (history persists across runAgent calls) must yield a fresh round-1 review —
+  // ROUND1 system prompt + full-scope user message, never the convergence
+  // follow-up (which would contradict the ROUND1 system prompt). The
+  // _advisorRound===0 half was lost in the _mutatedThisRun refactor and is
+  // restored here (regression 67ac851 → 6e15a6b window).
+  // No prior table: reset ONLY when this run made no code changes (user
+  // decision 2026-08-05: any loop that modified code must NOT reset — the
+  // advisor guard WILL push back, so the convergence round must keep advancing
+  // toward the cap; a run with no mutations has no push-back risk and a reset
+  // is safe). Deterministic runtime state (`_mutatedThisRun`) decides — never
+  // model output (phrases/table headers drift; three rounds of false reports
+  // proved it). Either way the message is a fresh full review (no issue list
+  // exists without a prior table) — only the round counter differs.
+  if (!prior || (agent._advisorRound || 0) === 0) {
+    if (!(agent._mutatedThisRun ?? false)) {
+      // New review cycle (first review, all-clear, or no code changes): reset
+      // the round so the cycle gets its own 5-round budget.
+      agent._advisorRound = 0
     }
+    // Mutations exist → KEEP the round (cap keeps advancing through retries).
+    const user = buildAdvisorUserMessage(agent, prior, reviewType, designToken, documents, paths)
+    return [
+      { role: "system", content: buildAdvisorSystemPrompt(agent, prior, reviewType) },
+      {
+        role: "user",
+        // NOTE (2026-08-06): the leading prefix is a PLAIN "System reminder:",
+        // NOT "[System reminder: ...]" — some OpenAI-compatible servers try to
+        // parse content that STARTS with '[' as structured content (or expand
+        // escape sequences in it). A literal "\x" inside the conversation
+        // background (e.g. the parent agent quoting escape sequences) then
+        // fails server-side as "unexpected end of hex escape" → 400. Plain
+        // prefix keeps the review message a plain string everywhere.
+        // The whole content also passes through escapeLiteralEscapes (below)
+        // so literal "\x"/"\u" quoted by the parent agent can never form an
+        // invalid escape when the server expands them.
+        content: escapeLiteralEscapes(`System reminder: no prior issue table is being carried into this review (first review, app restart, or session clear) — start with a fresh full review.\n\n${user}`),
+      },
+    ]
   }
-  session = [
+
+  // Convergence rounds (2+): fresh [system(ROUND2/3), user(prior table + fix
+  // claims)]. buildAdvisorFollowUp carries BOTH the prior issue table (the
+  // only complete verification list — decision 2026-08-05, reversed) and the
+  // agent's fix-claim table (focus reference). buildAdvisorSystemPrompt
+  // selects ROUND2 for round 2, ROUND3 for rounds 3+ — a failed review retry
+  // keeps _advisorRound so the convergence prompt matches the attempt count.
+  // scopeFiles gives the fallback (agent gave no response table) a concrete
+  // review surface.
+  const scopeFiles = resolveScopeFiles(agent, paths)
+  return [
     { role: "system", content: buildAdvisorSystemPrompt(agent, prior, reviewType) },
-    { role: "user", content: buildAdvisorUserMessage(agent, prior, reviewType, designToken, documents, paths) },
+    { role: "user", content: escapeLiteralEscapes(buildAdvisorFollowUp(agent, prior, scopeFiles)) },
   ]
-  // Fresh session. Only reset round if this is truly the first review.
-  if (!agent._advisorRound) agent._advisorRound = 0
-  if (!prior) {
-    // Tell the advisor why no prior issue table is present
-    session[1] = {
-      role: "user",
-      content: `[System reminder: no prior issue table is being carried into this review (first review, app restart, or session clear) — start with a fresh full review.]\n\n${session[1].content}`,
-    }
-  }
-  return session
 }

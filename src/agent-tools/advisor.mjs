@@ -92,7 +92,9 @@ export const advisorTool = {
     const agent = ctx.agent
     const reviewType = args.type || "code"
     const documents = args.documents || null
-    const paths = args.paths || null
+    // Scope fallback: the runtime mutation record (zero git) covers guard-triggered
+    // reviews where the model did not pass explicit paths (CLI parity).
+    const paths = args.paths || (agent._touchedFiles?.length ? [...agent._touchedFiles] : null)
 
     // Code review must have a scope — no implicit fallback.
     if (reviewType !== "design" && !paths && !documents) {
@@ -110,17 +112,17 @@ export const advisorTool = {
       }
     }
 
-    // Design review: always starts from round 1 (no convergence)
-    if (reviewType === "design") {
-      agent._advisorRound = 0
-      agent._advisorSession = null
-    }
+    // Design review: NO round reset — design reviews share the 5-round convergence
+    // budget with code reviews (round advances in agent.mjs; cap in run.mjs).
+    // Session reset also removed: design rounds 2+ continue the convergence
+    // protocol like code reviews (CLI parity).
 
     // Generate the design token BEFORE the review and inject it into the advisor's prompt.
     const designToken = reviewType === "design" ? generateDesignToken() : null
-    // Progress lines stream into the webview tool panel (advisor.outputPanel semantics).
+    // Progress chunks ({kind, text}) stream into the webview tool panel —
+    // same emission contract as the CLI TUI (think / tool / text kinds).
     const result = await runAdvisorReview(agent, reviewType, {
-      onOutput: (text) => ctx.callbacks?.onToolPanel?.("advisor", text),
+      onOutput: (chunk) => ctx.callbacks?.onToolPanel?.("advisor", chunk),
       signal: ctx.signal,
     }, designToken, documents, paths)
 

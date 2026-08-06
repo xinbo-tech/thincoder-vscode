@@ -583,6 +583,12 @@
   overflow-y: auto;
 }
 
+/* Advisor progress kinds (CLI TUI parity): thinking / tool progress / text */
+.tool-panel-line { white-space: pre-wrap; }
+.tool-panel-think { color: var(--vscode-descriptionForeground, #9a9a9a); font-style: italic; }
+.tool-panel-tool { color: var(--vscode-charts-blue, #4a9eff); }
+.tool-panel-text { color: inherit; }
+
 /* ─── AUTO confirm popover ───────────────────── */
 
 .auto-backdrop {

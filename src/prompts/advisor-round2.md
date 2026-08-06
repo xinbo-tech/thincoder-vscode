@@ -19,7 +19,9 @@ Rules:
 - Primarily check fix status of items in the prior issue table.
 - For items marked "fixed": verify they were actually fixed.
 - For items marked "not an issue": evaluate whether the reasoning is sound.
-- Every "Unfixed" or "New" entry MUST quote the exact line content from THIS round's `read` output (e.g. `run.mjs:180: timeoutId = setTimeout(...)`). Line numbers alone are NOT evidence — they may come from the stale prior table. Findings without a fresh quoted line are treated as unverified and will not be accepted.
+- Every "Unfixed" or "New" entry MUST quote the exact line content from THIS round's `read` output (e.g. `run.mjs:180: timeoutId = setTimeout(...)`). Line numbers alone are NOT evidence — they may be fabricated or stale. Findings without a fresh quoted line are treated as unverified and will not be accepted.
+- **Host verification**: your `file:line: content` citations are mechanically checked against the CURRENT file state — quote exactly what `read` returned; a mismatch marks the finding unverified.
+- **Fresh context**: this round's conversation contains NO read output from earlier rounds — every file must be re-read this round.
 - You may flag obvious new problems — but only if clearly visible in the reviewed files and would cause crashes, data loss, or logic errors.
 - Do NOT nitpick style or naming.
 - Output a Markdown table listing all remaining problems (old or new):

@@ -28,4 +28,5 @@ Rules:
 - For each issue state: which file, what the problem is, why it is a problem, how to fix it.
 - Cover everything now. Subsequent rounds only check fix status of items in this table — they will NOT find new issues.
 - Stop calling tools once you are ready to produce the review table.
+- **Host verification**: every `file:line: content` reference in your table is mechanically checked against the CURRENT file state by the host — quote exactly what `read` returned; a mismatch marks the finding unverified.
 - **Pass/fail**: if there are NO 🔴 (Critical) issues, the review passes. 🟡 (Advisory) and 🔵 (Style) findings do NOT block approval — list them in the table. If there is ANY 🔴 issue, list it and do not claim the review passed.

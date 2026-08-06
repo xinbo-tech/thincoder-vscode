@@ -113,7 +113,14 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       },
       onToolCall: (n, a, id) => panel._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
       onToolResult: (n, r, id) => panel._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 2000), id }),
-      onToolPanel: (name, text) => panel._panel?.webview.postMessage({ type: "toolPanel", name, text }),
+      // Advisor/verbose-tool progress: {kind, text} chunks (CLI TUI parity) —
+      // the webview accumulates them per kind (think/tool/text) instead of
+      // overwriting the panel on every message.
+      onToolPanel: (name, chunk) => {
+        const kind = typeof chunk === "string" ? "text" : (chunk?.kind ?? "text")
+        const text = typeof chunk === "string" ? chunk : String(chunk?.text ?? "")
+        panel._panel?.webview.postMessage({ type: "toolPanel", name, kind, text })
+      },
       onComplete: (content, agentState) => {
         // runAgent already appended the real messages to both lines via pushReal; just persist them.
         // agentState carries the engineering/advisor bookkeeping (CLI session fields:

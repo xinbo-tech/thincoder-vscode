@@ -253,13 +253,19 @@ function renderToolPanels() {
   if (entries.length === 0) { panel.style.display = "none"; return }
   panel.innerHTML = entries.map(([name, data]) => {
     const age = data.started ? Math.round((Date.now() - data.started) / 1000) + "s ago" : ""
+    // Ordered per-kind lines (think/tool/text) — accumulated, not overwritten
+    // (CLI TUI parity: the emission order and kind styling survive).
+    const blocks = data.blocks ?? [{ kind: "text", text: data.text ?? "" }]
+    const body = blocks.slice(-10)
+      .map((b) => `<div class="tool-panel-line tool-panel-${escHtml(b.kind || "text")}">${escHtml(String(b.text || "").slice(-2000))}</div>`)
+      .join("")
     return `<div class="tool-panel-item">
       <div class="tool-panel-header">
         <span class="tool-panel-name">${escHtml(name)}</span>
         <span class="tool-panel-age">${age}</span>
         <button class="tool-panel-close" data-name="${escHtml(name)}" aria-label="Close tool panel">✕</button>
       </div>
-      <pre class="tool-panel-body">${escHtml(data.text.slice(-4000))}</pre>
+      <div class="tool-panel-body">${body}</div>
     </div>`
   }).join("")
   panel.style.display = "block"
@@ -769,12 +775,28 @@ window.addEventListener("message", (e) => {
       renderGoalPanel()
       renderStatusBar()
       break
-    case "toolPanel":
-      _toolPanels[m.name] = { text: m.text, started: Date.now() }
+    case "toolPanel": {
+      // Accumulate per-kind blocks (think/tool/text) instead of overwriting —
+      // same emission contract as the CLI TUI. Same-kind chunks merge; hard
+      // cap per block so a runaway stream cannot balloon the panel.
+      const panel = _toolPanels[m.name] ?? { blocks: [], started: Date.now() }
+      const kind = m.kind ?? "text"
+      const text = String(m.text ?? "")
+      if (text) {
+        const last = panel.blocks[panel.blocks.length - 1]
+        if (last && last.kind === kind) {
+          last.text += text
+          if (last.text.length > 20000) last.text = last.text.slice(-20000)
+        } else {
+          panel.blocks.push({ kind, text })
+        }
+        _toolPanels[m.name] = panel
+      }
       renderToolPanels()
       // Auto-clean after 10s
       setTimeout(() => { if (_toolPanels[m.name]) { delete _toolPanels[m.name]; renderToolPanels() } }, 10000)
       break
+    }
   }
 })
 
