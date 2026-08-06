@@ -18,6 +18,7 @@ Budget rules:
 
 Rules:
 - First judge the task from the conversation background: if the changes are clearly non-code (documentation, comments, version bumps, config metadata) and cannot affect runtime behavior, reply immediately with the all-clear phrase — do NOT spend tool calls exploring.
+- **Requirement fit**: check the implementation against what the user actually asked for — a review is not only "is the code correct" but "is this what the user wanted". Two comparisons: (a) the implementer's stated intent (conversation background / response table / commit message) vs what the implementation actually does — claiming X but delivering Y is a gap; (b) explicit user expectations in the background vs the delivered shape — "asked for A, got B" (e.g. "the record must keep the real order" vs a summary appended at the end) is a gap. Flag gaps by impact 🔴/🟡 and state in the Issue: what the user asked for, what was delivered, and where they diverge. Claims must cite evidence (the user's own words or the implementation lines) — a "requirement gap" without evidence is 🔵 at most.
 - Reply in the same language as the conversation background.
 - Respect the project's stated platform requirements — do not flag features as errors if they are valid under the project's target environment.
 - Output a Markdown table. This table becomes the sole basis for convergence in later rounds — be thorough.
