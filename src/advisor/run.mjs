@@ -102,7 +102,7 @@ export { advisorToolsFor as _advisorToolsFor }
 /** Compact one-line summary of tool args for panel progress lines.
  *  Picks the most identifying field; falls back to truncated JSON. */
 function summarizeToolArgs(args) {
-  // e.g. "git diff HEAD", "read src/x.mjs" — action first when present
+  // e.g. "read src/x.mjs", "grep foo src/", "ls docs" — action first when present
   const parts = [args.action, args.path ?? args.pattern ?? args.command].filter((v) => v != null)
   let s = parts.length > 0 ? parts.map(String).join(" ") : JSON.stringify(args)
   s = s.replace(/\s+/g, " ").trim()
@@ -327,7 +327,6 @@ export function resolveAdvisorProvider(agent) {
   if (cfg?.reasoningEffort !== undefined) provider.reasoningEffort = cfg.reasoningEffort
   return provider
 }
-
 
 /**
  * Extract unfixed issues from prior review text (for the cap message).
