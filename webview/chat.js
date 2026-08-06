@@ -261,8 +261,14 @@ function renderToolPanels() {
         const kind = b.kind || "text"
         // text-kind blocks (final review prose) get the same markdown rendering
         // as the main conversation — **bold**, `code`, tables read naturally
-        // instead of raw markers (CLI TUI parity).
-        const rendered = kind === "text" ? md(String(b.text || "").slice(-2000)) : escHtml(String(b.text || "").slice(-2000))
+        // instead of raw markers (CLI TUI parity). md() failure on pathological
+        // input must not blank the whole panel — escHtml fallback.
+        let rendered
+        if (kind === "text") {
+          try { rendered = md(String(b.text || "").slice(-2000)) } catch { rendered = escHtml(String(b.text || "").slice(-2000)) }
+        } else {
+          rendered = escHtml(String(b.text || "").slice(-2000))
+        }
         return `<div class="tool-panel-line tool-panel-${escHtml(kind)}">${rendered}</div>`
       })
       .join("")
@@ -800,8 +806,8 @@ window.addEventListener("message", (e) => {
         _toolPanels[m.name] = panel
       }
       renderToolPanels()
-      // Auto-clean after 10s
-      setTimeout(() => { if (_toolPanels[m.name]) { delete _toolPanels[m.name]; renderToolPanels() } }, 10000)
+      // Cleanup is handled by the autoCleanPanels interval (10s threshold) —
+      // a per-message setTimeout would stack one timer per streamed chunk.
       break
     }
   }

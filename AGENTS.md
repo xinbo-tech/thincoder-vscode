@@ -89,5 +89,5 @@ webview/index.html   Webview shell (referenced by ChatPanel._html())
 ## Testing
 
 - **Smoke test**: `node test/smoke-provider.mjs <provider> <api-key>` — directly tests an API provider (single turn, no tools).
-- No test suite yet (planned). Manual test: open a workspace, configure a provider, send a message, verify tool execution and response streaming.
+- **Unit tests**: `npm test` (`node --test` on unit/dual-history/tools/config-io/settings-panel/advisor/execute/provider-panel/proxy) — 266 tests covering the agent loop, dual-line history, tool routing, config, advisor convergence protocol (fresh sessions, citations verification, escapeLiteralEscapes), and provider panels.
 - After modifying agent loop or tools: test with a simple file operation (read + write) and a multi-turn conversation.
