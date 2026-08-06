@@ -402,16 +402,23 @@ describe("prepareAdvisorMessages: fresh session every round (CLI parity — d698
 })
 
 
-describe("_withToolLog (CLI parity — tool calls in the persisted review record)", () => {
-  it("appends the tool-call log after the review text", async () => {
-    const { _withToolLog } = await import("../src/advisor/run.mjs")
-    assert.equal(_withToolLog("review text", []), "review text", "no calls → unchanged")
-    const out = _withToolLog("review text", [
-      { name: "read", args: "src/a.mjs" },
-      { name: "grep", args: "foo src" },
-    ])
-    assert.ok(out.includes("[advisor tools: 2 calls]"), "call count in the log")
-    assert.ok(out.includes("→ read src/a.mjs"), "each call listed")
-    assert.ok(out.indexOf("review text") < out.indexOf("[advisor tools"), "log appended AFTER the review text")
+describe("_renderTimeline (CLI parity — review process at its real positions)", () => {
+  it("interleaves thinking/tool/final in emission order", async () => {
+    const { _renderTimeline } = await import("../src/advisor/run.mjs")
+    assert.equal(_renderTimeline([]), "", "empty timeline")
+    assert.equal(_renderTimeline([], "tail only"), "tail only", "tail alone when timeline empty")
+    const timeline = [
+      { kind: "think", text: "先读文件" },
+      { kind: "tool", text: "\n→ read src/a.mjs\n" },
+      { kind: "think", text: "看到问题了" },
+      { kind: "text", text: "\n| # | 问题 |\n| 1 | x |" },
+    ]
+    const out = _renderTimeline(timeline)
+    assert.ok(out.includes("→ read src/a.mjs"), "tool call present")
+    assert.ok(out.indexOf("先读文件") < out.indexOf("→ read src/a.mjs"), "think before its tool call")
+    assert.ok(out.indexOf("→ read src/a.mjs") < out.indexOf("看到问题了"), "tool call before the next think")
+    assert.ok(out.indexOf("看到问题了") < out.indexOf("| 1 | x |"), "final text last")
+    const withPlaceholder = _renderTimeline([{ kind: "think", text: "a\n[thinking…]\nb" }])
+    assert.ok(!withPlaceholder.includes("[thinking…]"), "placeholder stripped")
   })
 })

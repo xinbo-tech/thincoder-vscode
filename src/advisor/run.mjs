@@ -110,19 +110,21 @@ function summarizeToolArgs(args) {
 }
 
 /**
- * Append the tool-call log to a review result. The persisted session record
- * (human-readable line) otherwise shows only the final review text with no
- * trace of which files the reviewer explored — a user-visible gap ("the
- * advisor record has no tool calls"). One short line per call, appended AFTER
- * the review text, so prior-table extraction (line-start headers) is
- * unaffected.
+ * Render the ordered review timeline — thinking / tool progress / final text
+ * interleaved EXACTLY as emitted, so the persisted record shows the review
+ * process at its real positions. A summary appended at the end would lose the
+ * order (the user-visible "no tool calls in the advisor record" gap). The
+ * live "[thinking…]" placeholder is stripped (wait indicator, not content).
  */
-function withToolLog(result, toolCalls) {
-  if (toolCalls.length === 0) return result
-  return `${result}\n\n---\n[advisor tools: ${toolCalls.length} calls]\n${toolCalls.map((t) => `→ ${t.name} ${t.args}`).join("\n")}`
+function renderTimeline(timeline, tail = "") {
+  const body = timeline
+    .map((b) => b.text.replaceAll(ADVISOR_THINKING_PLACEHOLDER, "").trim())
+    .filter(Boolean)
+    .join("\n\n")
+  return [body, tail].filter(Boolean).join("\n\n")
 }
-// Test seam (mirrors the CLI's _withToolLog).
-export { withToolLog as _withToolLog }
+// Test seam (mirrors the CLI's _renderTimeline).
+export { renderTimeline as _renderTimeline }
 
 /**
  * Run the advisor's tool loop: chat → execute tools → repeat.
@@ -134,39 +136,46 @@ export { withToolLog as _withToolLog }
  */
 async function runAdvisorToolLoop(provider, messages, onOutput, signal, agent, cwd) {
   // Kind-tagged wrappers: the TUI panel colors reasoning / answer / tool progress differently.
-  const emit = (kind) => (onOutput ? (text) => onOutput({ kind, text }) : undefined)
+  // Every chunk is ALSO recorded into an ordered timeline — the persisted record
+  // must show the review process (thinking ↔ tool progress ↔ final text) at its
+  // real positions, not a summary appended at the end. Same-kind consecutive
+  // chunks merge (token streams); kind flips start a new entry.
+  const timeline = []
+  const record = (kind, text) => {
+    const last = timeline.at(-1)
+    if (last && last.kind === kind) last.text += text
+    else timeline.push({ kind, text })
+  }
+  const emit = (kind) => (text) => { record(kind, text); onOutput?.({ kind, text }) }
   const onThink = emit("think")
   const onText = emit("text")
+  const onTool = emit("tool")
   const { schemas: toolSchemas, byName: toolByName } = advisorToolsFor(agent)
-  // Tool-call log: the persisted session record (human-readable line) would
-  // otherwise show only the final review text with no trace of what the
-  // reviewer explored — appended to every result below (user-visible gap).
-  const toolCalls = []
   let turns = 0
   const startTime = Date.now()
   
   while (true) {
     // Interrupted (Ctrl+I) — stop immediately instead of spinning a fresh uncancellable signal
-    if (signal?.aborted) return withToolLog("Advisor: interrupted.", toolCalls)
+    if (signal?.aborted) return renderTimeline(timeline, "Advisor: interrupted.")
     
     // Check review timeout (5 minutes)
     if (Date.now() - startTime > REVIEW_TIMEOUT_MS) {
-      return withToolLog(`Advisor: review timeout after ${Math.round(REVIEW_TIMEOUT_MS / 1000)}s. Partial results may be available. Try again with a narrower scope.`, toolCalls)
+      return renderTimeline(timeline, `Advisor: review timeout after ${Math.round(REVIEW_TIMEOUT_MS / 1000)}s. Partial results may be available. Try again with a narrower scope.`)
     }
     
     if (++turns > MAX_ADVISOR_TURNS) {
-      return withToolLog("Advisor: stopped after " + MAX_ADVISOR_TURNS + " tool rounds — the review appears to be looping. You may retry with a narrower scope.", toolCalls)
+      return renderTimeline(timeline, "Advisor: stopped after " + MAX_ADVISOR_TURNS + " tool rounds — the review appears to be looping. You may retry with a narrower scope.")
     }
     
     // Check context window and compact if needed
     const currentTokens = estimateTokens(messages)
     if (currentTokens > MAX_CONTEXT_TOKENS * 0.8) {
-      onOutput?.({ kind: "text", text: `\n[Context compacted: ${currentTokens} tokens → reducing to fit window]\n` })
+      onText(`\n[Context compacted: ${currentTokens} tokens → reducing to fit window]\n`)
       compactMessages(messages)
       if (estimateTokens(messages) > MAX_CONTEXT_TOKENS) {
         // Report the POST-compaction count — the pre-compaction currentTokens
         // is stale by the time compaction has run.
-        return withToolLog(`Advisor: context window limit reached (${estimateTokens(messages)} tokens). Review incomplete — too many tool calls. Try a narrower scope.`, toolCalls)
+        return renderTimeline(timeline, `Advisor: context window limit reached (${estimateTokens(messages)} tokens). Review incomplete — too many tool calls. Try a narrower scope.`)
       }
     }
     
@@ -194,8 +203,8 @@ async function runAdvisorToolLoop(provider, messages, onOutput, signal, agent, c
 
     // No tool calls — this is the final review text
     if (!response.toolCalls?.length) {
-      if (!response.content?.trim()) return withToolLog("Advisor: (empty response — review was inconclusive)", toolCalls)
-      return withToolLog(response.content.trim(), toolCalls)
+      if (!response.content?.trim()) return renderTimeline(timeline) || "Advisor: (empty response — review was inconclusive)"
+      return renderTimeline(timeline) || response.content.trim()
     }
 
     // Push assistant message with tool calls. reasoning_content ECHO is
@@ -233,8 +242,7 @@ async function runAdvisorToolLoop(provider, messages, onOutput, signal, agent, c
         continue
       }
       
-      onOutput?.({ kind: "tool", text: `\n→ ${tc.name} ${summarizeToolArgs(args)}\n` })
-      toolCalls.push({ name: tc.name, args: summarizeToolArgs(args) })
+      onTool(`\n→ ${tc.name} ${summarizeToolArgs(args)}\n`)
       let result
       if (!tool) {
         result = `Error: unknown tool "${tc.name}". Available: ${[...toolByName.keys()].join(", ")}`
