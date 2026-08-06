@@ -97,7 +97,10 @@ const { openSettings, closeSettings, renderMcpList, updateProviderStatus, update
 // ─── Session bar ───────────────────────────────
 
 // Auto-clean panel entries (done subagents after 3s, tool panels after 10s)
-setInterval(autoCleanPanels, 2000)
+// Panel cleanup interval. The webview has no teardown path today (it lives for
+// the panel's lifetime and dies with it), but the ID is captured so a future
+// dispose/visibility-hidden handler can clear it.
+const _panelTimer = setInterval(autoCleanPanels, 2000)
 
 // ─── Historical message edit / delete (delegated — buttons carry data-idx) ──
 
@@ -114,11 +117,6 @@ ctx.messagesEl.addEventListener("click", (e) => {
     if (ok) vscode.postMessage({ type: "deleteMessage", idx })
   }
 })
-
-
-// ─── Permission bar ──────────────────────────────
-
-
 
 document.getElementById("new-session-btn").addEventListener("click", () => vscode.postMessage({ type: "newSession" }))
 
@@ -265,9 +263,9 @@ function renderToolPanels() {
         // input must not blank the whole panel — escHtml fallback.
         let rendered
         if (kind === "text") {
-          try { rendered = md(String(b.text || "").slice(-2000)) } catch { rendered = escHtml(String(b.text || "").slice(-2000)) }
+          try { rendered = md(tailTruncate(b.text)) } catch { rendered = escHtml(tailTruncate(b.text)) }
         } else {
-          rendered = escHtml(String(b.text || "").slice(-2000))
+          rendered = escHtml(tailTruncate(b.text))
         }
         return `<div class="tool-panel-line tool-panel-${escHtml(kind)}">${rendered}</div>`
       })
@@ -289,6 +287,17 @@ function renderToolPanels() {
       renderToolPanels()
     })
   })
+}
+
+/** Truncate to the last ~max chars, snapped forward to a line boundary so
+ *  markdown constructs (code fences, tables, bold spans) are never cut
+ *  mid-syntax by the panel preview. */
+function tailTruncate(text, max = 2000) {
+  const t = String(text || "")
+  if (t.length <= max) return t
+  const start = t.length - max
+  const snap = t.indexOf("\n", start)
+  return snap >= 0 ? t.slice(snap + 1) : t.slice(start)
 }
 
 function clearPanels() {
@@ -803,6 +812,7 @@ window.addEventListener("message", (e) => {
         } else {
           panel.blocks.push({ kind, text })
         }
+        panel.started = Date.now() // refresh activity — long streams must not be reaped mid-stream
         _toolPanels[m.name] = panel
       }
       renderToolPanels()
@@ -919,8 +929,12 @@ function finish(aborted) {
       ctx.currentBubble.className = "bubble content"
       ctx.currentBlock.appendChild(ctx.currentBubble)
     }
-    ctx.currentRaw += `\n\n<span style="color:var(--vscode-editorWarning-foreground, #cca700);font-style:italic">${t("status.stopped")}</span>`
-    ctx.currentBubble.innerHTML = md(ctx.currentRaw)
+      ctx.currentRaw += "\n\n"
+      // Append the "[stopped]" indicator AFTER markdown rendering — raw HTML
+      // inside ctx.currentRaw would break if md() ever starts escaping HTML
+      // (security hardening) or if the i18n string contains < > &.
+      const indicator = `<span style="color:var(--vscode-editorWarning-foreground, #cca700);font-style:italic">${escHtml(t("status.stopped"))}</span>`
+      ctx.currentBubble.innerHTML = md(ctx.currentRaw) + indicator
   }
   if (ctx.currentBubble) attachCopyButtons(ctx.currentBubble)
   ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
