@@ -51,6 +51,9 @@ let _planActive = false
 let _subagentMap = {}
 let _goalInfo = null
 let _toolPanels = {}
+// Panel preview caps (named — used by tailTruncate and the block accumulator)
+const PANEL_PREVIEW_CHARS = 2000
+const PANEL_BLOCK_MAX = 20000
 let _currentTool = null  // name of the tool currently executing (CLI status parity)
 let _llmCalls = 0        // LLM calls this turn (CLI turn-count parity)
 let _turnStart = null    // ms timestamp of the current turn (elapsed parity)
@@ -101,6 +104,9 @@ const { openSettings, closeSettings, renderMcpList, updateProviderStatus, update
 // the panel's lifetime and dies with it), but the ID is captured so a future
 // dispose/visibility-hidden handler can clear it.
 const _panelTimer = setInterval(autoCleanPanels, 2000)
+// Webview lifetime == panel lifetime, but clear on unload so a future
+// teardown/dispose path cannot leak the interval.
+window.addEventListener("unload", () => clearInterval(_panelTimer))
 
 // ─── Historical message edit / delete (delegated — buttons carry data-idx) ──
 
@@ -185,7 +191,11 @@ function fmtDate(ts) {
     " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
 }
 
-function fmtK(n) { return n >= 10000 ? Math.round(n / 1000) + "k" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n) }
+function fmtK(n) {
+  if (n >= 10000) return Math.round(n / 1000) + "k"
+  if (n >= 1000) return (n / 1000).toFixed(1) + "k"
+  return String(n)
+}
 
 function renderTaskPanel() {
   const panel = document.getElementById("task-panel")
@@ -292,7 +302,7 @@ function renderToolPanels() {
 /** Truncate to the last ~max chars, snapped forward to a line boundary so
  *  markdown constructs (code fences, tables, bold spans) are never cut
  *  mid-syntax by the panel preview. */
-function tailTruncate(text, max = 2000) {
+function tailTruncate(text, max = PANEL_PREVIEW_CHARS) {
   const t = String(text || "")
   if (t.length <= max) return t
   const start = t.length - max
@@ -319,9 +329,10 @@ function autoCleanPanels() {
     if (s.status === "done" && s.doneAt && now - s.doneAt > 3000) delete _subagentMap[id]
     if (s.status === "error" && s.doneAt && now - s.doneAt > 5000) delete _subagentMap[id]
   }
-  // Remove tool panels older than 10s
+  // Remove tool panels idle >10s — an actively running tool's panel survives
+  // (slow bash/reads must not lose accumulated output).
   for (const [name, d] of Object.entries(_toolPanels)) {
-    if (d.started && now - d.started > 10000) delete _toolPanels[name]
+    if (d.started && now - d.started > 10000 && name !== _currentTool) delete _toolPanels[name]
   }
   renderSubagentPanel()
   renderToolPanels()
@@ -352,14 +363,16 @@ function renderStatusBar(m) {
   if (subCount > 0) parts.push(`<span id="sub-badge" role="button" tabindex="0" aria-label="${subCount} subagents" style="cursor:pointer">sub:${subCount}</span>`)
   if (_taskStatus) parts.push(`<span id="task-badge" role="button" tabindex="0" aria-label="Task progress" style="cursor:pointer">${_taskStatus}</span>`)
   document.getElementById("status-line").innerHTML = parts.join(` <span class="status-sep">|</span> `)
-  // Wire click handlers for all three badges
+  // Wire click handlers for all three badges — `onclick` (not addEventListener):
+  // the status line is rebuilt by innerHTML on every render, so old elements
+  // (and their listeners) are discarded; onclick overwrites rather than stacks.
   const wire = (id, panelId) => {
     const el = document.getElementById(id)
-    if (el) el.addEventListener("click", (e) => {
+    if (el) el.onclick = (e) => {
       e.stopPropagation()
       const p = document.getElementById(panelId)
       p.style.display = p.style.display === "none" ? "block" : "none"
-    })
+    }
   }
   wire("task-badge", "task-panel")
   wire("sub-badge", "subagent-panel")
@@ -387,6 +400,8 @@ autoBtn.addEventListener("click", () => {
 function showAutoConfirm() {
   const existing = document.querySelector(".auto-confirm")
   if (existing) existing.remove()
+  // A stale backdrop from a previous invocation would block clicks on the UI.
+  document.querySelector(".auto-backdrop")?.remove()
 
   const backdrop = document.createElement("div")
   backdrop.className = "auto-backdrop"
@@ -808,7 +823,7 @@ window.addEventListener("message", (e) => {
         const last = panel.blocks[panel.blocks.length - 1]
         if (last && last.kind === kind) {
           last.text += text
-          if (last.text.length > 20000) last.text = last.text.slice(-20000)
+          if (last.text.length > PANEL_BLOCK_MAX) last.text = last.text.slice(-PANEL_BLOCK_MAX)
         } else {
           panel.blocks.push({ kind, text })
         }
@@ -915,7 +930,9 @@ function onToken(text) {
     ctx.currentRaw = ""
   }
   ctx.currentRaw += text
-  ctx.currentBubble.innerHTML = md(ctx.currentRaw)
+  // md() failure on pathological input must not break all subsequent token
+  // rendering for the rest of the turn — plain-text fallback.
+  try { ctx.currentBubble.innerHTML = md(ctx.currentRaw) } catch { ctx.currentBubble.textContent = ctx.currentRaw }
   scrollDown(ctx)
 }
 
@@ -934,7 +951,7 @@ function finish(aborted) {
       // inside ctx.currentRaw would break if md() ever starts escaping HTML
       // (security hardening) or if the i18n string contains < > &.
       const indicator = `<span style="color:var(--vscode-editorWarning-foreground, #cca700);font-style:italic">${escHtml(t("status.stopped"))}</span>`
-      ctx.currentBubble.innerHTML = md(ctx.currentRaw) + indicator
+      try { ctx.currentBubble.innerHTML = md(ctx.currentRaw) + indicator } catch { ctx.currentBubble.textContent = ctx.currentRaw + " " + t("status.stopped") }
   }
   if (ctx.currentBubble) attachCopyButtons(ctx.currentBubble)
   ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
@@ -947,7 +964,8 @@ function finish(aborted) {
 
 /** Attach copy buttons to all code blocks in a container */
 function attachCopyButtons(container) {
-  const blocks = container.querySelectorAll?.(".code-block") || []
+  if (!container) return
+  const blocks = container.querySelectorAll(".code-block")
   for (const block of blocks) {
     if (block.querySelector(".code-copy-btn")) continue // already has one
     const btn = document.createElement("button")
