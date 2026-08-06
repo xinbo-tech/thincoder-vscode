@@ -400,3 +400,18 @@ describe("prepareAdvisorMessages: fresh session every round (CLI parity — d698
     assert.ok(messages[1].content.startsWith("System reminder:"), messages[1].content.slice(0, 60))
   })
 })
+
+
+describe("_withToolLog (CLI parity — tool calls in the persisted review record)", () => {
+  it("appends the tool-call log after the review text", async () => {
+    const { _withToolLog } = await import("../src/advisor/run.mjs")
+    assert.equal(_withToolLog("review text", []), "review text", "no calls → unchanged")
+    const out = _withToolLog("review text", [
+      { name: "read", args: "src/a.mjs" },
+      { name: "grep", args: "foo src" },
+    ])
+    assert.ok(out.includes("[advisor tools: 2 calls]"), "call count in the log")
+    assert.ok(out.includes("→ read src/a.mjs"), "each call listed")
+    assert.ok(out.indexOf("review text") < out.indexOf("[advisor tools"), "log appended AFTER the review text")
+  })
+})
