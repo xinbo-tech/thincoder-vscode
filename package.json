@@ -5,19 +5,34 @@
   "description": "ThinCoder AI coding assistant — prompts-driven, zero bloat",
   "publisher": "thincoder",
   "license": "MIT",
+  "icon": "assets/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://gitee.com/shanghai-xinbo/thincoder.git"
+    "url": "https://gitee.com/shanghai-xinbo/thincoder-vscode.git"
   },
+  "homepage": "https://gitee.com/shanghai-xinbo/thincoder-vscode",
+  "bugs": {
+    "url": "https://gitee.com/shanghai-xinbo/thincoder-vscode/issues"
+  },
+  "categories": [
+    "Machine Learning",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "coding agent",
+    "assistant",
+    "chat",
+    "agent"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
   "type": "module",
   "main": "./extension.mjs",
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:thincoder.openChat",
-    "onCommand:thincoder.sendMessage"
+    "onStartupFinished"
   ],
   "contributes": {
     "viewsContainers": {
@@ -98,12 +113,15 @@
     }
   },
   "scripts": {
-    "package": "npx @vscode/vsce package",
+    "vscode:prepublish": "npm run lint",
+    "package": "vsce package",
     "test": "node --test test/unit.test.mjs test/dual-history.test.mjs test/tools.test.mjs test/config-io.test.mjs test/settings-panel.test.mjs test/advisor.test.mjs test/execute.test.mjs test/provider-panel.test.mjs test/proxy.test.mjs",
     "lint": "eslint ."
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.8.0"
+    "@vscode/vsce": "^3.4.0",
+    "eslint": "^10.8.0",
+    "vscode": "file:test/vscode-mock"
   }
 }

@@ -2,3 +2,13 @@
 .vscode-test/**
 node_modules/**
 .gitignore
+.git/**
+test/**
+docs/**
+.cursor/**
+.github/**
+.thincoder/**
+*.vsix
+AGENTS.md
+eslint.config.mjs
+package-lock.json

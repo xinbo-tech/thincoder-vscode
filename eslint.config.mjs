@@ -13,6 +13,7 @@ export default [
         fetch: "readonly", AbortSignal: "readonly", AbortController: "readonly",
         DOMException: "readonly", FormData: "readonly", URLSearchParams: "readonly",
         setTimeout: "readonly", clearTimeout: "readonly", setInterval: "readonly",
+        clearInterval: "readonly", // webview/chat.js timer cleanup (browser runtime)<｜end▁of▁thinking｜>
         // Node.js
         process: "readonly", console: "readonly", Buffer: "readonly",
         TextDecoder: "readonly", TextEncoder: "readonly", URL: "readonly",

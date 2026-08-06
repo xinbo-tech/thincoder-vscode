@@ -58,6 +58,8 @@ export async function activate(context) {
       vscode.commands.executeCommand("workbench.view.extension.thincoder")
       _panel.sendMessage(selection)
     }),
+    // Internal-only: invoked from the settings webview (build index button); intentionally
+    // not in contributes.commands — not a user-facing command-palette entry.
     vscode.commands.registerCommand("thincoder.buildIndex", () => _panel._buildIndex()),
   )
 }
