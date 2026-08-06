@@ -257,7 +257,14 @@ function renderToolPanels() {
     // (CLI TUI parity: the emission order and kind styling survive).
     const blocks = data.blocks ?? [{ kind: "text", text: data.text ?? "" }]
     const body = blocks.slice(-10)
-      .map((b) => `<div class="tool-panel-line tool-panel-${escHtml(b.kind || "text")}">${escHtml(String(b.text || "").slice(-2000))}</div>`)
+      .map((b) => {
+        const kind = b.kind || "text"
+        // text-kind blocks (final review prose) get the same markdown rendering
+        // as the main conversation — **bold**, `code`, tables read naturally
+        // instead of raw markers (CLI TUI parity).
+        const rendered = kind === "text" ? md(String(b.text || "").slice(-2000)) : escHtml(String(b.text || "").slice(-2000))
+        return `<div class="tool-panel-line tool-panel-${escHtml(kind)}">${rendered}</div>`
+      })
       .join("")
     return `<div class="tool-panel-item">
       <div class="tool-panel-header">

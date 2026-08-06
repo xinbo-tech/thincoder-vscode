@@ -403,8 +403,9 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           }
         }
 
-        // Advisor guard (CLI completion.mjs parity): OPT-IN via advisor.enabled + guard!==false,
-        // NEVER in engineering mode (engineering has its own mandatory gates).
+        // Advisor guard (CLI completion.mjs parity): active by default when
+        // advisor.enabled is set (opt-out via guard: false), NEVER in
+        // engineering mode (engineering has its own mandatory gates).
         // Cap sync (CLI b74e413): beyond MAX_ADVISOR_ROUNDS the advisor tool
         // refuses reviews (run.mjs convergence cap) — pushing back further
         // would loop forever (fix → pushback → cap-refused call → fix …).

@@ -87,7 +87,7 @@ export const advisorTool = {
   },
   readonly: true,
   sideEffectExempt: true,
-  outputPanel: true,
+  outputPanel: true, // CLI tool-def parity (the CLI TUI reads this for panel layout); VS Code webview panel is driven by onToolPanel callbacks instead
   async execute(args, ctx) {
     const agent = ctx.agent
     const reviewType = args.type || "code"

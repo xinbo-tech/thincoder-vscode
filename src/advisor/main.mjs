@@ -47,7 +47,7 @@ import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { extractPriorIssueTable, extractAgentResponseTable } from "./history.mjs"
 import { buildAdvisorUserMessage, buildConvergenceInstructions, resolveScopeFiles } from "./messages.mjs"
-// Re-export for run.mjs and tests (keeps their imports from "../advisor.mjs" stable)
+// Re-exported for callers that import from this module (tests, run.mjs).
 export { ADVISOR_MD_PATH, extractPriorIssueTable, extractAgentResponseTable, extractConversationBackground } from "./history.mjs"
 export { buildAdvisorUserMessage } from "./messages.mjs"
 

@@ -86,10 +86,11 @@ const { codeSearchTool } = await import("../tools/code.mjs")
  * mandate is full decoupling (7d49a52 + d3be613). The reviewer reads files
  * and searches code; it never touches git and never writes.
  * No round parameter — the set is constant across all rounds.
- * @param {Object} agent — only used for the code index (agent.memory); the
- *   semantic code_search tool needs it. Without a memory, the set is 5 tools.
+ * @param {Object} _agent — accepted for API compatibility with the CLI
+ *   (there the parameter selects the code index); UNUSED in the VS Code port
+ *   (code_search reads the workspace index directly).
  */
-function advisorToolsFor(agent) {
+function advisorToolsFor(_agent) {
   // VS Code port: code_search reads the workspace index — no agent.memory
   // dependency, so the set is constant (ZERO git, read-only only).
   const tools = [readTool, globTool, grepTool, lsTool, lspTool, codeSearchTool]
@@ -266,7 +267,7 @@ async function runAdvisorToolLoop(provider, messages, onOutput, signal, agent, c
         result = (
           truncated +
           `\n… (truncated: ${remainingLines} more lines, ${result.length} chars total)\n` +
-          `To see more content, use: read(path, offset=${keptLines}, limit=200)`
+          `To see more content, use: read(path, offset=${keptLines + 1}, limit=200)`
         )
       }
       
@@ -301,7 +302,11 @@ export function resolveAdvisorProvider(agent) {
 
 
 /**
- * Extract unfixed issues from prior review text
+ * Extract unfixed issues from prior review text (for the cap message).
+ * Input: an advisor review markdown table (`| # | … |` rows). A row counts as
+ * unfixed unless its line carries a resolved-status word (fixed/resolved/done/
+ * addressed/corrected, ✓/✔). Returns at most MAX_UNFIXED_DISPLAY plain
+ * (pipe-stripped) row strings.
  */
 function extractUnfixedIssues(priorText) {
   if (!priorText) return []
