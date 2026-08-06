@@ -4,8 +4,14 @@
  * MCP server config stays in VS Code settings (extension-local concern).
  */
 
-import { PRESETS, providerNames, isProviderConfigured, storeProviderKey, removeProviderKey, buildProvider, providerLabel, readProviders } from "./presets.mjs"
-import { persistRaw, resolveProviders, loadMcpServers, addMcpServer, removeMcpServer, loadAgentSettings, loadRaw, normalizeProxy } from "../config-io.mjs"
+import {
+  PRESETS, providerNames, isProviderConfigured, storeProviderKey, removeProviderKey,
+  buildProvider, providerLabel, readProviders,
+} from "./presets.mjs"
+import {
+  persistRaw, resolveProviders, loadMcpServers, addMcpServer, removeMcpServer,
+  loadAgentSettings, loadRaw, normalizeProxy,
+} from "../config-io.mjs"
 import { addProviderEntry, removeProviderEntry } from "./provider-flows.mjs"
 import { mcpConnectedNames } from "../mcp.mjs"
 import { listModels } from "../provider.mjs"
@@ -40,7 +46,7 @@ export function providerStatus() {
   const presets = Object.entries(PRESETS)
     .filter(([name]) => !existing.has(name))
     .map(([name, p]) => ({ name, desc: p.desc, model: p.model, baseURL: p.baseURL }))
-  const custom = providers.custom && typeof providers.custom === "object"
+  const custom = providers.custom && typeof providers.custom === "object" && !Array.isArray(providers.custom)
     ? { baseURL: providers.custom.baseURL || "", model: providers.custom.model || "", hasKey: isProviderConfigured("custom") }
     : null
   return { providers: status, custom, labels, presets, activeProvider }
@@ -129,7 +135,7 @@ export async function testProxyConnection(uri) {
 
 /** Persist agent settings from the panel — implemented in config-io.mjs (pure Node, testable). */
 export async function saveProviderKey(name, key) {
-  if (!key || !key.trim()) return
+  // storeProviderKey performs the same !key || !key.trim() guard — delegate only.
   await storeProviderKey(name, key)
 }
 
@@ -137,15 +143,18 @@ export async function saveProviderKey(name, key) {
 export async function saveCustomProvider({ key, baseURL, model }) {
   const url = (baseURL || "").trim().replace(/\/+$/, "")
   const mdl = (model || "").trim()
-  // NOTE: the panel always sends ALL fields together — when `key` is empty the
-  // baseURL/model cannot be updated in isolation (only the all-empty clear path
-  // runs). A future per-field edit UI must restructure this write.
+  const k = (key || "").trim() // trimmed FIRST — a whitespace-only key must not land as an empty apiKey
   persistRaw((raw) => {
     raw.providers = Array.isArray(raw.providers) ? raw.providers : []
     let entry = raw.providers.find((p) => p?.name === "custom")
-    if (key) {
+    if (k) {
       if (!entry) { entry = { name: "custom" }; raw.providers.push(entry) }
-      entry.apiKey = key.trim()
+      entry.apiKey = k
+      if (url) entry.baseURL = url
+      if (mdl) entry.model = mdl
+    } else if ((url || mdl) && entry) {
+      // No key but url/model given → update the existing entry in place (a
+      // future per-field UI must not silently drop baseURL/model updates).
       if (url) entry.baseURL = url
       if (mdl) entry.model = mdl
     } else if (!url && !mdl && entry) {
