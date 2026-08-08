@@ -409,7 +409,15 @@ export async function runAdvisorReview(agent, reviewType, callbacks, designToken
       // Success path: keep the FULL review output for convergence rounds —
       // round 2+ injects this verbatim and the model understands it (decision
       // 2026-08-08: prior-table hard parsing removed; no phrase/header matching).
-      agent._lastAdvisorOutput = final
+      // Guard: only store outputs that actually carry a review — a markdown
+      // table row (`| a | b | c |`) or substantial prose (>200 chars). An
+      // empty or tool-progress-only reply must not become the "prior review"
+      // of round 2+.
+      const trimmed = final.trim()
+      const looksLikeReview = /\|.*\|.*\|/.test(trimmed) || trimmed.length >= 200
+      if (looksLikeReview) {
+        agent._lastAdvisorOutput = final
+      }
     }
 
     // Log review statistics for observability

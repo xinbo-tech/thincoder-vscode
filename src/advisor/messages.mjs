@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs"
 import { resolve, join, relative } from "node:path"
 import { findReviewRepos, collectRepoSnapshots, collectChangedFiles } from "./repos.mjs"
+import { buildConvergenceBody, buildConvergenceInstructions } from "./convergence.mjs"
 import { loadAdvisorMd, extractConversationBackground, extractAgentResponseTable } from "./history.mjs"
 
 /**
@@ -113,14 +114,7 @@ export function buildAdvisorUserMessage(agent, prior, reviewType, designToken = 
         ? "(Agent did not provide a response table — perform a fresh review of: " + scopeFiles.slice(0, 10).join(", ") + ")"
         : "(Agent did not provide a response table — perform a fresh review of the files named in the system prompt context)")
     const round = (agent._advisorRound || 0) + 1
-    const label = round === 2 ? "Verify Prior Table + Flag New Issues" : "Strict Verification"
-    parts.push(`## Round ${round} — ${label}`)
-    parts.push("")
-    parts.push("## Prior Review Output (verify every item it raises)")
-    parts.push(p)
-    parts.push("")
-    parts.push("## Agent Response (fix claims — reference only)")
-    parts.push(response)
+    parts.push(buildConvergenceBody(p, response, round, scopeFiles))
     parts.push("")
     parts.push("---")
     parts.push("")
@@ -212,29 +206,4 @@ export function resolveScopeFiles(agent, paths) {
   return null
 }
 
-/**
- * Shared convergence-round instructions — single source for BOTH paths
- * (buildAdvisorUserMessage's legacy convergence block and
- * buildAdvisorFollowUp), so the wording cannot diverge.
- * Round 2 may flag obvious new issues; round 3+ is strict verification.
- * @param {number} round — convergence round number (2+)
- * @param {string[]|null} scopeFiles — optional file list for the no-response fallback
- * @returns {string[]} the numbered instruction lines (callers spread them)
- */
-export function buildConvergenceInstructions(round, scopeFiles = null) {
-  const fileList = scopeFiles?.length
-    ? ` The review surface is: ${scopeFiles.slice(0, 10).join(", ")}.`
-    : ""
-  return [
-    `1. IMPORTANT: verify EVERY item of the prior issue table against the CURRENT FILE STATE with \`read\` — never decide based on earlier snapshots alone.${fileList}`,
-    "2. STALE-CONTEXT WARNING: any diff or file content from earlier messages is a historical snapshot — treat it as expired. Only fresh `read` results describe the current state.",
-    "3. You have no git tool; git output in earlier messages is historical and untrustworthy (committed fixes never show in a diff).",
-    "4. `read` the files named in the prior table (or the review surface above) in full — ALWAYS. Batch reads/greps in a single reply.",
-    "5. Evidence rule: every 'Unfixed'/'New' finding MUST quote the exact line content from THIS round's `read` output (e.g. `run.mjs:180: timeoutId = setTimeout(...)`). Line numbers alone are NOT evidence — they may be stale or fabricated. Findings without a fresh quoted line are treated as unverified and will not be accepted.",
-    "6. Produce your verification table. Do not re-read content you already have.",
-    round === 2
-      ? "7. You may flag obvious NEW issues introduced by the fixes (crashes, data loss, logic errors — not style)."
-      : "7. Do NOT look for new issues.",
-  ]
-}
 

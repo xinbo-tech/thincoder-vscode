@@ -46,7 +46,8 @@ import { readFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { extractAgentResponseTable } from "./history.mjs"
-import { buildAdvisorUserMessage, buildConvergenceInstructions, resolveScopeFiles } from "./messages.mjs"
+import { buildAdvisorUserMessage, resolveScopeFiles } from "./messages.mjs"
+import { buildConvergenceBody } from "./convergence.mjs"
 // Re-exported for callers that import from this module (tests, run.mjs).
 export { ADVISOR_MD_PATH, extractAgentResponseTable, extractConversationBackground } from "./history.mjs"
 export { buildAdvisorUserMessage } from "./messages.mjs"
@@ -160,38 +161,7 @@ export function buildAdvisorFollowUp(agent, prior, scopeFiles = null) {
     : "(Agent did not provide a response table — perform a fresh full review; the review surface is unknown, ask the user for the file list)"
   const response = extractAgentResponseTable(agent.history) || noResponseFallback
   const round = (agent._advisorRound || 0) + 1
-  const label = round === 2 ? "Verify Prior Table + Flag New Issues" : "Strict Verification"
-
-  const reminder = round === 2
-    ? "verify every item in the prior issue table and flag only obvious new issues introduced by the fixes"
-    : "strictly verify only the prior issue table — do NOT look for new issues"
-  const parts = [
-    `## Round ${round} — ${label}`,
-    "",
-    `[System reminder: this is round ${round} of the convergence protocol. ` +
-      `The system prompt for this round has already narrowed the review scope — follow it: ${reminder}.]`,
-    "",
-    // Prior review output IS in the context (decision 2026-08-08): the FULL
-    // verbatim output of the last review — the only complete verification list.
-    // The agent response table covers only issues the agent chose to answer,
-    // so issues the agent skipped would silently escape convergence without
-    // the prior output. The model understands the review output directly —
-    // no table/header/phrase parsing. Restatement risk is handled
-    // mechanically: host-verified citations reject references that do not
-    // match the CURRENT disk state, and fresh sessions exclude old read data.
-    // The agent response table stays as a focus aid ("I fixed X"), not as the
-    // to-verify list.
-    "## Prior Review Output (verify every item it raises)",
-    p,
-    "",
-    "## Agent Response (fix claims — reference only)",
-    response,
-    "",
-    "## Instructions",
-    ...buildConvergenceInstructions(round, scopeFiles),
-    "",
-  ]
-  return parts.join("\n")
+  return buildConvergenceBody(p, response, round, scopeFiles)
 }
 
 /**
@@ -234,10 +204,12 @@ export function escapeLiteralEscapes(text) {
  * @param {string[]|null} [documents] — design review only: explicit list of doc paths to review (passed through to buildAdvisorUserMessage)
  * @param {string[]|null} [paths] — code review only: explicit list of file/dir paths to review
  */
-export function prepareAdvisorMessages(agent, reviewType, designToken = null, documents = null, paths = null) {
+export function prepareAdvisorMessages(agent, reviewType, designToken = null, documents = null, paths = null, priorParam = null) {
   // Deterministic convergence state (decision 2026-08-08): round 2+ requires
   // _advisorRound > 0 AND a stored prior review output. No history parsing.
-  const prior = (agent._advisorRound || 0) > 0 ? (agent._lastAdvisorOutput ?? null) : null
+  // priorParam (direct callers) wins over the stored output — same derivation
+  // as buildAdvisorSystemPrompt (single source of truth for round semantics).
+  const prior = (agent._advisorRound || 0) > 0 ? (priorParam ?? agent._lastAdvisorOutput) : null
 
   // Design review round 1: the dedicated full-scope review with the approval
   // token (an independent gate — it runs even when a prior table exists, e.g.
