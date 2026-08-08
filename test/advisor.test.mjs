@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
-import { extractPriorIssueTable, extractAgentResponseTable, extractConversationBackground } from "../src/advisor/history.mjs"
+import { extractAgentResponseTable, extractConversationBackground } from "../src/advisor/history.mjs"
 import { buildAdvisorSystemPrompt, prepareAdvisorMessages, escapeLiteralEscapes } from "../src/advisor/main.mjs"
 import { verifyCitations, appendCitationReport, extractCitations } from "../src/advisor/citations.mjs"
 import { buildAdvisorUserMessage } from "../src/advisor/messages.mjs"
@@ -30,58 +30,6 @@ before(() => {
 after(() => {
   rmSync(tmpDir, { recursive: true, force: true })
   _setConfigPathForTest(null)
-})
-
-// ─── extractPriorIssueTable ─────────────────────────────────────
-
-describe("extractPriorIssueTable", () => {
-  it("returns null when history is empty", () => {
-    assert.equal(extractPriorIssueTable([]), null)
-  })
-
-  it("returns null when no advisor output found", () => {
-    const history = [
-      { role: "user", content: "hello" },
-      { role: "assistant", content: "hi" },
-      { role: "tool", tool_call_id: "t1", content: "some tool output" },
-    ]
-    assert.equal(extractPriorIssueTable(history), null)
-  })
-
-  it("ignores header constants quoted inside source code", () => {
-    const history = [
-      { role: "tool", tool_call_id: "a1", content: 'const ADVISOR_TABLE_HEADER = "| # | File | Severity | Issue | Suggestion |"\nThese constants are matched at line start only — no table here.' },
-    ]
-    assert.equal(extractPriorIssueTable(history), null)
-  })
-
-  it("returns null when last review says all clear", () => {
-    const history = [
-      { role: "tool", tool_call_id: "a1", content: "| # | File | Severity | Issue | Suggestion |\n|---|------|----------|-------|------------|\n\nNo 🔴 issues found. Review passed." },
-    ]
-    assert.equal(extractPriorIssueTable(history), null)
-  })
-
-  it("returns the table when issues remain", () => {
-    const history = [
-      { role: "tool", tool_call_id: "a1", content: "| # | File | Severity | Issue | Suggestion |\n|---|------|----------|-------|------------|\n| 1 | src/x.mjs | 🔴 | null check missing | add guard |" },
-    ]
-    const result = extractPriorIssueTable(history)
-    assert(result)
-    assert(result.text.includes("src/x.mjs"))
-    assert.equal(result.sinceIdx, 0)
-  })
-
-  it("picks the most recent advisor table", () => {
-    const history = [
-      { role: "tool", tool_call_id: "a1", content: "| # | File | Severity | Issue | Suggestion |\n|---|------|----------|-------|------------|\n| 1 | src/old.mjs | 🔴 | old issue | fix |" },
-      { role: "assistant", content: "fixed" },
-      { role: "tool", tool_call_id: "a2", content: "| # | File | Severity | Issue | Suggestion |\n|---|------|----------|-------|------------|\n| 1 | src/new.mjs | 🔴 | new issue | fix |" },
-    ]
-    const result = extractPriorIssueTable(history)
-    assert(result.text.includes("src/new.mjs"))
-    assert.equal(result.sinceIdx, 2)
-  })
 })
 
 // ─── extractAgentResponseTable ──────────────────────────────────
@@ -149,14 +97,14 @@ describe("buildAdvisorSystemPrompt", () => {
   })
 
   it("returns round-2 prompt after one prior round", () => {
-    const prior = { text: "| # | File | Severity | Issue | Suggestion |", sinceIdx: 0 }
+    const prior = "| # | File | Severity | Issue | Suggestion |"
     const agent = { history: [], _advisorRound: 1 }
     const prompt = buildAdvisorSystemPrompt(agent, prior, "code")
-    assert(prompt.includes("Verify the prior issue table"))
+    assert(prompt.includes("Verify the prior review output"))
   })
 
   it("returns round-3 prompt after two prior rounds", () => {
-    const prior = { text: "| # | File | Severity | Issue | Suggestion |", sinceIdx: 0 }
+    const prior = "| # | File | Severity | Issue | Suggestion |"
     const agent = { history: [], _advisorRound: 2 }
     const prompt = buildAdvisorSystemPrompt(agent, prior, "code")
     assert(prompt.includes("Strictly verify"))
@@ -376,6 +324,7 @@ describe("prepareAdvisorMessages: fresh session every round (CLI parity — d698
     const agent = {
       history: [{ role: "tool", content: "| # | File | Severity | Issue | Suggestion |\n| 1 | a.mjs | 🔴 | bug | x |" }],
       _advisorRound: 1,
+      _lastAdvisorOutput: "| # | File | Severity | Issue | Suggestion |\n| 1 | a.mjs | 🔴 | bug | x |",
       _mutatedThisRun: true,
       _advisorSession: [{ role: "system", content: "STALE_SESSION_MARKER" }, { role: "user", content: "STALE_SESSION_MARKER" }], // legacy field — must NOT be reused
       config: { agent: {}, advisor: {} },

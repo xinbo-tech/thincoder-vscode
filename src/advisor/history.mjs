@@ -1,16 +1,11 @@
 /**
- * advisor/history.mjs — advisor history extraction: issue/response tables and conversation background.
+ * advisor/history.mjs — advisor history extraction: agent response table and conversation background.
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 export const ADVISOR_MD_PATH = ".thincoder/advisor.md"
-export const ADVISOR_TABLE_HEADER = "| # | File | Severity | Issue | Suggestion |"
-// Design-review table header (advisor-design.md round 1): | # | Category | Severity | Issue | Suggestion |
-const DESIGN_TABLE_HEADER = "| # | Category | Severity | Issue | Suggestion |"
-const CONVERGENCE_TABLE_HEADER = "| # | Orig# | File | Severity | Status | Notes |"
 const AGENT_RESPONSE_HEADER = "| # | Action | Detail |"
-export const LEGACY_ADVISOR_HEADER = "| # | 文件 | 严重程度 | 问题描述 | 建议修复 |"
 
 const DEFAULT_CRITERIA = `Review the code changes, focusing on:
 1. Correctness: logic errors, edge cases, off-by-one, incomplete modifications
@@ -20,77 +15,28 @@ const DEFAULT_CRITERIA = `Review the code changes, focusing on:
 5. Maintainability: vague naming, missing comments, overly complex logic`
 
 /**
- * Extract the most recent advisor review table from history.
- * Returns { text, sinceIdx } where sinceIdx is the index of the advisor call's
- * own history entry — extractAgentResponseTable skips it (role is "tool", not
- * "assistant") and scans forward for the agent's response table.
- * Returns null when: no advisor call, empty output, or the last review is
- * all-clear (nothing to follow up on).
- */
-// All-clear phrases the prompts instruct the advisor to use on a clean review.
-// Used ONLY by extractPriorIssueTable (issue-table verdict — a phrase-free
-// issue table with rows is never all-clear). The round-reset guard no longer
-// depends on model output at all: prepareAdvisorMessages decides by the
-// deterministic _mutatedThisRun flag (user decision 2026-08-05). "no new
-// issues" is DELIBERATELY absent — verification-table outputs (round 2+)
-// commonly conclude with it (round 3+ instructions even SAY "do not look for
-// new issues"); treating it as all-clear would reset the convergence budget
-// after every round-2 review (the observed "always round 2" bug: prior → null
-// → _advisorRound reset → 1→2→1…).
-const ALL_CLEAR_PHRASES = ["no 🔴", "all clear", "全部通过", "review passed", "no issues found", "everything is fine"]
-
-export function extractPriorIssueTable(history) {
-  // Negative signals: a table listing SOME items as unfixed is NOT all-clear.
-  // Applied when the message carries a Status column (English or Chinese convergence
-  // format) — "failed"/"❌" in a round-1 Issue description must NOT trigger it.
-  const partiallyFixedRe = /\bunfixed\b|未修复|❌|\bfailed\b/i
-  const entries = Array.isArray(history) ? history : []
-
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const m = entries[i]
-    if (m.role !== "tool" || typeof m.content !== "string") continue
-    // Only review outputs carry one of these table headers. Matched at LINE START:
-    // an `includes()` match would also fire on advisor output that quotes the
-    // header constants' own source code (e.g. history.mjs), producing a phantom
-    // "prior issue table" and re-opening convergence rounds against stale data.
-    if (!lineHasHeader(m.content, ADVISOR_TABLE_HEADER)
-      && !lineHasHeader(m.content, DESIGN_TABLE_HEADER)
-      && !lineHasHeader(m.content, CONVERGENCE_TABLE_HEADER)
-      && !lineHasHeader(m.content, LEGACY_ADVISOR_HEADER)) continue
-    const text = m.content
-    const lower = text.toLowerCase()
-    // Has a Status column? (English convergence format or any table with a Status-like
-    // column) — Chinese legacy tables lack it, but they are issue tables, not convergence.
-    const hasStatusColumn = lineHasHeader(text, CONVERGENCE_TABLE_HEADER)
-      || /Status|状态/.test(text.slice(0, text.indexOf("\n") + 1))
-    if (hasStatusColumn) {
-      // Convergence/verification table: pass/fail is row-level — free-text
-      // phrases like "no new issues found" / "review passed" are partial or
-      // boilerplate statements in verification outputs. Some row unfixed →
-      // convergence continues; every row fixed → all clear (fresh cycle).
-      if (partiallyFixedRe.test(lower)) return { text, sinceIdx: i }
-      return null
-    }
-    // Issue table (round 1 / design): phrase-based all-clear detection.
-    if (ALL_CLEAR_PHRASES.some((s) => lower.includes(s))) return null
-    // sinceIdx = the advisor call's own index; extractAgentResponseTable skips it (role !== assistant)
-    return { text, sinceIdx: i }
-  }
-  return null
-}
-
-/** True when some line of `text` starts with `header` — table headers always sit at line start. */
-function lineHasHeader(text, header) {
-  return text.split("\n").some((l) => l.trimStart().startsWith(header))
-}
-
-/**
- * Extract the agent's response table (| # | Action | Detail |) that follows
- * the advisor review. Returns null when missing or no advisor review precedes.
+ * Extract the agent's response table (| # | Action | Detail |) — the fix-claims
+ * reference for convergence rounds.
+ * Semantics (decision 2026-08-08): without sinceIdx, scan BACKWARD for the
+ * MOST RECENT response table (no prior-table index is carried anymore — the
+ * agent response is a focus aid only; format drift falls back to the
+ * no-response text and never drives control flow). With sinceIdx, scan
+ * FORWARD from it (legacy callers/tests).
+ * @param {Array} history — message history
+ * @param {number} [sinceIdx] — legacy: start scanning forward from this index
+ * @returns {string|null} the response table content, or null
  */
 export function extractAgentResponseTable(history, sinceIdx) {
   const entries = Array.isArray(history) ? history : []
-  for (let i = sinceIdx ?? 0; i < entries.length; i++) {
+  if (sinceIdx !== undefined) {
+    for (let i = sinceIdx; i < entries.length; i++) {
+      const m = entries[i]
+      if (m.role !== "assistant" || typeof m.content !== "string") continue
+      if (m.content.includes(AGENT_RESPONSE_HEADER)) return m.content
+    }
+    return null
+  }
+  for (let i = entries.length - 1; i >= 0; i--) {
     const m = entries[i]
     if (m.role !== "assistant" || typeof m.content !== "string") continue
     if (m.content.includes(AGENT_RESPONSE_HEADER)) return m.content

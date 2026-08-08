@@ -7,7 +7,6 @@ import { resolveProviders, findProvider } from "../config-io.mjs"
 import { specForModel } from "../specs.mjs"
 import { toOpenAISchema } from "../tools/index.mjs"
 import { prepareAdvisorMessages } from "./main.mjs"
-import { extractPriorIssueTable } from "./history.mjs"
 import { appendCitationReport } from "./citations.mjs"
 
 const MAX_ADVISOR_TURNS = 100
@@ -373,9 +372,10 @@ export async function runAdvisorReview(agent, reviewType, callbacks, designToken
   // blocks the next call. 5 rounds max; after that the review is never pushed back
   // (the caller decides: accept, manual re-check, or /new to reset).
   if ((agent._advisorRound || 0) >= MAX_ADVISOR_ROUNDS) {
-    // 提取未解决的问题，给出更具体的指导
-    const prior = extractPriorIssueTable(agent.history)
-    const unfixed = prior ? extractUnfixedIssues(prior.text) : []
+    // Summarize unresolved items from the last review output for guidance
+    // (line-level status-word scan — no table-header parsing, decision 2026-08-08).
+    const prior = agent._lastAdvisorOutput
+    const unfixed = prior ? extractUnfixedIssues(prior) : []
     
     let message = `Advisor: convergence cap reached after ${MAX_ADVISOR_ROUNDS} rounds.\n`
     if (unfixed.length > 0) {
@@ -406,6 +406,10 @@ export async function runAdvisorReview(agent, reviewType, callbacks, designToken
     let final = result
     if (!result.trimStart().startsWith("Advisor:")) {
       final = appendCitationReport(result, advisorCwd)
+      // Success path: keep the FULL review output for convergence rounds —
+      // round 2+ injects this verbatim and the model understands it (decision
+      // 2026-08-08: prior-table hard parsing removed; no phrase/header matching).
+      agent._lastAdvisorOutput = final
     }
 
     // Log review statistics for observability

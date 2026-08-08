@@ -132,6 +132,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     _role: role,
     _advisorRound: 0,
     _advisorSession: null,
+    _lastAdvisorOutput: null, // full review output from the most recent advisor call (convergence rounds inject it verbatim)
     _engDesignToken: engState?.engDesignToken ?? null,
     _engDesignReviewed: engDesignReviewed === true, // eng-coder children arrive pre-authorized
     _calledAdvisorThisRun: false, _mutatedThisRun: false,

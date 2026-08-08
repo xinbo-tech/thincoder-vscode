@@ -45,10 +45,10 @@
 import { readFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import { extractPriorIssueTable, extractAgentResponseTable } from "./history.mjs"
+import { extractAgentResponseTable } from "./history.mjs"
 import { buildAdvisorUserMessage, buildConvergenceInstructions, resolveScopeFiles } from "./messages.mjs"
 // Re-exported for callers that import from this module (tests, run.mjs).
-export { ADVISOR_MD_PATH, extractPriorIssueTable, extractAgentResponseTable, extractConversationBackground } from "./history.mjs"
+export { ADVISOR_MD_PATH, extractAgentResponseTable, extractConversationBackground } from "./history.mjs"
 export { buildAdvisorUserMessage } from "./messages.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -73,8 +73,7 @@ const ADVISOR_ROUND1 = loadPrompt("advisor-round1.md", "advisor-round1.md")
 const ADVISOR_ROUND2 = loadPrompt("advisor-round2.md", "advisor-round2.md")
 const ADVISOR_ROUND3 = loadPrompt("advisor-round3.md", "advisor-round3.md")
 // Fallback when advisor-design.md is missing — keep in sync with the real
-// file (table format + workflow steps; a drifted fallback would also break
-// extractPriorIssueTable's DESIGN_TABLE_HEADER matching).
+// file (table format + workflow steps).
 const ADVISOR_DESIGN_FALLBACK = `You are an independent design reviewer for an engineering-mode project. Review the design document in the changes below. Evaluate: completeness, feasibility, clarity, scope, acceptance criteria. Read METHODOLOGY.md if provided. Produce a review table with | # | Category | Severity | Issue | Suggestion | format.`
 let ADVISOR_DESIGN = ""
 // Design review is OPTIONAL (engineering mode only) — silent fallback to the
@@ -89,24 +88,28 @@ try { ADVISOR_DESIGN = readFileSync(join(__dirname, "..", "prompts", "advisor-de
 /**
  * Build the system prompt for an advisor review session.
  * @param {Object} agent — the parent agent
- * @param {Object|null} [prior] — prior issue table (from extractPriorIssueTable)
+ * @param {Object|null} [prior] — prior review output (full text; decision 2026-08-08)
  * @param {string} [reviewType] — "design" for design review, undefined/"code" for code review
  * @returns {string} the system prompt
  */
 export function buildAdvisorSystemPrompt(agent, prior, reviewType) {
+  // Round decision is DETERMINISTIC (decision 2026-08-08): _advisorRound > 0
+  // with a stored review output means convergence (round 2+); 0 means round 1.
+  // No prior-table parsing, no all-clear phrase matching — the round counter
+  // and the stored output are the only inputs. A restarted process has
+  // _advisorRound 0 → conservative full re-review.
+  const hasPrior = (agent._advisorRound || 0) > 0 && (prior ?? agent._lastAdvisorOutput)
   // Design review: round 1 uses the dedicated design-review prompt (full scope +
   // approval token); rounds 2+ converge like code reviews (verify agent fix claims).
   if (reviewType === "design") {
-    const p = prior ?? extractPriorIssueTable(agent.history)
-    if (!p || (agent._advisorRound || 0) === 0) {
+    if (!hasPrior) {
       return ADVISOR_DESIGN || ADVISOR_DESIGN_FALLBACK
     }
     const round = (agent._advisorRound || 0) + 1
     if (round === 2) return ADVISOR_ROUND2
     return ADVISOR_ROUND3
   }
-  const p = prior ?? extractPriorIssueTable(agent.history)
-  if (!p || (agent._advisorRound || 0) === 0) return ADVISOR_ROUND1
+  if (!hasPrior) return ADVISOR_ROUND1
   const round = (agent._advisorRound || 0) + 1
   if (round === 2) return ADVISOR_ROUND2
   return ADVISOR_ROUND3
@@ -135,12 +138,11 @@ export function buildAdvisorSystemPrompt(agent, prior, reviewType) {
  *   otherwise scan history from index 0 and could match an unrelated stale table)
  */
 export function buildAdvisorFollowUp(agent, prior, scopeFiles = null) {
-  // Convergence follow-up REQUIRES a prior review record. The caller usually
-  // passes it; fall back to extracting it from history (compat for direct
-  // callers/tests). If there is genuinely no prior review, a nullish table
-  // would make the response-table extraction scan from index 0 and possibly
-  // match an unrelated stale table — return a round-1-style message instead.
-  const p = prior ?? extractPriorIssueTable(agent.history)
+  // Convergence follow-up REQUIRES a prior review record — the full output of
+  // the last review, injected VERBATIM (decision 2026-08-08: the model
+  // understands the review output; no table/header/phrase parsing). The caller
+  // usually passes it; fall back to the stored agent._lastAdvisorOutput.
+  const p = prior ?? agent._lastAdvisorOutput
   if (!p) {
     // Plain "System reminder:" prefix (no brackets) — same convention as the
     // round-1 path (some OpenAI-compatible servers parse '['-prefixed content
@@ -156,7 +158,7 @@ export function buildAdvisorFollowUp(agent, prior, scopeFiles = null) {
   const noResponseFallback = scopeFiles?.length
     ? "(Agent did not provide a response table — perform a fresh review of: " + scopeFiles.slice(0, 10).join(", ") + ")"
     : "(Agent did not provide a response table — perform a fresh full review; the review surface is unknown, ask the user for the file list)"
-  const response = extractAgentResponseTable(agent.history, p.sinceIdx) || noResponseFallback
+  const response = extractAgentResponseTable(agent.history) || noResponseFallback
   const round = (agent._advisorRound || 0) + 1
   const label = round === 2 ? "Verify Prior Table + Flag New Issues" : "Strict Verification"
 
@@ -169,16 +171,18 @@ export function buildAdvisorFollowUp(agent, prior, scopeFiles = null) {
     `[System reminder: this is round ${round} of the convergence protocol. ` +
       `The system prompt for this round has already narrowed the review scope — follow it: ${reminder}.]`,
     "",
-    // Prior issue table IS in the context (decision 2026-08-05, reversed):
-    // it is the ONLY complete verification list — the agent response table
-    // covers only issues the agent chose to answer, so issues the agent
-    // skipped would silently escape convergence. Restatement risk is handled
+    // Prior review output IS in the context (decision 2026-08-08): the FULL
+    // verbatim output of the last review — the only complete verification list.
+    // The agent response table covers only issues the agent chose to answer,
+    // so issues the agent skipped would silently escape convergence without
+    // the prior output. The model understands the review output directly —
+    // no table/header/phrase parsing. Restatement risk is handled
     // mechanically: host-verified citations reject references that do not
     // match the CURRENT disk state, and fresh sessions exclude old read data.
     // The agent response table stays as a focus aid ("I fixed X"), not as the
     // to-verify list.
-    "## Prior Issue Table (verify every item)",
-    p.text,
+    "## Prior Review Output (verify every item it raises)",
+    p,
     "",
     "## Agent Response (fix claims — reference only)",
     response,
@@ -231,7 +235,9 @@ export function escapeLiteralEscapes(text) {
  * @param {string[]|null} [paths] — code review only: explicit list of file/dir paths to review
  */
 export function prepareAdvisorMessages(agent, reviewType, designToken = null, documents = null, paths = null) {
-  const prior = extractPriorIssueTable(agent.history)
+  // Deterministic convergence state (decision 2026-08-08): round 2+ requires
+  // _advisorRound > 0 AND a stored prior review output. No history parsing.
+  const prior = (agent._advisorRound || 0) > 0 ? (agent._lastAdvisorOutput ?? null) : null
 
   // Design review round 1: the dedicated full-scope review with the approval
   // token (an independent gate — it runs even when a prior table exists, e.g.
