@@ -170,10 +170,27 @@ export async function executeToolBatches(agent, { response, history, fullHistory
       // Track mutations + advisor/verify bookkeeping (CLI parity)
       if (meta) {
         const { args, tool } = meta
-        if (tool && !tool.readonly && !tool.sideEffectExempt) {
-          // Side-effect tools (bash, git, …) invalidate prior review/verify —
-          // the environment changed even if no code file did.
-          if (agent._calledAdvisorThisRun) agent._calledAdvisorThisRun = false
+        if (FILE_MUTATORS.has(toolName)) {
+          // Direct file edit — code was changed. The prior advisor review and
+          // verify are stale: a review that ran before the edit no longer
+          // covers the current file state (user decision 2026-08-08: the review
+          // is triggered by CODE MUTATIONS only).
+          agent._mutatedThisRun = true
+          agent._calledAdvisorThisRun = false
+          agent._verifiedThisRun = false
+          agent._verifyPassed = undefined
+          const paths = tool.touchedPaths ? tool.touchedPaths(args) : [args?.path]
+          for (const p of paths) {
+            if (typeof p !== "string") continue
+            const abs = join(cwd, p)
+            if (!agent._touchedFiles.includes(abs)) agent._touchedFiles.push(abs)
+          }
+        } else if (tool && !tool.readonly && !tool.sideEffectExempt) {
+          // Non-mutating side-effect tools (bash, git): do NOT invalidate the
+          // advisor review — a review is triggered by code mutations only
+          // (user decision 2026-08-08; bash is barred from writing files, so
+          // it cannot change the reviewed code). Verify IS invalidated: its
+          // state snapshot (git diff, file list) may be stale.
           if (agent._verifiedThisRun) {
             agent._verifiedThisRun = false
             agent._verifyPassed = undefined
@@ -189,15 +206,6 @@ export async function executeToolBatches(agent, { response, history, fullHistory
             if (args.type !== "design") agent._advisorRound++
           } catch {
             agent._advisorRound++
-          }
-        }
-        if (FILE_MUTATORS.has(toolName)) {
-          agent._mutatedThisRun = true
-          const paths = tool.touchedPaths ? tool.touchedPaths(args) : [args?.path]
-          for (const p of paths) {
-            if (typeof p !== "string") continue
-            const abs = join(cwd, p)
-            if (!agent._touchedFiles.includes(abs)) agent._touchedFiles.push(abs)
           }
         }
       }
