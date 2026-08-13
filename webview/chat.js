@@ -96,10 +96,10 @@ const _ac = initAutocomplete({
   vscode,
   pastedImages: ctx._pastedImages,
 })
-const { showAtDropdown, closeAtDropdown } = _ac
+const { showAtDropdown } = _ac
 
 // ─── Settings panel (init early so openSettings is available for toolbar binding) ──
-const _settings = initSettings({ vscode, inputEl: ctx.inputEl, onClose: () => ctx.inputEl.focus() })
+const _settings = initSettings({ onClose: () => ctx.inputEl.focus() })
 const { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateShellCandidates, updateProxySettings, updateProxyTestResult } = _settings
 
 // ─── Session bar ───────────────────────────────

@@ -456,27 +456,8 @@ export async function migrateCore(deps) {
     }
   } catch { /* ignore */ }
 
-  // Legacy MCP servers (old VS Code settings `thincoder.mcpServers` dict) → config.json
-  // mcp.servers[] (CLI parity). CLI-written entries win; unknown names are kept as-is.
-  const legacyMcp = deps.legacyMcpServers
-  if (legacyMcp && typeof legacyMcp === "object") {
-    const existing = new Set((raw.mcp?.servers ?? []).map((s) => s?.name))
-    const migrated = []
-    for (const [name, cfg] of Object.entries(legacyMcp)) {
-      if (!cfg || typeof cfg !== "object" || existing.has(name)) continue
-      const entry = { name }
-      if (cfg.url) { entry.url = cfg.url; if (cfg.headers) entry.headers = cfg.headers }
-      else if (cfg.wsUrl) { entry.wsUrl = cfg.wsUrl; if (cfg.headers) entry.headers = cfg.headers }
-      else if (cfg.command) { entry.command = cfg.command; if (cfg.args) entry.args = cfg.args; if (cfg.env) entry.env = cfg.env }
-      else continue // unusable entry — drop
-      migrated.push(entry)
-    }
-    if (migrated.length > 0) {
-      raw.mcp = raw.mcp && typeof raw.mcp === "object" ? raw.mcp : {}
-      raw.mcp.servers = Array.isArray(raw.mcp.servers) ? raw.mcp.servers : []
-      raw.mcp.servers.push(...migrated)
-    }
-  }
+  // Legacy MCP servers were removed together with the `thincoder.mcpServers`
+  // setting itself (pre-release, no migration — see package.json history).
 
   saveRaw(raw)
 
@@ -486,6 +467,5 @@ export async function migrateCore(deps) {
   }
   try { await secrets.delete("thincoder.embedding.apiKey") } catch { /* ignore */ }
   try { await clearLegacySettings() } catch { /* ignore */ }
-  try { await deps.clearLegacyMcp() } catch { /* ignore */ }
   await flags.set()
 }

@@ -96,12 +96,6 @@
           "order": 1,
           "markdownDescription": "# Providers (legacy — migrated automatically)\nProvider configuration now lives in `~/.thincoder/config.json`, shared with the CLI. On first activation any keys/providers stored here (and in SecretStorage) are migrated into that file and this setting is cleared. Use the in-panel Settings (⚙) or edit `~/.thincoder/config.json` directly.",
           "deprecationMessage": "Provider config is stored in ~/.thincoder/config.json (shared with the CLI). This setting is only read once for migration."
-        },
-        "thincoder.mcpServers": {
-          "type": "object",
-          "default": {},
-          "order": 3,
-          "markdownDescription": "# MCP Servers\nModel Context Protocol servers. Each key is a server name, value is a config object:\n\n- `type`: \"stdio\" or \"http\" (auto-detected from command/url if omitted)\n- `command` + `args`: for stdio transport\n- `url` + `headers`: for HTTP transport\n\nExample:\n```json\n{\n  \"thincoder.mcpServers\": {\n    \"filesystem\": { \"command\": \"npx\", \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/path\"] },\n    \"my-api\": { \"url\": \"https://example.com/mcp\", \"headers\": { \"Authorization\": \"Bearer xxx\" } }\n  }\n}\n```"
         }
       }
     }

@@ -97,6 +97,8 @@ export const subagentTool = {
     ctx.callbacks?.onSubagent?.({ id: subId, role, status: "started", startedAt: Date.now() })
 
     // Subagent runs without UI callbacks — results are captured.
+    // EXCEPT onQuestion: the child's question tool must surface in the panel like the
+    // parent's (inline card, not a native popup at the window top).
     // stateSink receives the child's live mutation state (runAgent fills it every turn).
     let output = ""
     const sink = {}
@@ -106,6 +108,7 @@ export const subagentTool = {
         onToolCall: () => {},
         onToolResult: () => {},
         onComplete: () => {},
+        onQuestion: ctx.callbacks?.onQuestion ?? null,
       }, ctx.signal, true, {
         depth: 1, role, maxTurns,
         engState: { enabled: parent.config?.agent?.engineering ?? false, engDesignToken: parent._engDesignToken },

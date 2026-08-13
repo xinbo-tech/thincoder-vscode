@@ -43,9 +43,9 @@ let _proxySettings = null
 
 /**
  * Initialize settings panel.
- * @param {{ vscode: object, inputEl: HTMLElement }} deps
+ * @param {{ onClose?: Function }} deps
  */
-export function initSettings({ vscode, inputEl, onClose }) {
+export function initSettings({ onClose }) {
   document.getElementById("settings-btn").addEventListener("click", openSettings)
   document.getElementById("settings-close").addEventListener("click", () => {
     closeSettings()

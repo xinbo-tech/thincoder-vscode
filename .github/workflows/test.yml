@@ -6,7 +6,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: node -e "require('fs').mkdirSync('node_modules/vscode',{recursive:true});require('fs').copyFileSync('test/fixtures/vscode-mock.mjs','node_modules/vscode/index.mjs')"
-      - run: node --test test/unit.test.mjs
+        with: { node-version: 24 }
+      - run: npm install
+      - run: npm test
       - run: npx eslint . --quiet

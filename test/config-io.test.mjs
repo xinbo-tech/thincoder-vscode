@@ -385,43 +385,19 @@ describe("migrateCore", () => {
     assert(cleared)
   })
 
-  it("migrates legacy VS Code mcpServers dict into config.json mcp.servers[]", async () => {
+  it("no longer migrates the removed thincoder.mcpServers setting (pre-release, dead code deleted)", async () => {
     let mcpCleared = false
     await migrateCore({
       secrets: makeSecrets(),
       flags: makeFlags(),
       legacySettings: {},
       clearLegacySettings: async () => {},
-      legacyMcpServers: {
-        fs: { command: "npx", args: ["-y", "server-fs", "/tmp"] },
-        http1: { url: "https://example.com/mcp", headers: { Authorization: "Bearer x" } },
-        ws1: { wsUrl: "wss://example.com/mcp" },
-      },
+      legacyMcpServers: { fs: { command: "npx" } },  // ignored — the legacy input is gone
       clearLegacyMcp: async () => { mcpCleared = true },
     })
-    const servers = readCfg().mcp.servers
-    assert.equal(servers.length, 3)
-    const fs = servers.find((s) => s.name === "fs")
-    assert.equal(fs.command, "npx")
-    assert.deepEqual(fs.args, ["-y", "server-fs", "/tmp"])
-    assert.equal(servers.find((s) => s.name === "http1").headers.Authorization, "Bearer x")
-    assert.equal(servers.find((s) => s.name === "ws1").wsUrl, "wss://example.com/mcp")
-    assert(mcpCleared)
-  })
-
-  it("MCP migration: skips entries that already exist in config.json (CLI wrote them first)", async () => {
-    writeCfg({ mcp: { servers: [{ name: "fs", command: "cli-version" }] } })
-    await migrateCore({
-      secrets: makeSecrets(),
-      flags: makeFlags(),
-      legacySettings: {},
-      clearLegacySettings: async () => {},
-      legacyMcpServers: { fs: { command: "legacy-version" } },
-      clearLegacyMcp: async () => {},
-    })
-    const servers = readCfg().mcp.servers
-    assert.equal(servers.length, 1)
-    assert.equal(servers[0].command, "cli-version")
+    const raw = readCfg()
+    assert.ok(!raw.mcp?.servers || raw.mcp.servers.length === 0, "no MCP servers written from legacy settings")
+    assert.equal(mcpCleared, false, "clearLegacyMcp is never called")
   })
 })
 

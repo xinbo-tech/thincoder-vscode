@@ -23,7 +23,5 @@ export async function migrateLegacySettings(context) {
     },
     legacySettings: cfg.get("providers"),
     clearLegacySettings: async () => { await cfg.update("providers", undefined, vscode.ConfigurationTarget.Global) },
-    legacyMcpServers: cfg.get("mcpServers"),
-    clearLegacyMcp: async () => { await cfg.update("mcpServers", undefined, vscode.ConfigurationTarget.Global) },
   })
 }
