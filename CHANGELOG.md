@@ -4,6 +4,18 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.5] — 2026-08-13
+
+### Fixed
+
+- **TUI/CLI session divergence** ("TUI shows far fewer messages"): the extension never updated the CLI's `display` WYSIWYG snapshot, so returning to the TUI resumed a STALE snapshot and hid every message added in VS Code. The extension now clears `display` on write — the CLI (deprecated the field entirely) rebuilds from history, and rebuilds lazily (latest 200 messages + PgUp pages).
+- **Test-quality issues** (advisor-reviewed): an always-true assertion in advisor tests, a vacuous proxy assertion, smoke-provider preset drift (deepseek/minimax endpoints diverged from config-io), and a missing `format` propagation that sent claude/gemini through the OpenAI transport in the smoke tool.
+
+### Added
+
+- **First-run onboarding**: when no provider has a key, the panel opens a guided setup — pick a preset, paste the API key, Save & Start. Closes itself once a key lands; Skip defers; Full settings hands off to the complete settings panel.
+- **Webview automated coverage** (happy-dom): message/tool rendering, settings-panel cards and switches, the save flow, diff-preview line classification, and the welcome panel — the webview went from zero coverage to DOM-level regression tests.
+
 ## [0.1.4] — 2026-08-13
 
 ### Fixed
