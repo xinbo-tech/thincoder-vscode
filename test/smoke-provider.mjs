@@ -32,6 +32,7 @@ const provider = {
   ...(preset.thinking ? { thinking: preset.thinking } : {}),
   ...(preset.reasoningEffort ? { reasoningEffort: preset.reasoningEffort } : {}),
   ...(preset.chatPath ? { chatPath: preset.chatPath } : {}),
+  ...(preset.format ? { format: preset.format } : {}),
 }
 
 console.log("=== Provider ===")
