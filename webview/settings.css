@@ -48,6 +48,8 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
+  flex-shrink: 0; /* .panel-body is a flex column — without this the cards shrink
+                     and overflow:hidden clips their content into tiny stubs */
 }
 
 .settings-card-title {
