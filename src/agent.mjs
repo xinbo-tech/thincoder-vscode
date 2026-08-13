@@ -113,6 +113,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   let cfgSubagentTurns = 100
   let cfgMaxTurns = 100
   let cfgProviders = []
+  let cfgWebsearch = { provider: "tavily", apiKey: "" } // structured search; empty key → Bing fallback
   try {
     const raw = loadRaw()
     advisorCfg = raw.agent?.advisor ?? { enabled: false }
@@ -126,6 +127,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     cfgSubagentTurns = raw.agent?.subagentTurns ?? 100 // subagent turn cap (CLI parity)
     cfgMaxTurns = raw.agent?.maxTurns ?? 100
     cfgProviders = resolveProviders().providers // for subagent model overrides
+    cfgWebsearch = raw.websearch ?? { provider: "tavily", apiKey: "" }
   } catch { /* config unreadable — defaults */ }
   const engineering = engState?.enabled ?? cfgEngineering
 
@@ -151,6 +153,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       advisor: advisorCfg,
       agent: { engineering, subagentModel: cfgSubagentModel, subagentModels: cfgSubagentModels, subagentTurns: cfgSubagentTurns, maxTurns: cfgMaxTurns, verifyGuard: cfgVerifyGuard, compactThreshold: cfgCompactThreshold },
       proxy: cfgProxy, shell: cfgShell, providersList: cfgProviders,
+      websearch: cfgWebsearch,
     },
   }
 

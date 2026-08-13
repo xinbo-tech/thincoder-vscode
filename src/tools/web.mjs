@@ -13,6 +13,28 @@ function isPrivateUrl(urlStr) {
   return isPrivateHost(u.hostname)
 }
 
+/** Structured search via Tavily (optional — config.websearch.apiKey). Returns a
+ *  formatted result string, or null to fall back to Bing HTML scraping. */
+async function fetchTavily(query, limit, ctx) {
+  const apiKey = ctx?.agent?.config?.websearch?.apiKey
+  if (!apiKey) return null
+  try {
+    const res = await proxyFetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+      body: JSON.stringify({ query, search_depth: "basic", max_results: limit, include_answer: false, include_raw_content: false }),
+      signal: AbortSignal.timeout(15000),
+    }, resolveWebProxy(ctx))
+    if (!res.ok) return null
+    const data = await res.json()
+    const results = Array.isArray(data.results) ? data.results : []
+    if (results.length === 0) return null
+    return results.slice(0, limit).map((r, i) => `${i + 1}. [tavily] ${r.title ?? ""}\n   ${r.url}\n   ${r.content ?? ""}`).join("\n\n")
+  } catch {
+    return null // any failure → Bing fallback
+  }
+}
+
 export const websearchTool = {
   readonly: true,
   name: "websearch",
@@ -30,8 +52,13 @@ export const websearchTool = {
     required: ["query"],
   },
   async execute({ query, limit }, ctx) {
+    const max = limit || 8
+    // Structured search first when a Tavily key is configured (stable, no HTML
+    // scraping); silently falls back to Bing HTML extraction.
+    const tavily = await fetchTavily(query, max, ctx)
+    if (tavily) return tavily
     try {
-      const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${limit || 8}`
+      const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${max}`
       const res = await proxyFetch(url, {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ThinCoder-VSCode/0.1" },
       }, resolveWebProxy(ctx))
@@ -40,7 +67,7 @@ export const websearchTool = {
       const results = []
       const snippetRe = /<li class="b_algo"[^>]*>[\s\S]*?<h2[^>]*><a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/gi
       let match
-      while ((match = snippetRe.exec(html)) && results.length < (limit || 8)) {
+      while ((match = snippetRe.exec(html)) && results.length < max) {
         results.push({
           url: match[1],
           title: match[2].replace(/<[^>]+>/g, "").trim(),
