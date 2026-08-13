@@ -145,6 +145,10 @@ export async function executeToolBatches(agent, { response, history, fullHistory
             } catch { /* fall through */ }
           }
         } catch (e) {
+          // User interrupt (Stop) must propagate, not become a tool error — swallowing
+          // the AbortError keeps the loop running after the user asked to stop (CLI
+          // dispatch.mjs parity: rethrow when aborted).
+          if (e?.name === "AbortError" || signal?.aborted) throw e
           result = `Error: ${e.message}`
         }
       }

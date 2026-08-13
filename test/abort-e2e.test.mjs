@@ -142,3 +142,20 @@ test("bash: abort kills a long-running command (Stop works mid-command)", async 
   assert.match(r, /stopped|killed/, "aborted command: " + r.slice(0, 120))
   assert.ok(elapsed < 10000, `aborted fast, did not wait 60s (${elapsed}ms)`)
 })
+
+test("executeToolBatches rethrows AbortError from a tool (Stop propagates, not swallowed as a tool error)", async () => {
+  const { executeToolBatches } = await import("../src/agent/execute-tools.mjs")
+  const ctrl = new AbortController()
+  // A tool whose execute throws AbortError mid-run (e.g. fetch/websearch on abort).
+  const throwingTool = {
+    name: "fetch", readonly: true,
+    async execute() { ctrl.abort(); throw new DOMException("The operation was aborted", "AbortError") },
+  }
+  const toolByName = new Map([["fetch", throwingTool]])
+  const agent = { _planMode: false, config: { agent: {} } }
+  const response = { toolCalls: [{ id: "t1", name: "fetch", arguments: "{}" }] }
+  await assert.rejects(
+    () => executeToolBatches(agent, { response, history: [], fullHistory: [], toolByName, getAuto: () => true, callbacks: {}, signal: ctrl.signal, cwd: process.cwd(), depth: 0 }),
+    (e) => e.name === "AbortError",
+  )
+})
