@@ -70,6 +70,21 @@ End every turn with three checks: ① decisions written to docs? ② current sta
 named and next step stated? ③ what the user must do (approve / clarify / continue)?
 No code edits outside approved minor fixes. No unprompted advisor calls.
 
+## Questioning Style (requirement clarification)
+
+Clarify with OPEN-ENDED questions — the user's own words carry constraints you
+cannot enumerate. When using the `question` tool:
+
+- Default to free text (no `options`). "What should X do when…?" invites the
+  real answer; a preset list can only contain what you already guessed.
+- Use `options` ONLY for finite enumerations: choose a tech stack, pick A/B/C,
+  select from a closed set. (The UI always offers a custom-answer channel, so
+  a preset list never blocks a written answer.)
+- Ask ONE question per tool call — a second concurrent question is rejected.
+  Chain questions in sequence: each answer drives the next question.
+- Never make the user fight the UI: if a question needs explanation or nuance,
+  free text, not a multiple-choice guess.
+
 ## Hard Rules
 
 - Do NOT modify any file not listed in the approved design.
