@@ -175,11 +175,10 @@ export class ChatPanel {
       title: existing.title ?? "",
       activeProvider: extra.activeProvider ?? existing.activeProvider ?? "",
       history: fullHistory.filter(keepReal), contextHistory: contextHistory.filter(keepReal),
-      // display is the CLI's WYSIWYG render snapshot — the extension does NOT maintain it
-      // (the webview renders from history). Keeping the stale snapshot misleads the CLI:
-      // on resume it prefers display over history (startup.mjs), so a user who chats in
-      // VS Code then returns to the TUI would see the OLD snapshot and miss every message
-      // added in VS Code. Clear it — the CLI falls back to rebuilding from history.
+      // display (the CLI's old WYSIWYG render snapshot) is DEPRECATED — the CLI no
+      // longer reads or writes it (restore always rebuilds from history, lazily).
+      // Clear it defensively so OLD CLI builds still fall back to history instead
+      // of resuming from a stale snapshot missing every VS Code-added message.
       display: [], tasks: extra.tasks ?? existing.tasks ?? [],
       planMode: existing.planMode ?? false, goal: existing.goal ?? null,
       autoApprove: existing.autoApprove ?? false, advisor: existing.advisor ?? null,
