@@ -181,6 +181,15 @@ export async function parseStream(response, { onToken, onReasoning, signal }) {
     })
     try {
       await Promise.race([readLoop(), abortPromise])
+    } catch (e) {
+      // Interrupt (Ctrl+I): return the partial result so the agent loop commits it
+      // and injects the user's message, instead of erroring the turn (CLI parity).
+      if (e?.name === "AbortError" && signal.reason?.interrupt) {
+        result.interrupted = true
+        result.interruptMessage = signal.reason.message
+        return result
+      }
+      throw e
     } finally {
       try { await response.body.cancel() } catch { /* normal completion — no-op */ }
     }

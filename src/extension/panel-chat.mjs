@@ -98,74 +98,77 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   // pushReal into fullHistory (no separate accumulation needed here).
   // Accumulate token usage across all LLM calls in this turn (matches CLI)
   const totalUsage = { prompt_tokens: 0, completion_tokens: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 }
+  // Callbacks shared by the initial run and the interrupt-resume run (extracted so
+  // they can't drift apart).
+  const buildCallbacks = () => ({
+    onToken: (tok) => { panel._panel?.webview.postMessage({ type: "token", text: tok }) },
+    onReasoning: (r) => { panel._panel?.webview.postMessage({ type: "reasoning", text: r }) },
+    onTaskUpdate: (tasks) => {
+      const done = tasks.filter((t) => t.status === "done").length
+      const inProgress = tasks.filter((t) => t.status === "in_progress").length
+      const pending = tasks.filter((t) => t.status === "pending").length
+      panel._panel?.webview.postMessage({ type: "taskProgress", done, inProgress, pending, total: tasks.length, items: tasks })
+    },
+    onPlanMode: (active) => panel._panel?.webview.postMessage({ type: "planMode", active }),
+    onSubagent: (info) => panel._panel?.webview.postMessage({ type: "subagent", ...info }),
+    onGoal: (info) => panel._panel?.webview.postMessage({ type: "goal", ...info }),
+    onUsage: (u) => {
+      totalUsage.prompt_tokens += u.prompt_tokens ?? 0
+      totalUsage.completion_tokens += u.completion_tokens ?? 0
+      totalUsage.prompt_cache_hit_tokens += u.prompt_cache_hit_tokens ?? 0
+      totalUsage.prompt_cache_miss_tokens += u.prompt_cache_miss_tokens ?? 0
+      const ctxPct = ctxPercentForModel(u.prompt_tokens, p.model)
+      panel._panel?.webview.postMessage({ type: "usage", usage: { ...totalUsage }, ctxPct })
+    },
+    onToolCall: (n, a, id) => panel._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
+    onToolResult: (n, r, id) => panel._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 20000), id }),
+    onToolPanel: (name, chunk) => {
+      const kind = typeof chunk === "string" ? "text" : (chunk?.kind ?? "text")
+      const text = typeof chunk === "string" ? chunk : String(chunk?.text ?? "")
+      panel._panel?.webview.postMessage({ type: "toolPanel", name, kind, text, round: chunk?.round })
+    },
+    onComplete: (content, agentState) => {
+      panel._saveLines(fullHistory, history, { activeProvider: providerName, ...agentState })
+      panel._panel?.webview.postMessage({ type: "complete" })
+      panel._pushSessions()
+    },
+    onPermissionRequired: permissionGate(panel),
+    onQuestion: (question, options) => new Promise((resolve) => {
+      panel._questionQueue.push({ resolve })
+      panel._setStatus("waiting")
+      panel._panel?.webview.postMessage({ type: "question", question, options: options ?? null })
+    }),
+  })
+  const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume })
   try {
-    await runAgent(p, cwd, text, {
-      onToken: (tok) => { panel._panel?.webview.postMessage({ type: "token", text: tok }) },
-      onReasoning: (r) => { panel._panel?.webview.postMessage({ type: "reasoning", text: r }) },
-      onTaskUpdate: (tasks) => {
-        const done = tasks.filter((t) => t.status === "done").length
-        const inProgress = tasks.filter((t) => t.status === "in_progress").length
-        const pending = tasks.filter((t) => t.status === "pending").length
-        panel._panel?.webview.postMessage({ type: "taskProgress", done, inProgress, pending, total: tasks.length, items: tasks })
-      },
-      onPlanMode: (active) => panel._panel?.webview.postMessage({ type: "planMode", active }),
-      onSubagent: (info) => panel._panel?.webview.postMessage({ type: "subagent", ...info }),
-      onGoal: (info) => panel._panel?.webview.postMessage({ type: "goal", ...info }),
-      onUsage: (u) => {
-        totalUsage.prompt_tokens += u.prompt_tokens ?? 0
-        totalUsage.completion_tokens += u.completion_tokens ?? 0
-        totalUsage.prompt_cache_hit_tokens += u.prompt_cache_hit_tokens ?? 0
-        totalUsage.prompt_cache_miss_tokens += u.prompt_cache_miss_tokens ?? 0
-        const ctxPct = ctxPercentForModel(u.prompt_tokens, p.model)
-        panel._panel?.webview.postMessage({ type: "usage", usage: { ...totalUsage }, ctxPct })
-      },
-      onToolCall: (n, a, id) => panel._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
-      onToolResult: (n, r, id) => panel._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 20000), id }),
-      // Advisor/verbose-tool progress: {kind, text} chunks (CLI TUI parity) —
-      // the webview accumulates them per kind (think/tool/text) instead of
-      // overwriting the panel on every message.
-      onToolPanel: (name, chunk) => {
-        const kind = typeof chunk === "string" ? "text" : (chunk?.kind ?? "text")
-        const text = typeof chunk === "string" ? chunk : String(chunk?.text ?? "")
-        panel._panel?.webview.postMessage({ type: "toolPanel", name, kind, text, round: chunk?.round })
-      },
-      onComplete: (content, agentState) => {
-        // runAgent already appended the real messages to both lines via pushReal; just persist them.
-        // agentState carries the engineering/advisor bookkeeping (CLI session fields:
-        // engineering / engDesignToken / advisorRound).
-        panel._saveLines(fullHistory, history, { activeProvider: providerName, ...agentState })
-        panel._panel?.webview.postMessage({ type: "complete" })
-        panel._pushSessions()
-      },
-      onPermissionRequired: permissionGate(panel),
-      // Inline question prompts (question tool) — rendered in the panel, NOT via
-      // VS Code's native QuickPick/InputBox (which pops up at the window top and
-      // gets dismissed by an accidental click).
-      onQuestion: (question, options) => new Promise((resolve) => {
-        panel._questionQueue.push({ resolve })
-        panel._setStatus("waiting")
-        panel._panel?.webview.postMessage({ type: "question", question, options: options ?? null })
-      }),
-    }, panel._abortController.signal, () => panel._autoApprove, { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean) })
+    await runAgent(p, cwd, text, buildCallbacks(), panel._abortController.signal, () => panel._autoApprove, runOpts(false))
   } catch (e) {
-    // Persist the interrupted/errored turn: the user message and any partial output
-    // were already pushed into both lines by runAgent (pushReal). Without this save,
-    // an abort/error loses the whole turn from disk (CLI parity: at most half a turn lost).
-    try {
-      panel._saveLines(fullHistory, history, { activeProvider: providerName })
-    } catch (saveErr) {
-      console.error("[chat-panel] save after abort/error failed:", saveErr.message)
-    }
-    if (e.name === "AbortError") {
-      panel._panel.webview.postMessage({ type: "aborted" })
+    // Ctrl+I interrupt: the abort carries reason.interrupt — rebuild the
+    // controller and RESUME the same turn (the interrupt message is already in
+    // history; the model continues from there). CLI agent-turn.mjs parity.
+    if (e?.name === "AbortError" && e.reason?.interrupt) {
+      panel._abortController = new AbortController()
+      await runAgent(p, cwd, text, buildCallbacks(), panel._abortController.signal, () => panel._autoApprove, runOpts(true))
     } else {
-      console.error("[chat-panel] runAgent failed:", e.message, "provider:", p.baseURL, "model:", p.model)
-      // Friendly surface: first line only, URLs stripped (provider errors leak
-      // the baseURL into the message). Full detail + provider/model folds away.
-      const rawMsg = e.message || String(e)
-      const text = rawMsg.split("\n")[0].replace(/https?:\/\/[^\s,)"]+/g, "[endpoint]")
-      const techInfo = [rawMsg, `→ Provider: ${p.baseURL}`, `→ Model: ${p.model}`].join("\n")
-      panel._panel.webview.postMessage({ type: "error", text, techInfo })
+      // Persist the interrupted/errored turn: the user message and any partial output
+      // were already pushed into both lines by runAgent (pushReal). Without this save,
+      // an abort/error loses the whole turn from disk (CLI parity: at most half a turn lost).
+      try {
+        panel._saveLines(fullHistory, history, { activeProvider: providerName })
+      } catch (saveErr) {
+        console.error("[chat-panel] save after abort/error failed:", saveErr.message)
+      }
+      if (e.name === "AbortError") {
+        panel._panel.webview.postMessage({ type: "aborted" })
+      } else {
+        console.error("[chat-panel] runAgent failed:", e.message, "provider:", p.baseURL, "model:", p.model)
+        // Friendly surface: first line only, URLs stripped (provider errors leak
+        // the baseURL into the message). Full detail + provider/model folds away.
+        const rawMsg = e.message || String(e)
+        const text = rawMsg.split("\n")[0].replace(/https?:\/\/[^\s,)"]+/g, "[endpoint]")
+        const techInfo = [rawMsg, `→ Provider: ${p.baseURL}`, `→ Model: ${p.model}`].join("\n")
+        panel._panel.webview.postMessage({ type: "error", text, techInfo })
+      }
     }
   } finally {
     panel._turnActive = false

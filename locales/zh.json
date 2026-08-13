@@ -191,5 +191,6 @@
   "settings.connOk": "✓ 连接成功 — {count} 个模型",
   "settings.connFailed": "连接失败",
   "settings.fetchModelsFirst": "请先拉取模型",
-  "settings.providerUrlRequired": "需要 baseURL"
+  "settings.providerUrlRequired": "需要 baseURL",
+  "input.interruptPlaceholder": "中断 — 注入消息…（Enter 发送，Esc 取消）"
 }

@@ -62,7 +62,7 @@ export { builtinTools } from "./tools.mjs"
  * @param {object} opts - { depth, role, maxTurns } for subagent context
  */
 export async function runAgent(provider, cwd, input, callbacks = {}, signal, autoApprove = true, opts = {}) {
-  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills, engState, engDesignReviewed } = opts
+  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills, engState, engDesignReviewed, resume = false } = opts
 
   // Live autoApprove read (CLI parity: agent.autoApprove is a live field, not a snapshot).
   // The panel passes a getter because approve-all / the AUTO toolbar button flip the flag
@@ -237,7 +237,9 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     }
   }
 
-  pushReal(history, fullHistory, { role: "user", content: input })
+  // resume (interrupt continuation): the input is already in history — pushing it
+  // again would duplicate the user message (CLI setup.mjs resume parity).
+  if (!resume) pushReal(history, fullHistory, { role: "user", content: input })
 
   // Machine-only injections (editor context, etc.) — pushed to the MACHINE line ONLY,
   // never into fullHistory (CLI parity: automatic context must not pollute the
@@ -343,6 +345,17 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       onWait: callbacks.onWait,
       signal,
     })
+
+    // Interrupt (Ctrl+I, CLI agent.mjs parity): the SSE stream returned the
+    // partial result — commit the partial assistant output, inject the user's
+    // message, and throw so the outer loop rebuilds the controller and resumes.
+    if (response.interrupted) {
+      if (response.content) pushReal(history, fullHistory, { role: "assistant", content: response.content })
+      history.push({ role: "user", content: `[User interrupt: ${response.interruptMessage}]` })
+      const err = new DOMException("Aborted", "AbortError")
+      err.reason = { interrupt: true, message: response.interruptMessage }
+      throw err
+    }
 
     if (response.usage && depth === 0) {
       callbacks.onUsage?.(response.usage)
@@ -469,6 +482,12 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
 
     await executeToolBatches(agent, { response, history, fullHistory, toolByName, getAuto, callbacks, signal, cwd, recentSigs, depth })
 
+    // Ctrl+I interrupt during tool execution (CLI agent.mjs parity): skip committing
+    // partial tool results — they'd mislead the model. Inject the interrupt and retry.
+    if (signal?.reason?.interrupt) {
+      history.push({ role: "user", content: `[User interrupt: ${signal.reason.message}]` })
+      continue
+    }
     // Expired timers — inject reminders when the thinking budget is up (ported from CLI post-turn)
     if (agent._pendingTimers.length > 0) {
       const now = Date.now()

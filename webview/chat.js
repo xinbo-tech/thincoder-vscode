@@ -79,6 +79,9 @@ let _welcomeDismissed = false
 let _currentTool = null  // name of the tool currently executing (CLI status parity)
 let _llmCalls = 0        // LLM calls this turn (CLI turn-count parity)
 let _turnStart = null    // ms timestamp of the current turn (elapsed parity)
+// Interrupt mode (Ctrl+I, CLI parity): the input box switches to "inject a
+// message" — Enter aborts the turn and injects it, Esc cancels.
+let _interruptMode = false
 
 // ─── Init ──────────────────────────────────────
 
@@ -86,7 +89,53 @@ showWelcome(ctx)
 
 ctx.sendBtn.addEventListener("click", send)
 ctx.abortBtn.addEventListener("click", () => vscode.postMessage({ type: "abort" }))
+
+// ─── Interrupt mode (Ctrl+I inject, CLI parity) ──
+let _savedPlaceholder = ""
+function enterInterruptMode() {
+  _interruptMode = true
+  _savedPlaceholder = ctx.inputEl.placeholder
+  ctx.inputEl.placeholder = t("input.interruptPlaceholder")
+  ctx.inputEl.classList.add("interrupt-mode")
+  ctx.inputEl.focus()
+}
+function exitInterruptMode() {
+  _interruptMode = false
+  ctx.inputEl.placeholder = _savedPlaceholder
+  ctx.inputEl.classList.remove("interrupt-mode")
+  ctx.inputEl.value = ""
+  ctx.inputEl.style.height = "auto"
+}
+
 ctx.inputEl.addEventListener("keydown", (e) => {
+  // Interrupt mode swallows keys: Enter injects the message, Esc cancels.
+  if (_interruptMode) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      const msg = ctx.inputEl.value.trim()
+      exitInterruptMode()
+      if (msg) vscode.postMessage({ type: "interrupt", message: msg })
+    } else if (e.key === "Escape") {
+      exitInterruptMode()
+    }
+    return
+  }
+  // Ctrl+C with NO selection while running → Stop (CLI parity). A selection
+  // still copies (default browser behavior).
+  if (e.key === "c" && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+    const hasSelection = ctx.inputEl.selectionStart !== ctx.inputEl.selectionEnd
+    if (!hasSelection && ctx.isRunning) {
+      e.preventDefault()
+      vscode.postMessage({ type: "abort" })
+    }
+    return
+  }
+  // Ctrl+I while running → interrupt + inject (CLI parity)
+  if (e.key === "i" && e.ctrlKey && !e.altKey && !e.metaKey && ctx.isRunning) {
+    e.preventDefault()
+    enterInterruptMode()
+    return
+  }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() }
   // Input history navigation (CLI parity): ↑ on the first line recalls previous
   // inputs; ↓ walks back down; the in-progress draft is stashed and restored.

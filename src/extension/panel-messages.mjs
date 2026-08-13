@@ -58,6 +58,9 @@ export async function handlePanelMessage(panel, msg) {
       break
     }
     case "abort": panel._abortController?.abort(); break
+    // Ctrl+I inject (CLI parity): abort with an interrupt reason — the agent loop
+    // commits partial output, injects the message, and resumes from the same context.
+    case "interrupt": panel._abortController?.abort({ interrupt: true, message: msg.message }); break
     case "loadOlder": panel._loadOlder(msg.before); break
     case "questionResponse": {
       const entry = panel._questionQueue.shift()

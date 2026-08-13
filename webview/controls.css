@@ -348,6 +348,12 @@
   border-top-color: var(--accent);
 }
 
+/* Interrupt mode (Ctrl+I) — input box gets a distinct warning accent */
+#input.interrupt-mode {
+  border-color: var(--vscode-editorWarning-foreground, #cca700);
+  box-shadow: 0 0 0 1px var(--vscode-editorWarning-foreground, #cca700);
+}
+
 /* ─── Loading animation ───────────────────────── */
 
 #status-line:empty {

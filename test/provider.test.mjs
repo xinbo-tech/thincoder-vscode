@@ -84,6 +84,42 @@ describe("OpenAI SSE parsing", () => {
     assert.equal(result.usage.prompt_cache_miss_tokens, 200) // 1000 - 800
   })
 
+  it("interrupt (Ctrl+I) returns the partial result with interruptMessage instead of throwing", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const ctrl = new AbortController()
+    const enc = new TextEncoder()
+    const stream = new ReadableStream({
+      async start(controller) {
+        controller.enqueue(enc.encode('data: {"id":"1","choices":[{"delta":{"content":"partial out"}}]}\n'))
+        setTimeout(() => ctrl.abort({ interrupt: true, message: "focus on X" }), 20)
+        // never closes — the interrupt must break the hung for-await via the abort race
+      },
+    })
+    const response = { body: stream, ok: true, headers: new Map([["content-type", "text/event-stream"]]) }
+    const result = await parseStream(response, { onToken: () => {}, onReasoning: () => {}, signal: ctrl.signal })
+    assert.equal(result.interrupted, true)
+    assert.equal(result.interruptMessage, "focus on X")
+    assert.equal(result.content, "partial out")
+  })
+
+  it("a plain Stop (no interrupt reason) still throws AbortError", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const ctrl = new AbortController()
+    const enc = new TextEncoder()
+    const stream = new ReadableStream({
+      async start(controller) {
+        controller.enqueue(enc.encode('data: {"id":"1","choices":[{"delta":{"content":"x"}}]}\n'))
+        setTimeout(() => ctrl.abort(), 20) // no reason → plain Stop
+      },
+    })
+    const response = { body: stream, ok: true, headers: new Map([["content-type", "text/event-stream"]]) }
+    await assert.rejects(
+      () => parseStream(response, { onToken: () => {}, onReasoning: () => {}, signal: ctrl.signal }),
+      (e) => e.name === "AbortError",
+    )
+  })
+
+
   it("normalizeUsageCache leaves DeepSeek-style usage untouched and ignores cache-free usage", async () => {
     const { normalizeUsageCache } = await import("../src/provider/transports/openai.mjs")
     const ds = { prompt_cache_hit_tokens: 500, prompt_cache_miss_tokens: 500 }
