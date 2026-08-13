@@ -64,7 +64,7 @@ export function buildRequest(provider, messages, tools) {
  * Parse Anthropic SSE stream (server-sent events).
  * Events: message_start, content_block_start, content_block_delta, content_block_stop, message_delta, message_stop
  */
-export async function parseStream(response, { onToken, onReasoning }) {
+export async function parseStream(response, { onToken, onReasoning, signal }) {
   const result = { content: "", reasoning: "", toolCalls: [], usage: null, finishReason: null }
   const decoder = new TextDecoder()
   let buffer = ""
@@ -123,27 +123,53 @@ export async function parseStream(response, { onToken, onReasoning }) {
   let currentEvent = ""
   let currentData = ""
 
-  for await (const chunk of response.body) {
-    buffer += decoder.decode(chunk, { stream: true })
-    const lines = buffer.split("\n")
-    buffer = lines.pop()
+  const abortErr = () => {
+    const e = new DOMException("The operation was aborted", "AbortError")
+    e.reason = signal?.reason
+    return e
+  }
 
-    for (const line of lines) {
-      if (line.startsWith("event: ")) {
-        // Flush previous event
-        if (currentEvent) processEvent(currentEvent, currentData)
-        currentEvent = line.slice(7).trim()
-        currentData = ""
-      } else if (line.startsWith("data: ")) {
-        currentData = line.slice(6).trim()
-      } else if (line === "") {
-        // Empty line = event separator
-        if (currentEvent) processEvent(currentEvent, currentData)
-        currentEvent = ""
-        currentData = ""
+  const readLoop = async () => {
+    for await (const chunk of response.body) {
+      if (signal?.aborted) throw abortErr()
+      buffer += decoder.decode(chunk, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop()
+
+      for (const line of lines) {
+        if (line.startsWith("event: ")) {
+          // Flush previous event
+          if (currentEvent) processEvent(currentEvent, currentData)
+          currentEvent = line.slice(7).trim()
+          currentData = ""
+        } else if (line.startsWith("data: ")) {
+          currentData = line.slice(6).trim()
+        } else if (line === "") {
+          // Empty line = event separator
+          if (currentEvent) processEvent(currentEvent, currentData)
+          currentEvent = ""
+          currentData = ""
+        }
       }
     }
   }
+
+  if (signal) {
+    // Race the read loop against the abort — a Stop interrupts even a silent
+    // stream (no chunks arriving) that the for-await would otherwise hang on.
+    const abortPromise = new Promise((_, reject) => {
+      const onAbort = () => reject(abortErr())
+      signal.addEventListener("abort", onAbort, { once: true })
+    })
+    try {
+      await Promise.race([readLoop(), abortPromise])
+    } finally {
+      try { await response.body.cancel() } catch { /* normal completion — no-op */ }
+    }
+  } else {
+    await readLoop()
+  }
+
   // Flush remaining
   buffer += decoder.decode()
   for (const line of buffer.split("\n")) {

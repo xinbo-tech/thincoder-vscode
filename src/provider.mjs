@@ -77,7 +77,7 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
   await rateGate(provider, estimated, onWait, signal)
 
   const response = await requestWithRetry(provider, req.url, req.headers, req.body, signal, onWait)
-  const result = await transport.parseStream(response, { onToken, onReasoning })
+  const result = await transport.parseStream(response, { onToken, onReasoning, signal })
   recordRate(provider, estimated, result.usage)
 
   // Continuation handling (OpenAI-format only — Claude/Gemini handle truncation differently)

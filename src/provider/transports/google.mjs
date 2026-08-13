@@ -95,7 +95,7 @@ export function buildRequest(provider, messages, tools) {
  * Gemini SSE format: data: {...}\n\n (each line is a complete JSON object)
  * Response shape: { candidates: [{ content: { parts: [{ text }] }, finishReason }], usageMetadata }
  */
-export async function parseStream(response, { onToken, onReasoning }) {
+export async function parseStream(response, { onToken, onReasoning, signal }) {
   const result = { content: "", reasoning: "", toolCalls: [], usage: null, finishReason: null }
   const decoder = new TextDecoder()
   let buffer = ""
@@ -150,18 +150,44 @@ export async function parseStream(response, { onToken, onReasoning }) {
   }
 
   if (!response.body) throw new Error("No stream response body")
-  for await (const chunk of response.body) {
-    buffer += decoder.decode(chunk, { stream: true })
-    const lines = buffer.split("\n")
-    buffer = lines.pop()
 
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue
-      const data = line.slice(5).trim()
-      if (!data || data === "[DONE]") continue
-      processData(data)
+  const abortErr = () => {
+    const e = new DOMException("The operation was aborted", "AbortError")
+    e.reason = signal?.reason
+    return e
+  }
+
+  const readLoop = async () => {
+    for await (const chunk of response.body) {
+      if (signal?.aborted) throw abortErr()
+      buffer += decoder.decode(chunk, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop()
+
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue
+        const data = line.slice(5).trim()
+        if (!data || data === "[DONE]") continue
+        processData(data)
+      }
     }
   }
+
+  if (signal) {
+    // Race against abort — a Stop interrupts even a silent stream (CLI parity +).
+    const abortPromise = new Promise((_, reject) => {
+      const onAbort = () => reject(abortErr())
+      signal.addEventListener("abort", onAbort, { once: true })
+    })
+    try {
+      await Promise.race([readLoop(), abortPromise])
+    } finally {
+      try { await response.body.cancel() } catch { /* normal completion — no-op */ }
+    }
+  } else {
+    await readLoop()
+  }
+
   buffer += decoder.decode()
   for (const line of buffer.split("\n")) {
     if (!line.startsWith("data:")) continue

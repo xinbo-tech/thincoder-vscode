@@ -46,12 +46,21 @@ export function buildRequest(provider, messages, tools) {
 /**
  * Parse OpenAI SSE stream. Returns { content, reasoning, toolCalls, usage, finishReason }.
  * Reads the full response body; calls onToken/onReasoning callbacks per chunk.
+ * `signal` (CLI parity, sse.mjs): every chunk checks aborted; additionally the
+ * read loop races an abort promise so a Stop interrupts even a SILENT stream
+ * (server accepted, no data — the for-await would otherwise hang).
  */
-export async function parseStream(response, { onToken, onReasoning }) {
+export async function parseStream(response, { onToken, onReasoning, signal }) {
   const result = { content: "", reasoning: "", toolCalls: [], usage: null, finishReason: null }
   const decoder = new TextDecoder()
   let buffer = ""
   let hasChoices = false
+
+  const abortError = () => {
+    const e = new DOMException("The operation was aborted", "AbortError")
+    e.reason = signal?.reason
+    return e
+  }
 
   const processLines = (lines) => {
     for (const line of lines) {
@@ -87,12 +96,32 @@ export async function parseStream(response, { onToken, onReasoning }) {
   }
 
   if (!response.body) throw new Error("No stream response body")
-  for await (const chunk of response.body) {
-    buffer += decoder.decode(chunk, { stream: true })
-    const lines = buffer.split("\n")
-    buffer = lines.pop()
-    processLines(lines)
+
+  const readLoop = async () => {
+    for await (const chunk of response.body) {
+      if (signal?.aborted) throw abortError()
+      buffer += decoder.decode(chunk, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop()
+      processLines(lines)
+    }
   }
+
+  if (signal) {
+    const abortPromise = new Promise((_, reject) => {
+      const onAbort = () => reject(abortError())
+      signal.addEventListener("abort", onAbort, { once: true })
+    })
+    try {
+      await Promise.race([readLoop(), abortPromise])
+    } finally {
+      // Abort won the race — release the hanging stream; normal completion is a no-op.
+      try { await response.body.cancel() } catch { /* */ }
+    }
+  } else {
+    await readLoop()
+  }
+
   buffer += decoder.decode()
   processLines(buffer.split("\n"))
 
