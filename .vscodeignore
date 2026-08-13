@@ -8,6 +8,8 @@ docs/**
 .cursor/**
 .github/**
 .thincoder/**
+.thincoder-*
+*.txt
 *.vsix
 AGENTS.md
 eslint.config.mjs

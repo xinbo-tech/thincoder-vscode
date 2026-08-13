@@ -4,6 +4,10 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.3] — 2026-08-13
+
+Repackaged release — 0.1.2 shipped with a stray temporary file in the vsix; `.vscodeignore` now excludes scratch files.
+
 ## [0.1.2] — 2026-08-13
 
 ### Fixed
