@@ -4,6 +4,22 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.9] — 2026-08-13
+
+### Added
+
+- **CLI keyboard parity**: Ctrl+C stops a running turn (a text selection still copies), Ctrl+I opens an interrupt-and-inject prompt (partial output committed, message injected, turn resumes on a rebuilt controller — full CLI interrupt semantics), Ctrl+F opens in-conversation search (live highlight + match counter + navigation), Ctrl+U clears the input line.
+
+### Fixed
+
+- **Stop actually stops**: bash long-running commands now kill the whole process tree on Stop (CLI killProcessTree parity), and tool-execution AbortErrors propagate out of the batch instead of being swallowed into "Error:" tool results — the "clicked stop, kept running, stopped a few turns later" bug.
+- **Input-history ↑ never worked**: navigateInputHistory computed -1 + (-1) = -2 which clamped back to -1, so ArrowUp at the top could never recall a prior message. Fixed to CLI semantics (draft → newest, walk older).
+- **Error banner**: shows a friendly first line with URLs stripped; full detail + provider/model folds into Details.
+
+### Changed
+
+- **Add-provider flow**: a custom provider's model is now PICKED from a /models-probed dropdown (validates baseURL+key — no more silent hand-typed typos); preset adds also verify the connection right after save and surface failures in the settings error banner.
+
 ## [0.1.8] — 2026-08-13
 
 ### Fixed
