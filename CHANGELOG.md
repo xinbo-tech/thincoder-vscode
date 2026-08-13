@@ -4,6 +4,18 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.8] — 2026-08-13
+
+### Fixed
+
+- **Tool output scroll follow**: `finishTool` auto-expanded the card's output but never scrolled the conversation, so long results sat below the fold. Now scrolls into view on completion.
+- **Cache-hit % missing for non-DeepSeek providers**: Kimi/OpenAI report the cache hit as `prompt_tokens_details.cached_tokens` while the status bar read DeepSeek's `prompt_cache_hit_tokens`. Usage is now normalized so the cache-hit % renders for Kimi/OpenAI-style providers too (miss derived as prompt_tokens − hit).
+
+### Changed
+
+- **Bash output renders inline in the conversation tool card** — the side tool panel push was removed (it duplicated what `finishTool` already renders and lingered after completion); tool-result cap raised 2000→20000 chars (the card scrolls). The now-unused side tool panel (container + render logic + CSS) is removed.
+- **Settings panel**: advisor provider/model and all subagent model overrides (global + explore/plan/coder/eng-coder) are dropdowns listing known providers/models instead of free-text. New **Web Search** card to configure the optional Tavily key.
+
 ## [0.1.7] — 2026-08-13
 
 ### Fixed
