@@ -49,6 +49,9 @@ export async function executeToolBatches(agent, { response, history, fullHistory
   // Execute batches in order (parallel within batch, serial between batches)
   for (const batch of batches) {
     const runOne = async ({ tc, tool }) => {
+      // Stop already requested — don't even start the tool (tools that block
+      // synchronously would otherwise delay the abort until they finish).
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
       const toolName = tc.name
       let args
       try { args = JSON.parse(tc.arguments || "{}") } catch {

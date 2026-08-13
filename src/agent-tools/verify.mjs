@@ -3,8 +3,9 @@
  * Run a pre-completion self-check: syntax checks + VSCode diagnostics on changed files,
  * optionally the full test suite.
  */
-import { resolvePath } from "../tools/shared.mjs"
+import { resolvePath, runInterruptible } from "../tools/shared.mjs"
 import * as vscode from "vscode"
+import { join } from "node:path"
 
 export const verifyTool = {
   name: "verify",
@@ -26,15 +27,15 @@ export const verifyTool = {
     let anyFailure = false
     const results = []
 
-    // 1. Syntax check (node --check) for JS files
+    // 1. Syntax check (node --check) for JS files — interruptible (Stop kills it)
     for (const f of files) {
       if (/\.(m?js|cjs)$/.test(f)) {
         try {
-          const { execSync } = await import("node:child_process")
           const abs = resolvePath(f, ctx.cwd)
-          execSync(`node --check "${abs}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000, stdio: "pipe" })
+          await runInterruptible(process.execPath, ["--check", abs], { cwd: ctx.cwd, timeout: 10000, signal: ctx.signal })
           results.push(`✓ ${f}: syntax OK`)
         } catch (e) {
+          if (e.name === "AbortError") throw e  // propagate Stop — do not swallow as a syntax failure
           anyFailure = true
           results.push(`✗ ${f}: ${(e.stderr || e.message).slice(0, 200)}`)
         }
@@ -79,13 +80,17 @@ export const verifyTool = {
       results.push("\n✓ diagnostics: no errors or warnings")
     }
 
-    // 3. Test suite (full mode)
+    // 3. Test suite (full mode) — interruptible (Stop kills npm test)
     if (full) {
       try {
-        const { execSync } = await import("node:child_process")
-        const testResult = execSync("npm test", { cwd: ctx.cwd, encoding: "utf8", timeout: 60000, stdio: "pipe" })
+        // npm-cli.js via the current Node binary (avoids Windows npm.cmd spawn EINVAL;
+        // same pattern as linter's NPX_CLI). execSync froze the host event loop and a
+        // Stop click could not even be DELIVERED until the command finished.
+        const npmCli = join(process.execPath.replace(/[\\/][^\\/]+$/, ""), "node_modules", "npm", "bin", "npm-cli.js")
+        const testResult = await runInterruptible(process.execPath, [npmCli, "test"], { cwd: ctx.cwd, timeout: 60000, signal: ctx.signal })
         results.push(`\n=== Test suite ===\n${testResult.slice(0, 3000)}`)
       } catch (e) {
+        if (e.name === "AbortError") throw e  // propagate Stop
         anyFailure = true
         results.push(`\n=== Test suite FAILED ===\n${(e.stdout || e.stderr || e.message).slice(0, 2000)}`)
       }

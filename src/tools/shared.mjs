@@ -44,7 +44,79 @@ export function formatSize(bytes) {
 
 // ─── Git helpers (CLI shared.mjs parity — keep in sync) ─────────
 
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawn } from "node:child_process"
+
+/**
+ * Run a child process INTERRUPTIBLY (spawn, not execSync).
+ * execSync blocks the extension-host event loop — a Stop click during a long
+ * lint/verify run could not even be DELIVERED until the command finished.
+ * This spawns asynchronously and kills the child on abort/timeout.
+ *
+ * Success → resolves the stdout string (execFileSync-compatible call sites).
+ * Non-zero exit / spawn error / timeout / abort → rejects an Error whose
+ * .stdout/.stderr/.code are populated like execFileSync's error.
+ */
+export function runInterruptible(cmd, args, opts = {}) {
+  const { cwd, timeout, signal, env } = opts
+  return new Promise((resolve, reject) => {
+    let child
+    try {
+      child = spawn(cmd, args, { cwd, env: env ?? process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true })
+    } catch (e) {
+      reject(e)
+      return
+    }
+    let stdout = "", stderr = "", settled = false, timer = null
+
+    const finish = (err, out) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      if (err) {
+        err.stdout = stdout
+        err.stderr = stderr
+        reject(err)
+      } else {
+        resolve(out)
+      }
+    }
+
+    const onAbort = () => {
+      child.kill()
+      const e = new Error("aborted by user (Stop)")
+      e.name = "AbortError"
+      finish(e)
+    }
+
+    if (timeout) {
+      timer = setTimeout(() => {
+        child.kill()
+        const e = new Error(`timed out after ${timeout}ms`)
+        e.name = "TimeoutError"
+        finish(e)
+      }, timeout)
+    }
+
+    child.stdout?.on("data", (d) => { stdout += d })
+    child.stderr?.on("data", (d) => { stderr += d })
+    child.on("error", (e) => finish(e))
+    child.on("close", (code) => {
+      if (code === 0) finish(null, stdout)
+      else {
+        const e = new Error(`command failed with exit code ${code}`)
+        e.code = code
+        finish(e)
+      }
+    })
+
+    if (signal) {
+      if (signal.aborted) { onAbort(); return }
+      signal.addEventListener("abort", onAbort, { once: true })
+    }
+  })
+}
+
 
 /** Run git with args, return trimmed stdout ("" on failure). CLI parity. */
 export function runGit(cwd, cmdArgs) {

@@ -4,7 +4,7 @@
  * Fast path: node --check. Full path: language-aware cascade (eslint → tsc → node --check for JS/TS).
  */
 
-import { execFileSync } from "node:child_process"
+import { runInterruptible } from "./shared.mjs"
 import { existsSync } from "node:fs"
 import { join, relative, isAbsolute } from "node:path"
 import { resolvePath } from "./shared.mjs"
@@ -35,29 +35,27 @@ export const lintTool = {
     if (!abs) return "lint: no file specified and no recently modified file to check"
 
     if (!args.full) {
-      return nodeCheckResult(abs)
+      return nodeCheckResult(abs, ctx.signal)
     }
 
     const ext = abs.split(".").pop()?.toLowerCase()
     const checkers = LANG_CHECKERS[ext]
-    if (!checkers) return nodeCheckResult(abs)
+    if (!checkers) return nodeCheckResult(abs, ctx.signal)
 
     for (const checker of checkers) {
-      const result = await checker(abs, { cwd: ctx.cwd })
+      const result = await checker(abs, { cwd: ctx.cwd, signal: ctx.signal })
       if (result !== null) return result
     }
     return `lint: no linter available for ${abs}. Install one?`
   },
 }
 
-function nodeCheckResult(abs) {
+async function nodeCheckResult(abs, signal) {
   if (!/\.(?:m?js|cjs|m?ts|cts|jsx|tsx)$/.test(abs)) {
     return `lint (check): only JS/TS-family files supported for fast syntax check; use full=true for other languages. Path: ${abs}`
   }
   try {
-    execFileSync(process.execPath, ["--check", abs], {
-      encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"],
-    })
+    await runInterruptible(process.execPath, ["--check", abs], { cwd: undefined, timeout: 10000, signal })
     return `Syntax OK: ${abs}`
   } catch (e) {
     const msg = (e.stderr || e.stdout || e.message || "").trim()
@@ -72,7 +70,7 @@ function nodeCheckResult(abs) {
 const NPX_CLI = join(process.execPath.replace(/[\\/][^\\/]+$/, ""), "node_modules", "npm", "bin", "npx-cli.js")
 const npxArgs = (args) => [NPX_CLI, ...args]
 
-async function eslintCheck(file, { cwd }) {
+async function eslintCheck(file, { cwd, signal }) {
   // dir may be absolute (file given as absolute path) — resolve against cwd only when relative
   let dir = file.split(/[\\/]/).slice(0, -1).join("/") || "."
   const resolveDir = (d) => (isAbsolute(d) ? d : join(cwd, d))
@@ -82,9 +80,7 @@ async function eslintCheck(file, { cwd }) {
         try {
           const cfgDir = resolveDir(dir)
           const relPath = relative(cfgDir, file)
-          execFileSync(process.execPath, npxArgs(["eslint", "--no-color", relPath]), {
-            cwd: cfgDir, encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
-          })
+          await runInterruptible(process.execPath, npxArgs(["eslint", "--no-color", relPath]), { cwd: cfgDir, timeout: 30000, signal })
           return "✓ eslint: no issues"
         } catch (e) {
           const stdout = (e.stdout || "").trim()
@@ -100,13 +96,11 @@ async function eslintCheck(file, { cwd }) {
   return null
 }
 
-async function tscCheck(file, { cwd }) {
+async function tscCheck(file, { cwd, signal }) {
   if (!existsSync(join(cwd, "tsconfig.json"))) return null
   if (!/\.(ts|tsx|mts|cts)$/.test(file)) return null
   try {
-    execFileSync(process.execPath, npxArgs(["tsc", "--noEmit", "--pretty", "false"]), {
-      cwd, encoding: "utf8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"],
-    })
+    await runInterruptible(process.execPath, npxArgs(["tsc", "--noEmit", "--pretty", "false"]), { cwd, timeout: 60000, signal })
     return "✓ tsc: no type errors"
   } catch (e) {
     const stdout = (e.stdout || "").trim()
@@ -115,12 +109,10 @@ async function tscCheck(file, { cwd }) {
   }
 }
 
-async function ruffCheck(file, { cwd }) {
+async function ruffCheck(file, { cwd, signal }) {
   if (!/\.py$/.test(file)) return null
   try {
-    execFileSync("ruff", ["check", "--output-format", "concise", file], {
-      cwd, encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"],
-    })
+    await runInterruptible("ruff", ["check", "--output-format", "concise", file], { cwd, timeout: 30000, signal })
     return "✓ ruff: no issues"
   } catch (e) {
     if (e.code === "ENOENT") return "lint: ruff not installed. Run: pip install ruff"
@@ -130,14 +122,12 @@ async function ruffCheck(file, { cwd }) {
   }
 }
 
-async function cargoCheck(file, { cwd }) {
+async function cargoCheck(file, { cwd, signal }) {
   if (!/\.rs$/.test(file)) return null
   if (!existsSync(join(cwd, "Cargo.toml"))) return null
   const fname = file.split(/[\\/]/).pop()
   try {
-    const out = execFileSync("cargo", ["check", "--message-format", "short"], {
-      cwd, encoding: "utf8", timeout: 120000, stdio: ["ignore", "pipe", "pipe"],
-    })
+    const out = await runInterruptible("cargo", ["check", "--message-format", "short"], { cwd, timeout: 120000, signal })
     const errors = out.split("\n").filter((l) => l.includes(fname))
     return errors.length > 0 ? errors.join("\n") : "✓ cargo check: no errors"
   } catch (e) {
@@ -147,12 +137,10 @@ async function cargoCheck(file, { cwd }) {
   }
 }
 
-async function goVet(file, { cwd }) {
+async function goVet(file, { cwd, signal }) {
   if (!/\.go$/.test(file)) return null
   try {
-    execFileSync("go", ["vet", file], {
-      cwd, encoding: "utf8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"],
-    })
+    await runInterruptible("go", ["vet", file], { cwd, timeout: 60000, signal })
     return "✓ go vet: no issues"
   } catch (e) {
     return `✗ go vet: ${(e.stderr || e.message).slice(0, 500)}`
