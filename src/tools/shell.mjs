@@ -104,7 +104,9 @@ export const bashTool = {
       const finish = (out) => {
         if (settled) return
         settled = true
-        ctx.callbacks?.onToolPanel?.("bash", out)
+        // Output shows in the in-conversation tool card (finishTool auto-expands
+        // it) — NOT the side tool panel (that duplication read as an intrusive
+        // overlay; reported as jarring).
         resolve(guard ? `${guard.notice}\n\n${out}` : out)
       }
       // Shell override from config (CLI parity). Windows + default cmd: force UTF-8

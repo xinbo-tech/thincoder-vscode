@@ -120,7 +120,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
         panel._panel?.webview.postMessage({ type: "usage", usage: { ...totalUsage }, ctxPct })
       },
       onToolCall: (n, a, id) => panel._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
-      onToolResult: (n, r, id) => panel._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 2000), id }),
+      onToolResult: (n, r, id) => panel._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 20000), id }),
       // Advisor/verbose-tool progress: {kind, text} chunks (CLI TUI parity) —
       // the webview accumulates them per kind (think/tool/text) instead of
       // overwriting the panel on every message.

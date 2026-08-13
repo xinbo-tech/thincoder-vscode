@@ -362,6 +362,17 @@ describe("bash — background process does not hang (CLI parity)", () => {
     assert.ok(r.includes("hello-from-vscode"), "正常命令输出完整: " + r)
     assert.ok(!r.includes("(background)"), "正常命令不触发 background 提示")
   })
+
+  it("bash output does NOT go to the side panel (it belongs in the conversation tool card)", async () => {
+    const { bashTool } = await import("../src/tools/shell.mjs")
+    let panelCalled = false
+    const r = await bashTool.execute({ command: "echo side-panel-check" }, {
+      cwd,
+      callbacks: { onToolPanel: () => { panelCalled = true } },
+    })
+    assert.equal(panelCalled, false, "bash must not push output to the side tool panel")
+    assert.match(r, /side-panel-check/, "output still returned for the in-conversation tool card")
+  })
 })
 
 
