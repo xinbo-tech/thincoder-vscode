@@ -100,7 +100,7 @@ const { showAtDropdown } = _ac
 
 // ─── Settings panel (init early so openSettings is available for toolbar binding) ──
 const _settings = initSettings({ onClose: () => ctx.inputEl.focus() })
-const { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateShellCandidates, updateProxySettings, updateProxyTestResult } = _settings
+const { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError } = _settings
 
 // ─── Session bar ───────────────────────────────
 
@@ -903,6 +903,9 @@ window.addEventListener("message", (e) => {
     case "providerStatus":
       updateProviderStatus(m.status || {})
       showBanner(ctx, m.keyOk ? t("banner.configured") : t("banner.notConfigured"), m.keyOk)
+      break
+    case "providerError":
+      showSettingsError(m.text)
       break
     case "autoApprove":
       _autoApprove = m.value

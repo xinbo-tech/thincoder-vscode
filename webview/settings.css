@@ -226,3 +226,21 @@
   letter-spacing: 0;
   margin-bottom: 0;
 }
+
+/* ─── Feedback states (save flash / delete confirm / errors) ── */
+
+.key-btn.btn-saved { color: var(--green); border-color: var(--green); }
+
+.key-btn.confirming { color: var(--red); border-color: var(--red); font-weight: 700; }
+
+.settings-error-banner {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+  font-size: 12px;
+}
+
+.settings-body input.input-error { border-color: var(--red); }

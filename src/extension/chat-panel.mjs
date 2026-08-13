@@ -517,6 +517,9 @@ export class ChatPanel {
         }
       }
     })
+    // The panel set "Building…" + disabled the button — refresh its index status
+    // so the UI recovers without reopening the panel.
+    this._pushIndexStatus()
   }
 
   // ─── Chat ─────────────────────────────────────

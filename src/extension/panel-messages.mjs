@@ -83,8 +83,8 @@ export async function handlePanelMessage(panel, msg) {
     case "saveProviderKey": await panel._saveProviderKey(msg.name, msg.key); break
     case "saveCustomProvider": await panel._saveCustomProvider(msg.config); break
     case "deleteProviderKey": await panel._deleteProviderKey(msg.name); break
-    case "saveMcpServer": await panel._saveMcpServer(msg.name, msg.config); break
-    case "deleteMcpServer": await panel._deleteMcpServer(msg.name); break
+    case "saveMcpServer": await panel._saveMcpServer(msg.name, msg.config); panel._pushMcpStatus(); break
+    case "deleteMcpServer": await panel._deleteMcpServer(msg.name); panel._pushMcpStatus(); break
     case "addProvider":
       // Payload form (settings panel [+ Add] form): persist directly.
       // No payload (model dropdown shortcut): interactive QuickPick flow.

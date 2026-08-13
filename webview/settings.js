@@ -60,32 +60,33 @@ export function initSettings({ onClose }) {
     row.innerHTML = `<span class="key-label">${escHtml(label)}</span>
       <input id="input-${name}" type="password" placeholder="sk-..." style="flex:1;margin:0 8px;"
         onkeydown="if(event.key==='Enter')window._saveKey('${name}')">
-      <button class="key-btn" onclick="window._saveKey('${name}')">${t("settings.save")}</button>
+      <button class="key-btn" onclick="window._saveKey('${name}', this)">${t("settings.save")}</button>
       <button class="key-btn" onclick="window._cancelEdit('${name}')">${t("settings.cancel")}</button>`
     setTimeout(() => document.getElementById("input-" + name)?.focus(), 50)
   }
 
-  window._saveKey = function(name) {
+  window._saveKey = function(name, btn) {
     const inp = document.getElementById("input-" + name)
     const key = inp?.value?.trim()
     if (!key) return
     window._vscode.postMessage({ type: "saveProviderKey", name, key })
+    flashSaved(btn)
   }
 
   window._cancelEdit = function(_name) {
     buildSettings() // local re-render, no round-trip needed
   }
 
-  window._delKey = function(name) {
-    window._vscode.postMessage({ type: "deleteProviderKey", name })
+  window._delKey = function(name, btn) {
+    window._confirmDelete(btn, () => window._vscode.postMessage({ type: "deleteProviderKey", name }))
   }
 
   // Provider management (panel-internal, posts payloads to the extension host)
   window._setProviderProxy = function(name, proxy) {
     window._vscode.postMessage({ type: "setProviderProxy", name, proxy })
   }
-  window._removeProvider = function(name) {
-    window._vscode.postMessage({ type: "removeProvider", name })
+  window._removeProvider = function(name, btn) {
+    window._confirmDelete(btn, () => window._vscode.postMessage({ type: "removeProvider", name }))
   }
   window._toggleAddForm = function(show) {
     const form = document.getElementById("prov-add-form")
@@ -121,26 +122,94 @@ export function initSettings({ onClose }) {
   // Embedding key row — same pattern as provider keys
   window._editEmbedKey = function() {
     const row = document.getElementById("row-embed")
-    row.innerHTML = `<span class="key-label">SiliconFlow Embedding</span>
+    row.innerHTML = `<span class="key-label">${t("settings.embeddingLabel")}</span>
       <input id="input-embed" type="password" placeholder="sk-..." autocomplete="off" style="flex:1;margin:0 8px;"
         onkeydown="if(event.key==='Enter')window._saveEmbedKey()">
-      <button class="key-btn" onclick="window._saveEmbedKey()">${t("settings.save")}</button>
+      <button class="key-btn" onclick="window._saveEmbedKey(this)">${t("settings.save")}</button>
       <button class="key-btn" onclick="window._cancelEditEmbed()">${t("settings.cancel")}</button>`
     setTimeout(() => document.getElementById("input-embed")?.focus(), 50)
   }
-  window._saveEmbedKey = function() {
+  window._saveEmbedKey = function(btn) {
     const val = document.getElementById("input-embed")?.value?.trim()
     if (!val) { window._cancelEditEmbed(); return }
     window._vscode.postMessage({ type: "saveEmbedKey", key: val })
+    flashSaved(btn)
   }
   window._cancelEditEmbed = function() { buildSettings() }
-  window._delEmbedKey = function() { window._vscode.postMessage({ type: "deleteEmbedKey" }) }
+  window._delEmbedKey = function(btn) {
+    window._confirmDelete(btn, () => window._vscode.postMessage({ type: "deleteEmbedKey" }))
+  }
 
   window._mcpServers = {}
   // Request detected shells once (extension caches the detection — CLI /shell parity)
   window._vscode.postMessage({ type: "getShellCandidates" })
 
-  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateShellCandidates, updateProxySettings, updateProxyTestResult }
+  // Two-step delete confirmation: first click arms, second click (within 2.5s) executes.
+  window._confirmDelete = function(btn, action) {
+    if (btn.dataset.confirming === "1") { action(); return }
+    btn.dataset.confirming = "1"
+    const orig = btn.textContent
+    btn.textContent = t("settings.confirmDelete")
+    btn.classList.add("confirming")
+    setTimeout(() => {
+      if (btn.dataset.confirming !== "1") return
+      btn.dataset.confirming = ""
+      btn.textContent = orig
+      btn.classList.remove("confirming")
+    }, 2500)
+  }
+
+  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
+}
+
+/** Brief "✓" flash on a save button — the only save feedback the panel has. */
+function flashSaved(btn) {
+  if (!btn) return
+  const orig = btn.textContent
+  btn.textContent = "✓"
+  btn.classList.add("btn-saved")
+  setTimeout(() => {
+    btn.textContent = orig
+    btn.classList.remove("btn-saved")
+  }, 1200)
+}
+
+/** Mark an input as invalid briefly (e.g. malformed JSON headers). */
+function markInputError(el, ms = 2500) {
+  if (!el) return
+  el.classList.add("input-error")
+  setTimeout(() => el.classList.remove("input-error"), ms)
+}
+
+/** Error banner at the top of the settings panel (extension-side failures). */
+export function showSettingsError(text) {
+  const panel = document.getElementById("settings-panel")
+  const body = document.getElementById("settings-body")
+  if (!panel || !body || panel.style.display === "none") return
+  document.getElementById("settings-error-banner")?.remove()
+  const el = document.createElement("div")
+  el.id = "settings-error-banner"
+  el.className = "settings-error-banner"
+  el.textContent = text
+  body.prepend(el)
+  setTimeout(() => el.remove(), 6000)
+}
+
+/**
+ * A full rebuild wipes any in-progress form (add-provider / add-MCP) and steals
+ * focus from the field the user is typing in. Status pushes must not do that —
+ * skip the rebuild while a form is open or an input has focus.
+ */
+function panelHasActiveForm() {
+  const panel = document.getElementById("settings-panel")
+  if (!panel || panel.style.display === "none") return false
+  if (document.getElementById("mcp-form")?.style.display !== "none") return true
+  if (document.getElementById("prov-add-form")?.style.display !== "none") return true
+  return !!panel.querySelector("input:focus, select:focus, textarea:focus")
+}
+
+function rebuildIfIdle() {
+  if (!panelHasActiveForm()) buildSettings()
 }
 
 function openSettings() {
@@ -182,7 +251,7 @@ function buildSettings() {
           proxy
         </label>
         <button class="key-btn" onclick="window._editKey('${escHtml(name)}')">${s0.configured ? t("settings.setKey") : t("settings.addKey")}</button>
-        <button class="key-btn del-key" onclick="window._removeProvider('${escHtml(name)}')" ${active ? "disabled" : ""} title="${t("settings.remove")}">−</button>
+        <button class="key-btn del-key" onclick="window._removeProvider('${escHtml(name)}', this)" ${active ? "disabled" : ""} title="${t("settings.remove")}">−</button>
       </div>
       <div class="prov-sub">${escHtml(s0.model || "")}${s0.baseURL ? ` · ${escHtml(s0.baseURL)}` : ""}</div>
     </div>`
@@ -221,7 +290,7 @@ function buildSettings() {
     <button id="mcp-add-btn" class="key-btn" style="margin-top:6px">${t("settings.mcpAdd")}</button>
     <div id="mcp-form" style="display:none;margin-top:8px">
       <div class="key-field"><label>${t("settings.mcp.name")}</label><input id="mcp-name" placeholder="my-server"></div>
-      <div class="key-field"><label>${t("settings.mcp.type")}</label><select id="mcp-type"><option value="stdio">Command (stdio)</option><option value="http">HTTP</option><option value="ws">WebSocket</option></select></div>
+      <div class="key-field"><label>${t("settings.mcp.type")}</label><select id="mcp-type"><option value="stdio">${t("settings.mcpStdio")}</option><option value="http">${t("settings.mcpHttp")}</option><option value="ws">${t("settings.mcpWs")}</option></select></div>
       <div id="mcp-stdio-fields">
         <div class="key-field"><label>${t("settings.mcp.command")}</label><input id="mcp-command" placeholder="npx"></div>
         <div class="key-field"><label>${t("settings.mcp.args")}</label><input id="mcp-args" placeholder="-y @modelcontextprotocol/server-filesystem /path"></div>
@@ -244,11 +313,11 @@ function buildSettings() {
     html += `<div class="settings-sep"></div>
       <h4 class="settings-section-title">${t("settings.indexSection") || "Semantic Index"}</h4>
       <div class="key-row" id="row-embed">
-        <span class="key-label">SiliconFlow Embedding</span>
+        <span class="key-label">${t("settings.embeddingLabel")}</span>
         <span class="key-status ${embedConfigured ? "ok" : ""}" id="status-embed">${embedConfigured ? "****" : "—"}</span>
         ${embedConfigured
           ? `<button class="key-btn" onclick="window._editEmbedKey()">${t("settings.changeKey")}</button>
-             <button class="key-btn del-key" onclick="window._delEmbedKey()">✕</button>`
+             <button class="key-btn del-key" onclick="window._delEmbedKey(this)">✕</button>`
           : `<button class="key-btn" onclick="window._editEmbedKey()">${t("settings.addKey")}</button>`}
       </div>
       <div id="index-status" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>
@@ -259,32 +328,32 @@ function buildSettings() {
     const adv = as.advisor || {}
     html += `<div class="settings-sep"></div>
       <h4 class="settings-section-title">${t("settings.agentSection")}</h4>
-      <div class="key-field"><label>${t("settings.maxTurns")}</label><input id="ag-maxturns" type="number" min="1" value="${as.maxTurns ?? 100}"></div>
-      <div class="key-field"><label>${t("settings.subagentTurns")}</label><input id="ag-subturns" type="number" min="1" value="${as.subagentTurns ?? 100}"></div>
+      <div class="key-field"><label title="${t("settings.maxTurnsHelp")}">${t("settings.maxTurns")}</label><input id="ag-maxturns" type="number" min="1" value="${as.maxTurns ?? 100}"></div>
+      <div class="key-field"><label title="${t("settings.subagentTurnsHelp")}">${t("settings.subagentTurns")}</label><input id="ag-subturns" type="number" min="1" value="${as.subagentTurns ?? 100}"></div>
       <h4 class="settings-section-title">${t("settings.submodelSection")}</h4>
-      <div class="key-field"><label>${t("settings.submodelGlobal")}</label><input id="ag-submodel-global" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModel || "")}"></div>
+      <div class="key-field"><label title="${t("settings.submodelHelp")}">${t("settings.submodelGlobal")}</label><input id="ag-submodel-global" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModel || "")}"></div>
       ${["explore", "plan", "coder", "eng-coder"].map((role) => `
-        <div class="key-field"><label>${role}</label><input id="ag-submodel-${role}" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModels?.[role] || "")}"></div>`).join("")}
-      <div class="key-field"><label>${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>
-      <div class="key-row"><span class="key-label">${t("settings.verifyGuard")}</span>
+        <div class="key-field"><label title="${t("settings.submodelHelp")}">${role}</label><input id="ag-submodel-${role}" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModels?.[role] || "")}"></div>`).join("")}
+      <div class="key-field"><label title="${t("settings.compactThresholdHelp")}">${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>
+      <div class="key-row"><span class="key-label" title="${t("settings.verifyGuardHelp")}">${t("settings.verifyGuard")}</span>
         <input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}></div>
       <h4 class="settings-section-title">${t("settings.advisorSection")}</h4>
-      <div class="key-row"><span class="key-label">${t("settings.advisorEnabled")}</span>
+      <div class="key-row"><span class="key-label" title="${t("settings.advisorEnabledHelp")}">${t("settings.advisorEnabled")}</span>
         <input type="checkbox" id="adv-enabled" ${adv.enabled ? "checked" : ""}></div>
-      <div class="key-row"><span class="key-label">${t("settings.advisorGuard")}</span>
+      <div class="key-row"><span class="key-label" title="${t("settings.advisorGuardHelp")}">${t("settings.advisorGuard")}</span>
         <input type="checkbox" id="adv-guard" ${adv.guard !== false ? "checked" : ""}></div>
-      <div class="key-field"><label>${t("settings.advisorProvider")}</label><input id="adv-provider" placeholder="deepseek" value="${escHtml(adv.provider || "")}"></div>
-      <div class="key-field"><label>${t("settings.advisorModel")}</label><input id="adv-model" placeholder="deepseek-chat" value="${escHtml(adv.model || "")}"></div>
+      <div class="key-field"><label title="${t("settings.advisorProviderHelp")}">${t("settings.advisorProvider")}</label><input id="adv-provider" placeholder="deepseek" value="${escHtml(adv.provider || "")}"></div>
+      <div class="key-field"><label title="${t("settings.advisorModelHelp")}">${t("settings.advisorModel")}</label><input id="adv-model" placeholder="deepseek-chat" value="${escHtml(adv.model || "")}"></div>
       <button id="ag-save-btn" class="key-btn" style="margin-top:6px">${t("settings.save")}</button>`
 
     // Proxy section
     const px = _proxySettings || {}
     html += `<div class="settings-sep"></div>
       <h4 class="settings-section-title">${t("settings.proxySection")}</h4>
-      <div class="key-field"><label>${t("settings.proxyUri")}</label><input id="px-uri" placeholder="http://127.0.0.1:7890" value="${escHtml(px.uri || "")}"></div>
-      <div class="key-row"><span class="key-label">${t("settings.proxyWeb")}</span>
+      <div class="key-field"><label title="${t("settings.proxyUriHelp")}">${t("settings.proxyUri")}</label><input id="px-uri" placeholder="http://127.0.0.1:7890" value="${escHtml(px.uri || "")}"></div>
+      <div class="key-row"><span class="key-label" title="${t("settings.proxyWebHelp")}">${t("settings.proxyWeb")}</span>
         <input type="checkbox" id="px-web" ${px.web !== false ? "checked" : ""}></div>
-      <div class="key-row"><span class="key-label">${t("settings.proxyModel")}</span>
+      <div class="key-row"><span class="key-label" title="${t("settings.proxyModelHelp")}">${t("settings.proxyModel")}</span>
         <input type="checkbox" id="px-model" ${px.model ? "checked" : ""}></div>
       <button id="px-save-btn" class="key-btn" style="margin-top:4px">${t("settings.save")}</button>
       <button id="px-test-btn" class="key-btn" style="margin-top:4px">${t("settings.proxyTest")}</button>
@@ -296,7 +365,7 @@ function buildSettings() {
         // Custom path active when config.shell is set and not among the candidates
         const shellIsCustom = _shellValue !== null && !cands.some((c) => (c.value ?? null) === _shellValue)
         return `
-      <div class="key-field"><label>${t("settings.shellSelect")}</label><select id="sh-select">
+      <div class="key-field"><label title="${t("settings.shellHelp")}">${t("settings.shellSelect")}</label><select id="sh-select">
         ${cands.map((c) => `<option value="${escHtml(c.value || "")}" ${!shellIsCustom && (c.value ?? null) === _shellValue ? "selected" : ""}>${escHtml(c.name)}</option>`).join("")}
         <option value="__custom__" ${shellIsCustom ? "selected" : ""}>${t("settings.shellCustom")}</option>
       </select></div>
@@ -307,7 +376,7 @@ function buildSettings() {
   body.innerHTML = html
 
   // Bind Add-provider form controls
-  document.getElementById("pa-save-btn").addEventListener("click", () => window._paSave())
+  document.getElementById("pa-save-btn").addEventListener("click", () => { window._paSave(); flashSaved(document.getElementById("pa-save-btn")) })
   document.getElementById("pa-cancel-btn").addEventListener("click", () => window._toggleAddForm(false))
   paTypeChanged()
 
@@ -319,13 +388,14 @@ function buildSettings() {
       const web = document.getElementById("px-web")?.checked ?? false
       const model = document.getElementById("px-model")?.checked ?? false
       window._vscode.postMessage({ type: "saveProxySettings", settings: { uri, web, model } })
+      flashSaved(pxSave)
     })
   }
   const pxTest = document.getElementById("px-test-btn")
   if (pxTest) {
     pxTest.addEventListener("click", () => {
       const result = document.getElementById("px-test-result")
-      if (result) result.textContent = "Testing…"
+      if (result) result.textContent = t("settings.proxyTestRunning")
       const uri = document.getElementById("px-uri")?.value?.trim() || ""
       // Test runs in the extension host (Node) — the webview cannot import Node modules.
       window._vscode.postMessage({ type: "testProxy", uri })
@@ -360,6 +430,7 @@ function buildSettings() {
           },
         },
       })
+      flashSaved(agSave)
     })
   }
 
@@ -382,6 +453,7 @@ function buildSettings() {
       const custom = shCustom?.value?.trim() ?? ""
       const value = sel === "__custom__" ? custom : sel
       window._vscode.postMessage({ type: "saveShellSettings", value })
+      flashSaved(shSave)
     })
   }
 
@@ -429,12 +501,17 @@ function buildSettings() {
       }
     } else if (type === "ws") {
       config.wsUrl = document.getElementById("mcp-ws-url").value.trim()
-      try { config.headers = JSON.parse(document.getElementById("mcp-ws-headers").value || "{}") } catch { config.headers = {} }
+      const headersEl = document.getElementById("mcp-ws-headers")
+      try { config.headers = JSON.parse(headersEl.value || "{}") }
+      catch { config.headers = {}; markInputError(headersEl) }
     } else {
       config.url = document.getElementById("mcp-url").value.trim()
-      try { config.headers = JSON.parse(document.getElementById("mcp-headers").value || "{}") } catch { config.headers = {} }
+      const headersEl = document.getElementById("mcp-headers")
+      try { config.headers = JSON.parse(headersEl.value || "{}") }
+      catch { config.headers = {}; markInputError(headersEl) }
     }
     vscode.postMessage({ type: "saveMcpServer", name, config })
+    flashSaved(document.getElementById("mcp-save-btn"))
     document.getElementById("mcp-form").style.display = "none"
   })
 
@@ -446,7 +523,7 @@ function buildSettings() {
   // Bind index build button
   document.getElementById("index-build-btn").addEventListener("click", () => {
     vscode.postMessage({ type: "buildIndex" })
-    document.getElementById("index-status").textContent = "Building..."
+    document.getElementById("index-status").textContent = t("settings.indexBuilding")
     document.getElementById("index-build-btn").disabled = true
   })
 
@@ -484,7 +561,7 @@ function renderMcpList() {
   }).join("")
   list.querySelectorAll(".mcp-del-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      window._vscode.postMessage({ type: "deleteMcpServer", name: btn.dataset.name })
+      window._confirmDelete(btn, () => window._vscode.postMessage({ type: "deleteMcpServer", name: btn.dataset.name }))
     })
   })
   list.querySelectorAll(".mcp-reconnect-btn").forEach((btn) => {
@@ -496,27 +573,23 @@ function renderMcpList() {
 
 function updateProviderStatus(status) {
   _providerStatus = status
-  const panel = document.getElementById("settings-panel")
-  if (panel && panel.style.display !== "none") buildSettings()
+  rebuildIfIdle()
 }
 
 function updateAgentSettings(settings) {
   _agentSettings = settings
-  const panel = document.getElementById("settings-panel")
-  if (panel && panel.style.display !== "none") buildSettings()
+  rebuildIfIdle()
 }
 
 function updateShellCandidates(payload) {
   _shellCandidates = payload?.candidates || []
   _shellValue = payload?.current ?? null
-  const panel = document.getElementById("settings-panel")
-  if (panel && panel.style.display !== "none") buildSettings()
+  rebuildIfIdle()
 }
 
 function updateProxySettings(settings) {
   _proxySettings = settings
-  const panel = document.getElementById("settings-panel")
-  if (panel && panel.style.display !== "none") buildSettings()
+  rebuildIfIdle()
 }
 
 function updateProxyTestResult(result) {
@@ -530,8 +603,7 @@ function updateProxyTestResult(result) {
 function updateIndexStatus(s) {
   _indexStatus = s
   renderIndexStatus()
-  const panel = document.getElementById("settings-panel")
-  if (panel && panel.style.display !== "none") buildSettings()
+  rebuildIfIdle()
 }
 
 function renderIndexStatus() {
@@ -539,15 +611,15 @@ function renderIndexStatus() {
   if (!el) return
   const btn = document.getElementById("index-build-btn")
   if (!_indexStatus) {
-    el.textContent = "No embedding API key configured."
+    el.textContent = t("settings.indexNoKey")
     if (btn) btn.disabled = true
     return
   }
   if (_indexStatus.built) {
-    el.textContent = `\u2713 Index built: ${_indexStatus.files} files, ${_indexStatus.chunks} chunks`
+    el.textContent = t("settings.indexBuilt", { files: _indexStatus.files, chunks: _indexStatus.chunks })
     if (btn) { btn.textContent = t("settings.indexRebuild") || "Rebuild Index"; btn.disabled = false }
   } else {
-    el.textContent = "Index not built. Vector search is inactive."
+    el.textContent = t("settings.indexNotBuilt")
     if (btn) btn.disabled = false
   }
 }
