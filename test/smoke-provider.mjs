@@ -7,15 +7,11 @@
  */
 
 import { chat } from "../src/provider.mjs"
+import { PROVIDER_PRESETS } from "../src/config-io.mjs"
 
-const PRESETS = {
-  deepseek: { baseURL: "https://api.deepseek.com/v1", model: "deepseek-v4-pro", thinking: { type: "enabled" }, reasoningEffort: "max", maxTokens: 393216 },
-  kimi:     { baseURL: "https://api.moonshot.cn/v1", model: "kimi-k3", reasoningEffort: "max", maxTokens: 131072 },
-  glm:      { baseURL: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.2", thinking: { type: "enabled" }, maxTokens: 128000 },
-  qwen:     { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen3.7-max", maxTokens: 131072 },
-  minimax:  { baseURL: "https://api.minimax.chat/v1", model: "MiniMax-M3", chatPath: "/text/chatcompletion_v2", maxTokens: 128000 },
-  openai:   { baseURL: "https://api.openai.com/v1", model: "gpt-4o" },
-}
+// Single source of truth — do NOT hand-maintain a duplicate table (it drifted:
+// deepseek baseURL gained "/v1", minimax pointed at the old .chat host).
+const PRESETS = PROVIDER_PRESETS
 
 const name = process.argv[2]
 const apiKey = process.argv[3]

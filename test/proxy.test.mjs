@@ -94,12 +94,9 @@ describe("proxyFetch — local CONNECT tunnel", () => {
     await new Promise((r) => proxy.listen(0, "127.0.0.1", r))
     const port = proxy.address().port
     try {
-      const out = await proxyFetch("https://example.com/", {}, `http://127.0.0.1:${port}`)
       // 403 → proxyFetch rejects via tunnelHttps (CONNECT not 200)
-      assert.equal(out, undefined) // should have thrown; guard below
-    } catch (e) {
+      await assert.rejects(() => proxyFetch("https://example.com/", {}, `http://127.0.0.1:${port}`), /Proxy CONNECT/)
       assert(sawConnect, "CONNECT reached the local proxy")
-      assert.match(e.message, /Proxy CONNECT/)
     } finally {
       proxy.close()
     }

@@ -24,6 +24,7 @@ beforeEach(() => {
   api.updateAgentSettings({})
   api.updateProxySettings({})
   api.updateShellCandidates({})
+  api.updateIndexStatus(null)
 })
 
 function openPanel() {

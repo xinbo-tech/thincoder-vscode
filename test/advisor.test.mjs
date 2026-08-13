@@ -257,7 +257,9 @@ describe("isDocFile", () => {
 
   it("rejects source files", () => {
     assert.equal(isDocFile("src/main.mjs"), false)
-    assert.equal(isDocFile("src/prompts/system.md") && false, false) // extension matches; src/ exclusion is the caller's job
+    // isDocFile matches by extension only — src/prompts/*.md IS a doc file by
+    // extension; the src/ exclusion is the CALLER's job (isDocOnlyChange adds it).
+    assert.equal(isDocFile("src/prompts/system.md"), true)
     assert.equal(isDocFile("package.json"), false)
   })
 })

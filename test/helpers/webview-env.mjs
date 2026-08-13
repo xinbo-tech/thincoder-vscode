@@ -7,11 +7,11 @@
  */
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { setStrings } from "../../webview/i18n.js"
 
-const __dirname = join(fileURLToPath(import.meta.url), "..")
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /** Register happy-dom globals + locale + vscode stub. Call once per test file. */
 export function setupWebview() {

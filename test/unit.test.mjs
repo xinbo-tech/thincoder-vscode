@@ -7,8 +7,9 @@
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs"
-import { join } from "node:path"
+import { join, dirname } from "node:path"
 import { tmpdir } from "node:os"
+import { fileURLToPath } from "node:url"
 
 // ─── memory.mjs ──────────────────────────────────────────────
 
@@ -512,8 +513,8 @@ describe("i18n — locale loading", () => {
 
   // Verify zh locale has same keys as en
   it("zh locale has all en keys", () => {
-    const enPath = join(import.meta.dirname, "..", "locales", "en.json")
-    const zhPath = join(import.meta.dirname, "..", "locales", "zh.json")
+    const enPath = join(dirname(fileURLToPath(import.meta.url)), "..", "locales", "en.json")
+    const zhPath = join(dirname(fileURLToPath(import.meta.url)), "..", "locales", "zh.json")
     const en = JSON.parse(readFileSync(enPath, "utf8"))
     const zh = JSON.parse(readFileSync(zhPath, "utf8"))
     for (const key of Object.keys(en)) {
