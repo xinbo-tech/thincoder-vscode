@@ -7,7 +7,7 @@ import { renderDiff, lineDiff } from "./diff.js"
 import {
   showWelcome, showBanner, addUser, addAssistantHistory, newBlock,
   addTool, addToolHistory, finishTool, setLoading, showError, scrollDown, escHtml,
-  buildHistoryMessage,
+  buildHistoryMessage, buildAdvisorBlock, appendAdvisorChunk,
 } from "./ui.js"
 import { setStrings, t } from "./i18n.js"
 import { initAutocomplete } from "./autocomplete.js"
@@ -65,6 +65,9 @@ let _planActive = false
 let _subagentMap = {}
 let _goalInfo = null
 let _toolPanels = {}
+// Current live-turn advisor block (in-conversation details element) — advisor
+// output streams here like reasoning instead of the side tool panel.
+let _advisorBlock = null
 // Lazy history loading: _hasOlder = more pages exist before the first rendered
 // message; _loadingOlder guards against scroll-triggered double requests.
 let _hasOlder = false
@@ -919,6 +922,7 @@ window.addEventListener("message", (e) => {
     case "clearMessages":
       ctx.messagesEl.replaceChildren()
       ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""
+      _advisorBlock = null
       _hasOlder = false
       _loadingOlder = false
       renderStatusBar()
@@ -1086,6 +1090,9 @@ window.addEventListener("message", (e) => {
       renderStatusBar()
       break
     case "toolPanel": {
+      // Advisor streams into an in-conversation details block (like reasoning),
+      // round-tagged and never truncated — NOT the side tool panel.
+      if (m.name === "advisor") { advisorChunk(m); break }
       // Accumulate per-kind blocks (think/tool/text) instead of overwriting —
       // same emission contract as the CLI TUI. Same-kind chunks merge; hard
       // cap per block so a runaway stream cannot balloon the panel.
@@ -1110,6 +1117,29 @@ window.addEventListener("message", (e) => {
     }
   }
 })
+
+/**
+ * Advisor output renders as an in-conversation details block (reasoning-style):
+ * full content streams into a scrolling region — NEVER truncated — and the
+ * summary carries the round number. A "start" chunk opens (and closes the
+ * previous round's block); think/tool/text chunks append inside it.
+ */
+function advisorChunk(m) {
+  if (m.kind === "start") {
+    if (_advisorBlock) _advisorBlock.open = false // previous round collapses (stays readable)
+    const details = buildAdvisorBlock(t("advisor.round", { round: m.round ?? "?" }))
+    if (ctx.currentBlock) ctx.currentBlock.appendChild(details)
+    else ctx.messagesEl.appendChild(details)
+    _advisorBlock = details
+    return
+  }
+  if (!_advisorBlock) return
+  appendAdvisorChunk(_advisorBlock, m.kind ?? "text", m.text)
+  const content = _advisorBlock.querySelector(".advisor-content")
+  if (content) content.scrollTop = content.scrollHeight
+  scrollDown(ctx)
+}
+
 
 // ─── Send ──────────────────────────────────────
 
@@ -1235,6 +1265,7 @@ function finish(aborted) {
   ctx._toolRefs = {}
   _currentTool = null
   _turnStart = null
+  _advisorBlock = null // turn over — the next advisor call opens a fresh round block
   setLoading(ctx, false)
   renderStatusBar()
 }

@@ -118,8 +118,11 @@ export const advisorTool = {
 
     // Generate the design token BEFORE the review and inject it into the advisor's prompt.
     const designToken = reviewType === "design" ? generateDesignToken() : null
-    // Progress chunks ({kind, text}) stream into the webview tool panel —
-    // same emission contract as the CLI TUI (think / tool / text kinds).
+    // Progress chunks ({kind, text}) stream into the webview — same emission
+    // contract as the CLI TUI (think / tool / text kinds). A "start" chunk first
+    // opens the in-conversation advisor block tagged with the round number.
+    const round = (agent._advisorRound || 0) + 1
+    ctx.callbacks?.onToolPanel?.("advisor", { kind: "start", text: "", round })
     const result = await runAdvisorReview(agent, reviewType, {
       onOutput: (chunk) => ctx.callbacks?.onToolPanel?.("advisor", chunk),
       signal: ctx.signal,

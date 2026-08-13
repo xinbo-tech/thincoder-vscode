@@ -254,6 +254,41 @@
   font-style: italic;
 }
 
+/* ─── Advisor review block (in-conversation, reasoning-style) ── */
+
+.advisor-block {
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 12px;
+  background: var(--tool-bg);
+}
+
+.advisor-block summary {
+  padding: 4px 10px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Scrolling content region — the FULL review streams here, never truncated. */
+.advisor-content {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.advisor-think { opacity: 0.55; }
+.advisor-tool-line { color: var(--accent); opacity: 0.8; margin-top: 2px; }
+
 .error-text { flex: 1; }
 .error-retry-btn {
   margin-top: 6px;

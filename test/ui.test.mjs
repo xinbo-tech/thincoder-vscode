@@ -8,7 +8,7 @@ import assert from "node:assert/strict"
 import { setupWebview } from "./helpers/webview-env.mjs"
 import {
   buildUserMessage, buildAssistantHistory, buildToolHistory, buildHistoryMessage, escHtml,
-  newBlock, addUser,
+  newBlock, addUser, buildAdvisorBlock, appendAdvisorChunk,
 } from "../webview/ui.js"
 
 let env
@@ -83,6 +83,35 @@ describe("buildAssistantHistory", () => {
     assert.doesNotMatch(el.innerHTML, /ThinCoder:/)
     assert.equal(el.dataset.idx, "5") // data-idx on the element for paging
     assert.match(el.innerHTML, /continuation/)
+  })
+})
+
+describe("advisor review block (in-conversation streaming)", () => {
+  it("buildAdvisorBlock creates an open details block with the round label and a scrolling content region", () => {
+    const el = buildAdvisorBlock("Advisor Review (Round 2)")
+    assert.match(el.className, /advisor-block/)
+    assert.equal(el.open, true)
+    assert.equal(el.querySelector("summary").textContent, "Advisor Review (Round 2)")
+    assert.ok(el.querySelector(".advisor-content"))
+  })
+
+  it("appendAdvisorChunk merges same-kind runs, marks think dim, and appends tool lines", () => {
+    const el = buildAdvisorBlock("Advisor Review (Round 1)")
+    appendAdvisorChunk(el, "text", "Hello")
+    appendAdvisorChunk(el, "text", " world")  // same-kind merge
+    assert.equal(el.querySelectorAll(".advisor-text").length, 1, "same-kind runs merge")
+    assert.equal(el.querySelector(".advisor-text").textContent, "Hello world")
+    appendAdvisorChunk(el, "think", "thinking…")
+    assert.equal(el.querySelector(".advisor-think").textContent, "thinking…")
+    appendAdvisorChunk(el, "tool", "read file.mjs")
+    assert.equal(el.querySelector(".advisor-tool-line").textContent, "read file.mjs")
+  })
+
+  it("NEVER truncates — a huge review chunk stays complete inside the block", () => {
+    const el = buildAdvisorBlock("Advisor Review (Round 1)")
+    const huge = "x".repeat(50000) // far beyond any panel cap
+    appendAdvisorChunk(el, "text", huge)
+    assert.equal(el.querySelector(".advisor-content").textContent.length, 50000)
   })
 })
 

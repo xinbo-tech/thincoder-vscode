@@ -179,5 +179,6 @@
   "welcome.skip": "暂时跳过",
   "welcome.fullSettings": "完整设置",
   "settings.providerKey": "API Key",
-  "question.customPlaceholder": "或输入你自己的回答…"
+  "question.customPlaceholder": "或输入你自己的回答…",
+  "advisor.round": "Advisor 审查（第 {round} 轮）"
 }

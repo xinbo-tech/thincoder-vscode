@@ -127,7 +127,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       onToolPanel: (name, chunk) => {
         const kind = typeof chunk === "string" ? "text" : (chunk?.kind ?? "text")
         const text = typeof chunk === "string" ? chunk : String(chunk?.text ?? "")
-        panel._panel?.webview.postMessage({ type: "toolPanel", name, kind, text })
+        panel._panel?.webview.postMessage({ type: "toolPanel", name, kind, text, round: chunk?.round })
       },
       onComplete: (content, agentState) => {
         // runAgent already appended the real messages to both lines via pushReal; just persist them.

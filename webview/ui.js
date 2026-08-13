@@ -7,6 +7,55 @@ import { md, mdInline, esc } from "./md.js"
 import { fmtTime } from "./lib.js"
 import { t } from "./i18n.js"
 
+// ─── Advisor review block (in-conversation, reasoning-style) ──
+
+/**
+ * Create the details block that streams an advisor review into the conversation.
+ * `roundLabel` is the summary text (e.g. "Advisor Review (Round 2)").
+ */
+export function buildAdvisorBlock(roundLabel) {
+  const details = document.createElement("details")
+  details.className = "advisor-block"
+  details.open = true
+  const summary = document.createElement("summary")
+  summary.textContent = roundLabel
+  const content = document.createElement("div")
+  content.className = "advisor-content"
+  details.appendChild(summary)
+  details.appendChild(content)
+  return details
+}
+
+/**
+ * Append one advisor progress chunk ({ kind: "think"|"tool"|"text", text }) to
+ * the block's scrolling content region. Same-kind text runs merge; nothing is
+ * ever truncated — the full review stays in the block (scrolling).
+ */
+export function appendAdvisorChunk(block, kind, text) {
+  const content = block.querySelector(".advisor-content")
+  if (!content) return
+  const str = String(text ?? "")
+  if (!str) return
+  if (kind === "tool") {
+    const line = document.createElement("div")
+    line.className = "advisor-tool-line"
+    line.textContent = str
+    content.appendChild(line)
+    return
+  }
+  const k = kind ?? "text"
+  const last = content.lastElementChild
+  if (last && last.classList.contains("advisor-text") && last.dataset.kind === k) {
+    last.textContent += str
+  } else {
+    const div = document.createElement("div")
+    div.className = "advisor-text" + (k === "think" ? " advisor-think" : "")
+    div.dataset.kind = k
+    div.textContent = str
+    content.appendChild(div)
+  }
+}
+
 // ─── Welcome / Banner ──────────────────────────
 
 export function showWelcome(ctx) {
