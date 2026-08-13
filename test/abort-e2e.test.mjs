@@ -128,3 +128,17 @@ test("abort during tool execution stops before the next LLM round", async () => 
     globalThis.fetch = orig
   }
 })
+
+test("bash: abort kills a long-running command (Stop works mid-command)", async () => {
+  const { bashTool } = await import("../src/tools/shell.mjs")
+  const ctrl = new AbortController()
+  const start = Date.now()
+  setTimeout(() => ctrl.abort(), 150)
+  const r = await bashTool.execute(
+    { command: "node -e \"setTimeout(()=>{},60000)\"", timeout: 90000 },
+    { cwd: process.cwd(), signal: ctrl.signal },
+  )
+  const elapsed = Date.now() - start
+  assert.match(r, /stopped|killed/, "aborted command: " + r.slice(0, 120))
+  assert.ok(elapsed < 10000, `aborted fast, did not wait 60s (${elapsed}ms)`)
+})

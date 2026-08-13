@@ -20,6 +20,19 @@ const SAFE_ENV = Object.fromEntries(
 // Always override interactive/pager tools
 SAFE_ENV.GIT_PAGER = "cat"
 SAFE_ENV.PAGER = "cat"
+
+/** Kill the whole process tree of a spawned child (CLI parity): Windows uses
+ *  taskkill /T /F (tree + force), POSIX kills the process group. Plain
+ *  child.kill() only reaps the direct child — grandchildren (npm test's
+ *  subprocesses, etc.) would leak. */
+function killProcessTree(child) {
+  if (process.platform === "win32") {
+    try { execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" }) } catch { /* already gone */ }
+  } else {
+    try { process.kill(-child.pid, "SIGKILL") } catch { /* */ }
+    try { child.kill("SIGKILL") } catch { /* fallback if group kill fails */ }
+  }
+}
 SAFE_ENV.EDITOR = "true"
 SAFE_ENV.TERM = "dumb"
 // Windows: force UTF-8 for Python child output (CLI parity — cmd GBK would garble)
@@ -123,6 +136,10 @@ export const bashTool = {
         maxBuffer: 2 * 1024 * 1024,
         ...(shell ? { shell } : {}),
       }, (error, stdout, stderr) => {
+        if (error && error.name === "AbortError") {
+          finish(`(stopped)`)
+          return
+        }
         if (error && error.killed) {
           finish(`(killed — timeout ${timeout || BASH_TIMEOUT_MS}ms)`)
           return
@@ -134,6 +151,15 @@ export const bashTool = {
         ].filter(Boolean).join("\n")
         finish(out)
       })
+      // Stop: resolve IMMEDIATELY on abort (don't wait for stdio pipes to close —
+      // exec's callback hangs when a grandchild survives the kill). Kill the WHOLE
+      // process tree (CLI killProcessTree parity: Windows taskkill /T /F, POSIX
+      // group-kill) so grandchildren (npm test's subprocesses, etc.) don't leak.
+      if (ctx.signal) {
+        const onAbort = () => { killProcessTree(child); finish("(stopped)") }
+        if (ctx.signal.aborted) onAbort()
+        else ctx.signal.addEventListener("abort", onAbort, { once: true })
+      }
       // exec's callback waits for the stdio pipes to close. A BACKGROUND child
       // (start /b, &, …) inherits them, so the callback never fires and the tool
       // hangs until the timeout — resolve after a grace period instead (CLI parity).
