@@ -86,3 +86,14 @@ export function specForModel(model) {
 export function contextWindowForModel(model) {
   return specForModel(model).context
 }
+
+/**
+ * Context utilization percentage: provider-reported prompt tokens vs the model's
+ * spec context window. Null when there is no token data. (The spec field is
+ * `context` — a `contextWindow` read would silently fall back to 128K and show
+ * absurd percentages on 1M-context models.)
+ */
+export function ctxPercentForModel(promptTokens, model) {
+  if (!promptTokens) return null
+  return Math.round((promptTokens / contextWindowForModel(model)) * 100)
+}

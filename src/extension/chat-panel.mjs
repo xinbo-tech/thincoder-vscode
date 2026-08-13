@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { closeAllMcp, mcpConnectedToolCounts, mcpConnect, mcpDisconnectByName } from "../mcp.mjs"
-import { listSlots, loadSlot, saveSessionToSlot, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs } from "./session-io.mjs"
+import { listSlots, loadSlot, saveSessionToSlot, setSlotAutoApprove, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, historyWindow } from "./session-io.mjs"
 import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, agentSettings, proxySettings, shellCandidates } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { generateTitle } from "./generate-title.mjs"
@@ -29,6 +29,11 @@ export class ChatPanel {
 
     this._abortController = null
     this._permissionQueue = []
+    // Live autoApprove flag for the current turn — approve-all / the AUTO toolbar
+    // button flip it MID-TURN (via _setAutoApprove); the permission gate re-checks
+    // it on every invocation because runAgent's startup snapshot cannot change.
+    this._autoApprove = false
+    this._questionQueue = []  // pending inline question-tool prompts (panel, not native popups)
     this._statusBar = null
     // The slot number this panel is bound to. Set once when a session is opened/created,
     // then used for ALL reads and writes — we never re-read the shared manifest's active
@@ -150,18 +155,34 @@ export class ChatPanel {
 
   _loadSession() {
     const history = this._activeHistory()
+    // AUTO state is session-level (CLI parity) — sync the panel flag and the webview
+    // toolbar button to the slot's autoApprove field on every session load/switch.
+    this._autoApprove = this._activeData()?.autoApprove ?? false
+    this._panel?.webview.postMessage({ type: "autoApprove", value: this._autoApprove })
     this._panel?.webview.postMessage({ type: "clearMessages" })
-    history.forEach((m, idx) => {
-      // Real messages carry role (LLM line); UI-only ones may carry type. Derive the UI kind from either.
-      const kind = m.type ?? m.role
-      if (kind === "user" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "userMessage", text: stripEditorInjection(m.content), timestamp: m.timestamp, idx })
-      else if (kind === "assistant" && typeof m.content === "string") this._panel?.webview.postMessage({ type: "assistantMessage", text: m.content, timestamp: m.timestamp, idx })
-      else if (kind === "tool" && typeof m.content === "string") {
-        // Tool results ARE in the human line (pushReal); render as collapsed cards.
-        this._panel?.webview.postMessage({ type: "toolHistory", name: m.name ?? "tool", text: m.content.slice(0, 2000), idx })
-      }
-    })
+    // Lazy history: only the LAST page is sent on load; older pages arrive via
+    // loadOlder (webview scroll-back). idx values are global history indexes.
+    const { messages, hasOlder } = historyWindow(history, null)
+    this._sendHistoryPage(messages, hasOlder, false)
     this._pushSessions()
+  }
+
+  /** Older-history page for the webview's scroll-back lazy loading. */
+  _loadOlder(before) {
+    const history = this._activeHistory()
+    const { messages, hasOlder } = historyWindow(history, typeof before === "number" ? before : null)
+    this._sendHistoryPage(messages, hasOlder, true)
+  }
+
+  _sendHistoryPage(messages, hasOlder, older) {
+    // Machine-only editor-context injections must never surface in the UI (parity
+    // with the per-message strip in the old eager loader).
+    const clean = messages.map((m) => {
+      if (m.kind === "user") return { ...m, text: stripEditorInjection(m.text) }
+      if (m.kind === "tool") return { ...m, text: m.text.slice(0, 2000) }
+      return m
+    })
+    this._panel?.webview.postMessage({ type: "historyPage", messages: clean, hasOlder, older })
   }
 
   /**
@@ -284,8 +305,13 @@ export class ChatPanel {
     this._pushMcpStatus()
   }
   async _setAutoApprove(value) {
-    const c = vscode.workspace.getConfiguration("thincoder")
-    await c.update("autoApprove", value, vscode.ConfigurationTarget.Global)
+    this._autoApprove = value  // mid-turn source of truth for the permission gate
+    // Session-level persistence (CLI parity): autoApprove lives in the slot file shared
+    // with the CLI — NOT in VS Code settings.json. Workspace-scope overrides of the old
+    // `thincoder.autoApprove` setting are gone with it (the setting is removed).
+    try {
+      setSlotAutoApprove(_cwd(), this._ensureSlot(), value)
+    } catch { /* slot unwritable — the live flag still governs this turn */ }
   }
 
   _pushStatus() {

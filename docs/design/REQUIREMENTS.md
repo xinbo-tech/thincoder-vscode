@@ -15,7 +15,7 @@
 | 支持的 Provider | 16 个 preset（含 Claude/Gemini）+ 自定义端点（三协议） | 见下表 |
 | 模型配置 | `~/.thincoder/config.json`（与 CLI 共享） | providers[] + activeProvider，见「与 CLI 的关系」 |
 | 会话存储 | `~/.thincoder/sessions/`（与 CLI 共享） | 完整 sha1(cwd) + 槽位，两端互读 |
-| 工具审批 | `autoApprove` 默认 `false` | 用户显式开启才自动执行 |
+| 工具审批 | `autoApprove` 会话级槽位字段，默认 `false` | AUTO 按钮 / approve-all 翻转；agent 循环 live 读取，mid-turn 立即生效 |
 | 模型能力 | 自包含 `src/config.mjs` | MODEL_SPECS 表独立维护 |
 | Session 标题 | LLM 自动生成（首条消息后触发） | 失败静默降级为截断消息 |
 
@@ -49,7 +49,7 @@
 - Agent 自律工具链：`task` / `plan` / `goal` / `verify` / `recent_changes` / `subagent` / `skill`
 - 多 Provider：16 个 preset（含 Claude/Gemini）+ 自定义 endpoint（openai/anthropic/google 三协议），与 CLI 共享 `~/.thincoder/config.json`
 - 多会话 + 模型选择器 + 设置面板 + 快捷键
-- `autoApprove` 配置项，默认 `false`
+- `autoApprove` 会话级开关（槽位字段，与 CLI 共享），默认 `false`；AUTO 按钮 / approve-all 翻转，mid-turn 立即生效
 - repo_outline + context compaction
 
 **暂未做（v1.x / v2）：**

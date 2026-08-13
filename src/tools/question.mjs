@@ -20,7 +20,16 @@ export const questionTool = {
     },
     required: ["question"],
   },
-  async execute({ question, options }, _ctx) {
+  async execute({ question, options }, ctx) {
+    // Panel-inline interaction (preferred): the question renders INSIDE the chat
+    // panel via callbacks.onQuestion (same queue pattern as permissionRequest).
+    // VS Code's native QuickPick / InputBox pops up at the TOP of the editor
+    // window — users miss it and an accidental click dismisses it as "cancelled".
+    if (ctx?.callbacks?.onQuestion) {
+      const answer = await ctx.callbacks.onQuestion(question, options?.length ? options : null)
+      return answer ?? "(user cancelled)"
+    }
+    // Fallback (no panel callback — e.g. subagent runs): native VS Code UI.
     let answer
     if (options?.length) {
       // Use createQuickPick for proper title support

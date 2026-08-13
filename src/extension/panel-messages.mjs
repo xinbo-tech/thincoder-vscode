@@ -58,6 +58,12 @@ export async function handlePanelMessage(panel, msg) {
       break
     }
     case "abort": panel._abortController?.abort(); break
+    case "loadOlder": panel._loadOlder(msg.before); break
+    case "questionResponse": {
+      const entry = panel._questionQueue.shift()
+      entry?.resolve(msg.answer ?? null)  // null → tool returns "(user cancelled)"
+      break
+    }
     case "setAutoApprove": await panel._setAutoApprove(!!msg.value); break
     case "atComplete": await panel._atComplete(msg.query, msg.cwd); break
     case "permissionResponse": {

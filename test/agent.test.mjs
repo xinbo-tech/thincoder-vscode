@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { compactHistory, truncateFallback, shrinkOversized } from "../src/compact.mjs"
-import { specForModel } from "../src/config.mjs"
+import { specForModel, ctxPercentForModel, contextWindowForModel } from "../src/config.mjs"
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -104,23 +104,45 @@ describe("model specs", () => {
       console.warn = orig
     }
   })
+
+  it("ctxPercentForModel divides by the REAL spec context (1M models, not 128K)", () => {
+    // Regression: the status bar read a non-existent `contextWindow` field and
+    // fell back to 128K — a 1M-context model at 175K tokens showed "137%".
+    assert.equal(ctxPercentForModel(175_000, "deepseek-v4-pro"), 18)
+    assert.equal(ctxPercentForModel(1_000_000, "deepseek-v4-pro"), 100)
+    assert.equal(ctxPercentForModel(200_000, "deepseek-v4-pro"), 20)
+    assert.equal(contextWindowForModel("deepseek-v4-pro"), 1_000_000)
+  })
+
+  it("ctxPercentForModel returns null without token data and 128K for unknown models", () => {
+    assert.equal(ctxPercentForModel(0, "deepseek-v4-pro"), null)
+    assert.equal(ctxPercentForModel(null, "deepseek-v4-pro"), null)
+    assert.equal(ctxPercentForModel(64_000, `no-such-${Date.now()}`), 50)  // 128K default window
+  })
 })
 
 // ─── Compaction ─────────────────────────────────────────────────
 
-/** Local mock LLM server: returns a single SSE response with the given content. */
+/** Local mock LLM server: returns a single SSE response with the given content.
+ *  Captures request bodies into `requests` so tests can assert the serialization. */
 function mockLLMServer(content = "这是摘要") {
   return import("node:http").then(({ createServer }) => {
+    const requests = []
     const server = createServer((req, res) => {
-      res.writeHead(200, { "Content-Type": "text/event-stream" })
-      res.end(
-        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content } }] })}\n\n` +
-        `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` +
-        `data: [DONE]\n\n`
-      )
+      let body = ""
+      req.on("data", (c) => { body += c })
+      req.on("end", () => {
+        requests.push(body)
+        res.writeHead(200, { "Content-Type": "text/event-stream" })
+        res.end(
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content } }] })}\n\n` +
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` +
+          `data: [DONE]\n\n`
+        )
+      })
     })
     return new Promise((resolve) => {
-      server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port }))
+      server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port, requests }))
     })
   })
 }
@@ -204,12 +226,13 @@ describe("compaction — threshold is model-aware", () => {
     }
   })
 
-  it("head protection: assistant tool_calls at the head boundary pulls its tool responses in", async () => {
+  it("KEEP_HEAD=0: early tool_calls messages enter the serialization (no orphan tool messages)", async () => {
     const cwd = setupTempDir()
-    const { server, port } = await mockLLMServer()
+    const { server, port, requests } = await mockLLMServer()
     try {
-      // Head boundary: message[1] is an assistant declaring tool_calls — its tool
-      // responses must stay in head, otherwise the summary swallows them (protocol 400).
+      // KEEP_HEAD=0: the head is EMPTY — an early assistant with tool_calls (and its
+      // tool response) both land in the middle and are serialized as TEXT with a
+      // tool-name marker, not preserved as a raw pair (CLI parity — no orphan risk).
       const messages = [
         { role: "user", content: "最初需求" },
         { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "read", arguments: "{}" } }] },
@@ -221,9 +244,57 @@ describe("compaction — threshold is model-aware", () => {
       }
       const result = await compactHistory(messages, "system prompt", mockProvider("unknown-model", port))
       assert.notEqual(result, null, "should compact")
-      // The tool response survives (in head), the pair is not split
-      assert.ok(result.some((m) => m.role === "tool" && m.tool_call_id === "call_1"), "head tool response must survive")
-      assert.ok(result.some((m) => m.tool_calls?.some((tc) => tc.id === "call_1")), "owner assistant must survive")
+      // The compaction note is the FIRST message (no verbatim head is kept)
+      assert.match(result[0].content, /compacted/)
+      // The early tool_calls pair entered the summary serialization with the tool-name marker
+      assert.match(requests[0] ?? "", /\[assistant\] \[called tools: read\]/, "early tool_calls message must be serialized")
+      // No orphan tool messages: every tool message still has its assistant caller
+      const byId = new Map()
+      for (const m of result) {
+        if (m.role === "assistant" && m.tool_calls) for (const tc of m.tool_calls) byId.set(tc.id, true)
+      }
+      for (const m of result) {
+        if (m.role === "tool") assert.ok(byId.has(m.tool_call_id), `orphan tool message: ${m.tool_call_id}`)
+      }
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("multimodal message text is extracted into the serialization (CLI parity)", async () => {
+    const cwd = setupTempDir()
+    const { server, port, requests } = await mockLLMServer()
+    try {
+      const messages = [
+        { role: "user", content: [{ type: "text", text: "看这张图并修复问题" }, { type: "image_url", image_url: { url: "data:image/png;base64,xx" } }] },
+      ]
+      for (let i = 0; i < 500; i++) {
+        messages.push({ role: "user", content: `msg ${i} `.repeat(80) })
+        messages.push({ role: "assistant", content: `resp ${i} `.repeat(60) })
+      }
+      const result = await compactHistory(messages, "system prompt", mockProvider("unknown-model", port))
+      assert.notEqual(result, null, "should compact")
+      assert.match(requests[0] ?? "", /看这张图并修复问题/, "multimodal text part must survive into the summary serialization")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("pure-estimation path counts the tools schema overhead (CLI parity)", async () => {
+    const cwd = setupTempDir()
+    const { server, port } = await mockLLMServer()
+    try {
+      const messages = []
+      for (let i = 0; i < 14; i++) messages.push({ role: "user", content: `m${i} ` + "x".repeat(4) })
+      // ~28 history + ~15 system tokens is far below the explicit threshold 500…
+      const noTrigger = await compactHistory(messages, "system prompt", mockProvider("unknown-model", port), 500)
+      assert.equal(noTrigger, null, "without the schema overhead the estimate stays below threshold")
+      // …but a large tools schema pushes the pure-estimation total over it.
+      const bigSchema = Array.from({ length: 20 }, (_, i) => ({ name: `tool_${i}_` + "x".repeat(300), parameters: { type: "object" } }))
+      const result = await compactHistory(messages, "system prompt", mockProvider("unknown-model", port), 500, null, bigSchema)
+      assert.notEqual(result, null, "tools schema overhead must trigger compaction")
     } finally {
       server.close()
       rmSync(cwd, { recursive: true, force: true })
@@ -292,8 +363,9 @@ describe("compaction — threshold is model-aware", () => {
     const out = truncateFallback(history, mockProvider("deepseek-v4-pro"))
     assert.ok(out, "should truncate")
     assert.ok(out.length < history.length, "result must be shorter")
-    assert.ok(out.some((m) => m.content.includes("truncated")), "blunt truncation note present")
-    assert.ok(out.some((m) => m.content.includes("消息 0")), "head kept")
+    // KEEP_HEAD=0: the blunt note is the FIRST message — no verbatim head is kept
+    assert.match(out[0].content, /truncated/)
+    assert.ok(!out.some((m) => m.content.includes("消息 0")), "earliest message is NOT kept verbatim (KEEP_HEAD=0)")
     assert.ok(out.some((m) => m.content.includes("回复 39")), "tail kept")
   })
 

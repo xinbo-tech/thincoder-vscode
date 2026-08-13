@@ -191,6 +191,50 @@ body {
 }
 .perm-btn.approve-all:hover { background: color-mix(in srgb, var(--green) 15%, transparent); }
 
+/* ─── Inline Question Prompt (question tool) ───── */
+
+.question-card {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.question-mark {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.question-text {
+  color: var(--fg);
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.question-input {
+  flex: 1;
+  min-width: 140px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--fg);
+  background: var(--vscode-input-background, transparent);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  outline: none;
+}
+.question-input:focus { border-color: var(--accent); }
+
 
 /* ─── Syntax highlighting tokens ─────────────────── */
 

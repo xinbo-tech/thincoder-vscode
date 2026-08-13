@@ -336,3 +336,14 @@
   max-width: 280px;
   margin: 0 auto;
 }
+
+/* ─── Lazy history loading ───────────────────── */
+
+.load-older-indicator {
+  text-align: center;
+  padding: 10px 20px;
+  font-size: 11px;
+  color: var(--fg);
+  opacity: 0.5;
+}
+

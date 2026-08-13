@@ -93,7 +93,8 @@ runAgent(provider, cwd, input, callbacks, signal, autoApprove, opts)
 ```
 [System: working directory snapshot]
 [System: project dependency outline]
-[System: AUTO mode active]          ← 仅在 autoApprove=true 时
+[System: AUTO mode active]          ← 当 autoApprove 为 true 时；每次循环迭代动态检查（live getter，CLI parity）——
+                                       approve-all / AUTO 按钮在轮次中途翻转后，下一条注入即生效
 user input
 ```
 
@@ -205,7 +206,7 @@ user input
 | Checkpoint (git snapshot) | ✅ | git stash 快照 + list/create/rewind/cat，支持单文件恢复 |
 | Image input | ❌ | `readImageTool` 已注册，但 webview 无粘贴/选择图片 UI |
 | Skill 系统 | ✅ | 读取 `.thincoder/skills/` 目录下的 .md 文件，列表注入上下文 |
-| 权限审批 UI | ❌ | `autoApprove=false` 时仅注入 system reminder，无工具级确认拦截 |
+| 权限审批 UI | ✅ | webview 逐工具弹窗（approve / deny / approve-all + diff 预览）；autoApprove 是**会话级槽位字段**（与 CLI 共享），AUTO 工具栏按钮或 approve-all 翻转它；agent 循环以 live getter 读取——轮次中途翻转立即停掉后续弹窗（2026-08-13 修复） |
 
 ## 与 thincoder CLI 的差异
 
@@ -217,7 +218,7 @@ user input
 | 会话存储 | `~/.thincoder/sessions/`（共享，5 槽位轮转） | 同上（共享同一目录） |
 | 工具目录约束 | 工作目录 (`process.cwd()`) | 第一个 workspace 文件夹 |
 | 文件打开 | TUI 内显示 | VS Code 编辑器标签页 |
-| 权限审批 | TUI 内交互式 | autoApprove 默认 false，提示 agent 确认但无工具级拦截 |
+| 权限审批 | TUI 内交互式（y/n/a；a = approve + AUTO ON） | webview 逐工具弹窗（approve / deny / approve-all）；autoApprove 会话级槽位字段，两端语义一致 |
 | 配置存储 | `~/.thincoder/config.json`（共享） | 同上（共享同一文件；apiKey 回退环境变量） |
 | 记忆系统 | 3-layer FTS5 + vector | JSON 文件存储（单层） |
 | MCP | ✅ | ✅ stdio + HTTP（`thincoder.mcpServers` 配置） |

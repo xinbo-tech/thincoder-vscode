@@ -83,7 +83,7 @@ CLI 的完整 proxy 支持已移植：
 
 ## 5. 已确认不动的
 
-- `thincoder.autoApprove`（VS Code 特有权限模型，合理留在 settings）
+- ~~`thincoder.autoApprove`（VS Code 特有权限模型，合理留在 settings）~~ **已推翻（2026-08-13）**：autoApprove 迁移为会话级槽位字段（与 CLI 共享 `~/.thincoder/sessions/`），`thincoder.autoApprove` 设置项已删除。AUTO 工具栏按钮 / approve-all 是唯一开关；agent 循环以 live getter 读取，轮次中途翻转立即生效（见 ARCHITECTURE.md 权限审批 UI 行）
 - engineering 模式：走 eng 工具（已移植），面板不加开关
 - MCP AI 辅助添加（M5）：不做
 - 面板整体布局：保持单列滚动分区

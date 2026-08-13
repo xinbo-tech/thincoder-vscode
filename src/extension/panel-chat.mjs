@@ -5,6 +5,7 @@
  */
 import * as vscode from "vscode"
 import { resolveProviders } from "../config-io.mjs"
+import { ctxPercentForModel } from "../config.mjs"
 import { providerNames, getKey, buildProvider } from "./presets.mjs"
 import { saveModelPrefs } from "./session-io.mjs"
 import { specForModel } from "../specs.mjs"
@@ -13,6 +14,7 @@ import { getMcpServers } from "./settings.mjs"
 import { loadSkills } from "./skills.mjs"
 import { collectEditorInjection } from "./editor-context.mjs"
 import { injectAtRefs } from "./file-refs.mjs"
+import { permissionGate } from "./permission-gate.mjs"
 import { t } from "../i18n.mjs"
 
 /**
@@ -55,8 +57,13 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     p = { ...p, thinking: null, reasoningEffort: null }
   }
 
-  const c = vscode.workspace.getConfiguration("thincoder")
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
+
+  // Sync the live mid-turn flag from the session slot (CLI parity — autoApprove is a
+  // session-level slot field, not a VS Code setting). runAgent receives a GETTER: the
+  // agent loop and the permission gate re-read it every iteration, so approve-all /
+  // the AUTO button take effect immediately mid-turn.
+  panel._autoApprove = panel._activeData()?.autoApprove ?? false
 
   text = injectAtRefs(text, cwd)
 
@@ -107,8 +114,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
         totalUsage.completion_tokens += u.completion_tokens ?? 0
         totalUsage.prompt_cache_hit_tokens += u.prompt_cache_hit_tokens ?? 0
         totalUsage.prompt_cache_miss_tokens += u.prompt_cache_miss_tokens ?? 0
-        const ctxWin = specForModel(p.model)?.contextWindow ?? 128000
-        const ctxPct = u.prompt_tokens ? Math.round((u.prompt_tokens / ctxWin) * 100) : null
+        const ctxPct = ctxPercentForModel(u.prompt_tokens, p.model)
         panel._panel?.webview.postMessage({ type: "usage", usage: { ...totalUsage }, ctxPct })
       },
       onToolCall: (n, a, id) => panel._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
@@ -129,12 +135,15 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
         panel._panel?.webview.postMessage({ type: "complete" })
         panel._pushSessions()
       },
-      onPermissionRequired: c.get("autoApprove", false) ? undefined : (toolName, args, diffInfo) =>
-        new Promise((resolve) => {
-          panel._permissionQueue.push({ resolve, toolName })
-          panel._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
-        }),
-    }, panel._abortController.signal, c.get("autoApprove", false), { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: collectEditorInjection(cwd) })
+      onPermissionRequired: permissionGate(panel),
+      // Inline question prompts (question tool) — rendered in the panel, NOT via
+      // VS Code's native QuickPick/InputBox (which pops up at the window top and
+      // gets dismissed by an accidental click).
+      onQuestion: (question, options) => new Promise((resolve) => {
+        panel._questionQueue.push({ resolve })
+        panel._panel?.webview.postMessage({ type: "question", question, options: options ?? null })
+      }),
+    }, panel._abortController.signal, () => panel._autoApprove, { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: collectEditorInjection(cwd) })
   } catch (e) {
     // Persist the interrupted/errored turn: the user message and any partial output
     // were already pushed into both lines by runAgent (pushReal). Without this save,

@@ -218,6 +218,49 @@ export function saveSessionToSlot(cwd, slot, data) {
   } catch { /* non-fatal */ }
 }
 
+/**
+ * Flip the session's autoApprove flag (CLI parity: session-level slot field, NOT a
+ * VS Code setting). Returns false when the slot cannot be loaded.
+ */
+export function setSlotAutoApprove(cwd, slot, value) {
+  const data = loadSlot(cwd, slot)
+  if (!data) return false
+  data.autoApprove = value
+  saveSessionToSlot(cwd, slot, data)
+  return true
+}
+
+
+/** Page size for lazy history loading (initial paint + scroll-back pages). */
+export const HISTORY_PAGE_SIZE = 50
+
+/**
+ * Window into the human line for lazy history loading. `before` = null takes the
+ * LAST page (first paint); otherwise the page ending just before `before`.
+ * `idx` values are GLOBAL indexes into the full history array — the webview's
+ * edit/delete buttons anchor on them, so pagination must never renumber messages.
+ */
+export function historyWindow(history, before, pageSize = HISTORY_PAGE_SIZE) {
+  const total = Array.isArray(history) ? history.length : 0
+  if (total === 0) return { messages: [], hasOlder: false }
+  const end = before == null ? total : Math.min(before, total)
+  const start = Math.max(0, end - pageSize)
+  const messages = []
+  for (let i = start; i < end; i++) {
+    const m = history[i]
+    if (typeof m?.content !== "string") continue
+    const kind = m.type ?? m.role
+    if (kind !== "user" && kind !== "assistant" && kind !== "tool") continue
+    messages.push({
+      kind,
+      text: m.content,
+      name: m.name ?? null,
+      timestamp: m.timestamp ?? null,
+      idx: i,
+    })
+  }
+  return { messages, hasOlder: start > 0 }
+}
 /** Delete a slot + remove from manifest. Returns the new active slot (or null if none left). */
 export function deleteSlotAndUpdate(cwd, slot) {
   deleteSlot(cwd, slot)

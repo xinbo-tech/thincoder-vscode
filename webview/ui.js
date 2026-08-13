@@ -35,7 +35,7 @@ export function showBanner(ctx, text, keyOk) {
 // ─── Messages ──────────────────────────────────
 
 /** Historical user message (idx set) gets edit + delete buttons; live ones don't. */
-export function addUser(ctx, text, timestamp, idx) {
+export function buildUserMessage(ctx, text, timestamp, idx) {
   const el = document.createElement("div")
   el.className = "message user"
   const ts = timestamp ? fmtTime(new Date(timestamp)) : fmtTime(new Date())
@@ -45,18 +45,26 @@ export function addUser(ctx, text, timestamp, idx) {
       <button class="msg-del-btn" data-idx="${idx}" title="${t("msg.deleteTitle")}">✕</button>
     </span>`
   el.innerHTML = `<div class="msg-label">❯ ${t("msg.user")}: <span class="msg-time">${ts}</span>${actions}</div><div class="bubble">${mdInline(esc(text))}</div>`
-  ctx.messagesEl.appendChild(el)
+  return el
+}
+
+export function addUser(ctx, text, timestamp, idx) {
+  ctx.messagesEl.appendChild(buildUserMessage(ctx, text, timestamp, idx))
   scrollDown(ctx)
 }
 
 /** Historical assistant message (idx set) gets a delete button; live ones don't. */
-export function addAssistantHistory(ctx, text, timestamp, idx) {
+export function buildAssistantHistory(ctx, text, timestamp, idx) {
   const el = document.createElement("div")
   el.className = "message assistant"
   const ts = timestamp ? fmtTime(new Date(timestamp)) : ""
   const actions = idx === undefined ? "" : `<button class="msg-del-btn" data-idx="${idx}" title="${t("msg.deleteTitle")}">✕</button>`
   el.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}: ${ts ? `<span class="msg-time">${ts}</span>` : ""}<button class="msg-copy-btn" title="${t("msg.copyTitle")}">${t("msg.copy")}</button>${actions}</div><div class="bubble content">${md(text)}</div>`
-  ctx.messagesEl.appendChild(el)
+  return el
+}
+
+export function addAssistantHistory(ctx, text, timestamp, idx) {
+  ctx.messagesEl.appendChild(buildAssistantHistory(ctx, text, timestamp, idx))
   scrollDown(ctx)
 }
 
@@ -189,7 +197,7 @@ export function setLoading(ctx, on) {
 }
 
 /** Historical tool call rendered from the human line (collapsed card, read-only). */
-export function addToolHistory(ctx, name, text, idx) {
+export function buildToolHistory(ctx, name, text, idx) {
   const c = document.createElement("div")
   c.className = "tool-call"
   c.dataset.toolId = "hist-" + (idx ?? name)
@@ -221,8 +229,25 @@ export function addToolHistory(ctx, name, text, idx) {
 
   c.appendChild(h)
   c.appendChild(b)
-  ctx.messagesEl.appendChild(c)
+  return c
+}
+
+export function addToolHistory(ctx, name, text, idx) {
+  ctx.messagesEl.appendChild(buildToolHistory(ctx, name, text, idx))
   scrollDown(ctx)
+}
+
+/**
+ * Build one history element from a historyPage message ({ kind, text, name,
+ * timestamp, idx }) — the lazy-loading counterpart of the eager per-message
+ * loaders above. Returns null for kinds the UI does not render.
+ */
+export function buildHistoryMessage(ctx, msg) {
+  if (!msg) return null
+  if (msg.kind === "user") return buildUserMessage(ctx, msg.text, msg.timestamp, msg.idx)
+  if (msg.kind === "assistant") return buildAssistantHistory(ctx, msg.text, msg.timestamp, msg.idx)
+  if (msg.kind === "tool") return buildToolHistory(ctx, msg.name ?? "tool", msg.text, msg.idx)
+  return null
 }
 
 export function showError(ctx, text, techInfo) {

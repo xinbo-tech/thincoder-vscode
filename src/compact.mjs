@@ -17,8 +17,12 @@ const THRESHOLD_FRACTION = 0.60
 /** Estimated token cost of one image part (CLI parity: legacy 256 underestimated real image costs). */
 const IMAGE_TOKEN_ESTIMATE = 2000
 
-/** Keep the earliest user intent — must not lose it (CLI parity D5). */
-const KEEP_HEAD = 2
+/** No dedicated head (CLI parity): in multi-task sessions the earliest messages are
+ *  typically a COMPLETED earlier task — preserving them verbatim anchored the model's
+ *  attention on stale work after compaction. Everything before the tail goes into the
+ *  summary (which distinguishes completed vs in-progress work). The tool_calls-extension
+ *  below is defensive for a future KEEP_HEAD > 0. */
+const KEEP_HEAD = 0
 
 /** After this many consecutive summary failures, degrade to deterministic truncation (CLI parity D6). */
 export const COMPRESS_FAILURE_LIMIT = 3
@@ -100,14 +104,18 @@ function estimateTokens(messages) {
  * @param {object|null} [baseline] - { lastPromptTokens, usageAtLen } measured prompt-token baseline
  *   from the previous response (CLI parity D3). When present, the trigger check is
  *   baseline + estimation of messages appended since; otherwise pure estimation of system+history.
+ * @param {Array|null} [tools] - tool schemas for the pure-estimation overhead (CLI parity):
+ *   system prompt AND tools schema are part of every request but not in history — without
+ *   them the first-turn/restored estimate under-counts and may never trigger compaction.
  * @throws when the summarization LLM fails — the CALLER counts consecutive failures and
  *   degrades to truncateFallback (CLI parity D6; the heuristic summary is deprecated).
  */
-export async function compactHistory(history, systemPrompt, provider, explicitThreshold = null, baseline = null) {
+export async function compactHistory(history, systemPrompt, provider, explicitThreshold = null, baseline = null, tools = null) {
   const threshold = explicitThreshold != null ? explicitThreshold : compactionThreshold(provider)
+  const overhead = estimateText(systemPrompt) + (tools ? estimateText(JSON.stringify(tools)) : 0)
   const total = baseline?.lastPromptTokens != null
     ? baseline.lastPromptTokens + estimateTokens(history.slice(baseline.usageAtLen ?? history.length))
-    : estimateText(systemPrompt) + estimateTokens(history)
+    : overhead + estimateTokens(history)
   if (total < threshold) return null
 
   // Keep a model-aware number of recent messages — scales with context window, ≤40% of history
@@ -154,10 +162,14 @@ export async function compactHistory(history, systemPrompt, provider, explicitTh
   const serialized = oldMessages
     .map((m) => {
       let prefix = `[${m.role}]`
-      if (m.tool_calls) prefix += ` [called: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}]`
+      if (m.tool_calls) prefix += ` [called tools: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}]`
       const cap = m.role === "user" ? 8000 : 2000
-      const content = typeof m.content === "string" ? m.content.slice(0, cap) : ""
-      return `${prefix} ${content}`
+      // Multimodal messages (array content): extract the TEXT parts — the image itself
+      // can't be summarized, but accompanying text must not be silently lost (CLI parity).
+      let text = ""
+      if (typeof m.content === "string") text = m.content
+      else if (Array.isArray(m.content)) text = m.content.filter((p) => p?.type === "text").map((p) => p.text ?? "").join(" ")
+      return `${prefix} ${text.slice(0, cap)}`
     })
     .join("\n")
 
@@ -171,7 +183,7 @@ export async function compactHistory(history, systemPrompt, provider, explicitTh
   const summary = resp.content || ""
 
   return [
-    ...history.slice(0, headEnd), // KEEP_HEAD + pulled-in tool responses stay intact (CLI parity D5)
+    ...history.slice(0, headEnd), // head (empty by default — KEEP_HEAD=0, CLI parity)
     {
       role: "user",
       content:

@@ -18,7 +18,7 @@ import { isDocFile } from "../advisor/repos.mjs"
  * in parallel (each has its own agent). sideEffectExempt tools (like subagent) don't block
  * readonly merging. Batch order is serial — results are committed in call order.
  */
-export async function executeToolBatches(agent, { response, history, fullHistory, toolByName, autoApprove, callbacks, signal, cwd, recentSigs, depth }) {
+export async function executeToolBatches(agent, { response, history, fullHistory, toolByName, getAuto, callbacks, signal, cwd, recentSigs, depth }) {
   // Group tool calls into batches — consecutive readonly tools run in parallel,
   // consecutive subagent calls also run in parallel (each has its own agent).
   // sideEffectExempt tools (like subagent) don't block readonly merging.
@@ -79,8 +79,10 @@ export async function executeToolBatches(agent, { response, history, fullHistory
         }
       }
 
-      // Permission gate: any non-readonly tool at depth 0 in manual mode
-      if (!autoApprove && tool && !tool.readonly && depth === 0 && callbacks.onPermissionRequired) {
+      // Permission gate: any non-readonly tool at depth 0 in manual mode. getAuto() is the
+      // LIVE flag (CLI parity) — approve-all / the AUTO button can flip it mid-turn, so
+      // re-read it per tool call instead of using the startup snapshot.
+      if (!getAuto() && tool && !tool.readonly && depth === 0 && callbacks.onPermissionRequired) {
         // Compute diff preview for file-based tools
         let diffInfo = null
         if (toolName !== "bash" && args.path) {

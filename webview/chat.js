@@ -6,6 +6,7 @@ import { renderDiff, lineDiff } from "./diff.js"
 import {
   showWelcome, showBanner, addUser, addAssistantHistory, newBlock,
   addTool, addToolHistory, finishTool, setLoading, showError, scrollDown, escHtml,
+  buildHistoryMessage,
 } from "./ui.js"
 import { setStrings, t } from "./i18n.js"
 import { initAutocomplete } from "./autocomplete.js"
@@ -51,6 +52,10 @@ let _planActive = false
 let _subagentMap = {}
 let _goalInfo = null
 let _toolPanels = {}
+// Lazy history loading: _hasOlder = more pages exist before the first rendered
+// message; _loadingOlder guards against scroll-triggered double requests.
+let _hasOlder = false
+let _loadingOlder = false
 // Panel preview caps (named — used by tailTruncate and the block accumulator)
 const PANEL_PREVIEW_CHARS = 2000
 const PANEL_BLOCK_MAX = 20000
@@ -353,8 +358,13 @@ function renderStatusBar(m) {
   if (_goalInfo?.status === "active") parts.push(`<span id="goal-badge" role="button" tabindex="0" aria-label="Goal panel" style="cursor:pointer">🎯</span>`)
   parts.push(`↑${fmtK(prompt)} ↓${fmtK(completion)}`)
   if (cachePct !== null) parts.push(`hit${cachePct}%`)
-  if (m && m.ctxPct != null) parts.push(`context ${m.ctxPct}%`)
-  else if (_lastCtxPct != null) parts.push(`context ${_lastCtxPct}%`)
+  const ctxPct = (m && m.ctxPct != null) ? m.ctxPct : _lastCtxPct
+  if (ctxPct != null) {
+    // CLI parity: context utilization ≥80% renders in warning color
+    parts.push(ctxPct >= 80
+      ? `<span style="color:var(--vscode-editorWarning-foreground, #cca700)">context ${ctxPct}%</span>`
+      : `context ${ctxPct}%`)
+  }
   // CLI status parity: current tool, turn count (LLM calls), elapsed seconds
   if (_currentTool) parts.push(`<span class="status-tool">${t("status.currentTool")}: ${escHtml(_currentTool)}</span>`)
   if (_llmCalls > 0) parts.push(`${t("status.turns")} ${_llmCalls}`)
@@ -625,6 +635,138 @@ document.addEventListener("click", (e) => {
   }
 })
 
+// ─── Lazy history loading ───────────────────────
+
+/** Earliest loaded global history idx (from data-idx buttons), or null if none. */
+function minLoadedIdx(ctx) {
+  let min = Infinity
+  for (const el of ctx.messagesEl.querySelectorAll("[data-idx]")) {
+    const v = Number(el.dataset.idx)
+    if (Number.isFinite(v) && v < min) min = v
+  }
+  return min === Infinity ? null : min
+}
+
+function showLoadOlderIndicator(ctx) {
+  if (document.getElementById("load-older-indicator")) return
+  const el = document.createElement("div")
+  el.id = "load-older-indicator"
+  el.className = "load-older-indicator"
+  el.textContent = t("msg.loadingOlder")
+  const anchor = ctx.messagesEl.querySelector(".message, .tool-call")
+  ctx.messagesEl.insertBefore(el, anchor)
+}
+
+function removeLoadOlderIndicator(ctx) {
+  ctx.messagesEl.querySelector("#load-older-indicator")?.remove()
+}
+
+/**
+ * Render a historyPage payload ({ messages, hasOlder, older }). `older` pages are
+ * prepended ABOVE the earliest rendered message with the scroll position
+ * compensated (the newly loaded content must not shove the viewport down);
+ * the first paint page is appended and scrolled to the bottom.
+ */
+function applyHistoryPage(ctx, m) {
+  const frag = document.createDocumentFragment()
+  for (const msg of m.messages || []) {
+    const el = buildHistoryMessage(ctx, msg)
+    if (!el) continue
+    if (msg.kind === "assistant") {
+      attachCopyButtons(el)
+      wireMsgCopyButton(el)
+    }
+    frag.appendChild(el)
+  }
+  const anchor = ctx.messagesEl.querySelector(".message, .tool-call")
+  if (m.older) {
+    const prevTop = ctx.messagesEl.scrollTop
+    const prevHeight = ctx.messagesEl.scrollHeight
+    ctx.messagesEl.insertBefore(frag, anchor)
+    ctx.messagesEl.scrollTop = prevTop + (ctx.messagesEl.scrollHeight - prevHeight)
+  } else {
+    ctx.messagesEl.insertBefore(frag, anchor)
+    scrollDown(ctx)
+  }
+  _hasOlder = !!m.hasOlder
+  _loadingOlder = false
+  removeLoadOlderIndicator(ctx)
+}
+
+/**
+ * Render an inline question prompt (question tool) INSIDE the chat panel —
+ * not VS Code's native popup at the window top. Options → button list; free
+ * text → input + submit. Cancel always available (answer null = cancelled).
+ */
+function showQuestion(ctx, question, options) {
+  const el = document.createElement("div")
+  el.className = "question-card"
+  el.setAttribute("role", "alert")
+  el.setAttribute("aria-label", t("question.label"))
+
+  const textEl = document.createElement("div")
+  textEl.className = "question-text"
+  textEl.innerHTML = `<span class="question-mark">${escHtml(t("question.mark"))}</span> ${escHtml(question)}`
+  el.appendChild(textEl)
+
+  const actions = document.createElement("div")
+  actions.className = "question-actions"
+  el.appendChild(actions)
+
+  const answer = (value) => {
+    el.remove()
+    vscode.postMessage({ type: "questionResponse", answer: value ?? null })
+    ctx.inputEl.focus()
+  }
+
+  if (Array.isArray(options) && options.length > 0) {
+    for (const opt of options) {
+      const b = document.createElement("button")
+      b.className = "perm-btn approve question-option"
+      b.textContent = opt
+      b.addEventListener("click", () => answer(opt))
+      actions.appendChild(b)
+    }
+  } else {
+    const input = document.createElement("input")
+    input.className = "question-input"
+    input.type = "text"
+    input.placeholder = t("question.placeholder")
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && input.value.trim()) answer(input.value.trim())
+    })
+    actions.appendChild(input)
+    const submit = document.createElement("button")
+    submit.className = "perm-btn approve"
+    submit.textContent = t("question.submit")
+    submit.addEventListener("click", () => { if (input.value.trim()) answer(input.value.trim()) })
+    actions.appendChild(submit)
+  }
+
+  const cancel = document.createElement("button")
+  cancel.className = "perm-btn deny"
+  cancel.textContent = t("question.cancel")
+  cancel.addEventListener("click", () => answer(null))
+  actions.appendChild(cancel)
+
+  ctx.messagesEl.appendChild(el)
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" })
+  const input = el.querySelector(".question-input")
+  if (input) setTimeout(() => input.focus(), 50)
+}
+
+// Scroll-back trigger: near the top → fetch the next older page (guarded against
+// double requests; _hasOlder=false means everything is already rendered).
+ctx.messagesEl.addEventListener("scroll", () => {
+  if (!_hasOlder || _loadingOlder) return
+  if (ctx.messagesEl.scrollTop > 40) return
+  const before = minLoadedIdx(ctx)
+  if (before == null) { _hasOlder = false; return }  // nothing anchorable — defensive stop
+  _loadingOlder = true
+  showLoadOlderIndicator(ctx)
+  vscode.postMessage({ type: "loadOlder", before })
+})
+
 // ─── Message handling ──────────────────────────
 
 window.addEventListener("message", (e) => {
@@ -664,8 +806,13 @@ window.addEventListener("message", (e) => {
     case "clearMessages":
       ctx.messagesEl.replaceChildren()
       ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""
+      _hasOlder = false
+      _loadingOlder = false
       renderStatusBar()
       showWelcome(ctx)
+      break
+    case "historyPage":
+      applyHistoryPage(ctx, m)
       break
     case "sessions":
       ctx._sessions = m.sessions || []
@@ -728,6 +875,10 @@ window.addEventListener("message", (e) => {
     case "proxyTestResult":
       updateProxyTestResult(m.result || {})
       break
+    case "question": {
+      showQuestion(ctx, m.question, m.options)
+      break
+    }
     case "permissionRequest": {
       const el = document.createElement("div")
       el.className = "permission-prompt"
@@ -937,6 +1088,10 @@ function onToken(text) {
 }
 
 function finish(aborted) {
+  // A turn end without an answer leaves a stale inline question card — drop it
+  // (aborted/error paths; a completed turn answers via questionResponse which
+  // removes its own card).
+  if (aborted) document.querySelectorAll(".question-card").forEach((el) => el.remove())
   if (aborted) {
     // Match CLI: push "[stopped]" as a line in the output stream
     if (!ctx.currentBubble) {

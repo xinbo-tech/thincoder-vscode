@@ -120,7 +120,7 @@ export function agentState(agent) {
  * Task list is the single source of truth: stale re-injections are filtered FIRST, then the
  * latest version is appended (CLI parity D7 — otherwise old copies accumulate and grow stale).
  */
-export function reinjectAfterCompaction(history, agent, autoApprove) {
+export function reinjectAfterCompaction(history, agent, getAuto) {
   for (let i = history.length - 1; i >= 0; i--) {
     const m = history[i]
     if (m.role === "user" && typeof m.content === "string" && m.content.startsWith(TASK_REINJECT_PREFIX)) {
@@ -150,8 +150,9 @@ export function reinjectAfterCompaction(history, agent, autoApprove) {
     })
   }
 
-  // Re-inject permission mode reminder
-  if (autoApprove) {
+  // Re-inject permission mode reminder — getAuto() is the live flag (CLI parity), so a
+  // mid-turn approve-all that survives compaction re-injects the correct reminder.
+  if (getAuto()) {
     history.push({
       role: "user",
       content: "[System reminder: AUTO mode is active — all tool calls are automatically approved without asking.]",

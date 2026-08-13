@@ -38,6 +38,10 @@ try { _ENG_CODER = readFileSync(join(__dirname, "prompts", "eng-coder.md"), "utf
 try { _ENG_MAIN = readFileSync(join(__dirname, "prompts", "engineering.md"), "utf8") } catch { _ENG_MAIN = "" }
 try { _ENG_SUB = readFileSync(join(__dirname, "prompts", "engineering-sub.md"), "utf8") } catch { _ENG_SUB = "" }
 
+/** AUTO mode reminder (CLI parity, agent.mjs:48 — same wording, byte-identical). */
+const AUTO_REMINDER =
+  "[System reminder: AUTO mode is active — all tool calls are automatically approved without asking.]"
+
 /** Engineering mode reminder — shared with the eng tool (CLI parity). */
 export const ENG_ON_REMINDER =
   "[System reminder: engineering mode is ON — design-before-code enforced. " +
@@ -59,6 +63,12 @@ export { builtinTools } from "./tools.mjs"
  */
 export async function runAgent(provider, cwd, input, callbacks = {}, signal, autoApprove = true, opts = {}) {
   const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills, engState, engDesignReviewed } = opts
+
+  // Live autoApprove read (CLI parity: agent.autoApprove is a live field, not a snapshot).
+  // The panel passes a getter because approve-all / the AUTO toolbar button flip the flag
+  // MID-TURN — a plain boolean snapshot could never see it. The permission gate and the
+  // AUTO reminder both re-read it on every iteration.
+  const getAuto = typeof autoApprove === "function" ? autoApprove : () => autoApprove
 
   const agentTools = depth === 0
     ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool, advisorTool, engTool]
@@ -204,11 +214,8 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   }
 
   if (depth === 0 && freshMachineLine) {
-    if (autoApprove) {
-      history.push({
-        role: "user",
-        content: "[System reminder: AUTO mode is active — all tool calls are automatically approved without asking.]",
-      })
+    if (getAuto()) {
+      history.push({ role: "user", content: AUTO_REMINDER })
     } else {
       history.push({
         role: "user",
@@ -272,10 +279,11 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       try {
         // Measured baseline path (CLI parity D3): the last response's prompt_tokens is the
         // true full-context cost; messages appended since are estimated as increments.
+        // tools schemas ride along for the pure-estimation overhead (CLI parity).
         const compacted = await compactHistory(history, systemPrompt, provider, cfgCompactThreshold, {
           lastPromptTokens: agent._lastPromptTokens,
           usageAtLen: agent._usageAtLen,
-        })
+        }, toolSchemas)
         if (compacted) {
           history.length = 0
           history.push(...compacted)
@@ -283,7 +291,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           agent._lastPromptTokens = null
           agent._usageAtLen = null
           agent._compressFailures = 0
-          reinjectAfterCompaction(history, agent, autoApprove)
+          reinjectAfterCompaction(history, agent, getAuto)
         }
       } catch (e) {
         // AbortError must not be swallowed: user cancellation must propagate
@@ -299,10 +307,18 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
             history.push(...truncated)
             agent._lastPromptTokens = null
             agent._usageAtLen = null
-            reinjectAfterCompaction(history, agent, autoApprove)
+            reinjectAfterCompaction(history, agent, getAuto)
           }
         }
       }
+    }
+
+    // Live AUTO reminder (CLI parity, agent.mjs:158): approve-all / the AUTO button can
+    // flip the flag mid-turn, and compaction can drop the earlier reminder. Re-read the
+    // live flag every iteration — the model must know AUTO turned on without waiting
+    // for the next user message.
+    if (getAuto() && !history.some((m) => m.content === AUTO_REMINDER)) {
+      history.push({ role: "user", content: AUTO_REMINDER })
     }
 
     // Flush pending reminders queued by meta-tools (eng enter/exit, etc.)
@@ -444,7 +460,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         : {}),
     })
 
-    await executeToolBatches(agent, { response, history, fullHistory, toolByName, autoApprove, callbacks, signal, cwd, recentSigs, depth })
+    await executeToolBatches(agent, { response, history, fullHistory, toolByName, getAuto, callbacks, signal, cwd, recentSigs, depth })
 
     // Expired timers — inject reminders when the thinking budget is up (ported from CLI post-turn)
     if (agent._pendingTimers.length > 0) {
