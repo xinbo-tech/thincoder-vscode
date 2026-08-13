@@ -2,6 +2,7 @@
  * chat.js — main orchestration: state, events, token handling
  */
 import { md } from "./md.js"
+import { tailTruncate, fmtK, patchLineType } from "./lib.js"
 import { renderDiff, lineDiff } from "./diff.js"
 import {
   showWelcome, showBanner, addUser, addAssistantHistory, newBlock,
@@ -196,12 +197,6 @@ function fmtDate(ts) {
     " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
 }
 
-function fmtK(n) {
-  if (n >= 10000) return Math.round(n / 1000) + "k"
-  if (n >= 1000) return (n / 1000).toFixed(1) + "k"
-  return String(n)
-}
-
 function renderTaskPanel() {
   const panel = document.getElementById("task-panel")
   if (!_taskProgress || !_taskProgress.items || _taskProgress.items.length === 0) {
@@ -306,17 +301,6 @@ function renderToolPanels() {
       renderToolPanels()
     })
   })
-}
-
-/** Truncate to the last ~max chars, snapped forward to a line boundary so
- *  markdown constructs (code fences, tables, bold spans) are never cut
- *  mid-syntax by the panel preview. */
-function tailTruncate(text, max = PANEL_PREVIEW_CHARS) {
-  const t = String(text || "")
-  if (t.length <= max) return t
-  const start = t.length - max
-  const snap = t.indexOf("\n", start)
-  return snap >= 0 ? t.slice(snap + 1) : t.slice(start)
 }
 
 function clearPanels() {
@@ -672,11 +656,7 @@ document.addEventListener("click", (e) => {
  * Hunk headers (@@, diff --git, ---/+++) stay neutral; only content lines colored.
  */
 function renderPatch(patch) {
-  const lines = String(patch || "").split("\n").map((l) => {
-    if (l.startsWith("+") && !l.startsWith("+++")) return { type: "add", text: l }
-    if (l.startsWith("-") && !l.startsWith("---")) return { type: "del", text: l }
-    return { type: "same", text: l }
-  })
+  const lines = String(patch || "").split("\n").map((l) => ({ type: patchLineType(l), text: l }))
   return renderDiff(lines)
 }
 

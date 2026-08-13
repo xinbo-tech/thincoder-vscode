@@ -1,0 +1,46 @@
+/**
+ * lib.js — pure helpers (no DOM, no module side effects) extracted from
+ * chat.js / ui.js so the webview's logic is unit-testable. The webview has
+ * otherwise ZERO automated coverage — every regression (Stop, iterable,
+ * i18n loss, 137%) had to be caught by the user.
+ *
+ * Keep this module dependency-free so node --test can import it directly.
+ */
+
+/**
+ * Truncate to the last ~max chars, snapped FORWARD to a line boundary so
+ * markdown constructs (code fences, tables, bold spans) are never cut
+ * mid-syntax by the panel preview.
+ */
+export function tailTruncate(text, max = 2000) {
+  const t = String(text || "")
+  if (t.length <= max) return t
+  const start = t.length - max
+  const snap = t.indexOf("\n", start)
+  return snap >= 0 ? t.slice(snap + 1) : t.slice(start)
+}
+
+/** Compact token count: 10_000 → "10k", 1_500 → "1.5k", 999 → "999". */
+export function fmtK(n) {
+  if (n >= 10000) return Math.round(n / 1000) + "k"
+  if (n >= 1000) return (n / 1000).toFixed(1) + "k"
+  return String(n)
+}
+
+/** HH:MM from a Date (zero-padded). */
+export function fmtTime(d) {
+  const h = String(d.getHours()).padStart(2, "0")
+  const m = String(d.getMinutes()).padStart(2, "0")
+  return `${h}:${m}`
+}
+
+/**
+ * Classify one unified-diff line for +/- coloring. Hunk/file headers stay
+ * neutral ("same"); content lines color as add/del. Used by renderPatch in
+ * chat.js (apply_patch approval preview).
+ */
+export function patchLineType(line) {
+  if (line.startsWith("+") && !line.startsWith("+++")) return "add"
+  if (line.startsWith("-") && !line.startsWith("---")) return "del"
+  return "same"
+}

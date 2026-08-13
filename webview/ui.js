@@ -4,6 +4,7 @@
  */
 
 import { md, mdInline, esc } from "./md.js"
+import { fmtTime } from "./lib.js"
 import { t } from "./i18n.js"
 
 // ─── Welcome / Banner ──────────────────────────
@@ -66,12 +67,6 @@ export function buildAssistantHistory(ctx, text, timestamp, idx) {
 export function addAssistantHistory(ctx, text, timestamp, idx) {
   ctx.messagesEl.appendChild(buildAssistantHistory(ctx, text, timestamp, idx))
   scrollDown(ctx)
-}
-
-function fmtTime(d) {
-  const h = String(d.getHours()).padStart(2,"0")
-  const m = String(d.getMinutes()).padStart(2,"0")
-  return `${h}:${m}`
 }
 
 export function newBlock(ctx) {
