@@ -8,6 +8,7 @@ import assert from "node:assert/strict"
 import { setupWebview } from "./helpers/webview-env.mjs"
 import {
   buildUserMessage, buildAssistantHistory, buildToolHistory, buildHistoryMessage, escHtml,
+  newBlock, addUser,
 } from "../webview/ui.js"
 
 let env
@@ -15,6 +16,30 @@ before(() => { env = setupWebview() })
 after(() => env?.cleanup())
 
 const ctx = () => ({ messagesEl: document.createElement("div") })
+
+describe("newBlock — one ThinCoder label per turn (live streaming)", () => {
+  it("paints the label only on the turn's first block — segments after tool batches get none", () => {
+    const c = { messagesEl: document.createElement("div"), assistantLabeled: false }
+    newBlock(c)  // turn start
+    newBlock(c)  // next LLM segment after a tool batch
+    newBlock(c)  // and another
+    const labels = c.messagesEl.querySelectorAll(".msg-label")
+    assert.equal(labels.length, 1)
+    assert.equal(labels[0].textContent, "❯ ThinCoder:")
+  })
+
+  it("a new user message resets the guard so the next turn paints again", () => {
+    const c = { messagesEl: document.createElement("div"), assistantLabeled: false }
+    newBlock(c)
+    addUser(c, "second question")
+    newBlock(c)
+    const labels = c.messagesEl.querySelectorAll(".msg-label")
+    assert.equal(labels.length, 3, "ThinCoder + You + ThinCoder (one per turn)")
+    assert.equal(labels[0].textContent, "❯ ThinCoder:")
+    assert.match(labels[1].textContent, /You:/)
+    assert.equal(labels[2].textContent, "❯ ThinCoder:")
+  })
+})
 
 describe("escHtml", () => {
   it("escapes the four dangerous characters", () => {

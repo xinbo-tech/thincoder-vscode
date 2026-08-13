@@ -50,6 +50,7 @@ export function buildUserMessage(ctx, text, timestamp, idx) {
 }
 
 export function addUser(ctx, text, timestamp, idx) {
+  ctx.assistantLabeled = false // new turn — the next assistant label is allowed once
   ctx.messagesEl.appendChild(buildUserMessage(ctx, text, timestamp, idx))
   scrollDown(ctx)
 }
@@ -75,7 +76,13 @@ export function newBlock(ctx) {
   ctx.currentRaw = ""
   ctx.currentBlock = document.createElement("div")
   ctx.currentBlock.className = "message assistant"
-  ctx.currentBlock.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}:</div>`
+  // One "❯ ThinCoder:" per turn (CLI ensureAssistantLabel parity): only the
+  // turn's FIRST block carries the label; segments after tool batches start
+  // fresh blocks but must not paint a second label.
+  if (!ctx.assistantLabeled) {
+    ctx.assistantLabeled = true
+    ctx.currentBlock.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}:</div>`
+  }
   ctx.messagesEl.appendChild(ctx.currentBlock)
 }
 

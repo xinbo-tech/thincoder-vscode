@@ -40,6 +40,11 @@ const ctx = {
   _inputHistory: [], // sent inputs (memory, per panel session — CLI parity)
   _historyIdx: -1,   // -1 = showing the live draft
   _inputDraft: "",   // stashed in-progress text while navigating history
+  // Turn-level assistant label guard (CLI ensureAssistantLabel parity): one
+  // "❯ ThinCoder:" per TURN, not per LLM-response segment. onToken/onReasoning
+  // start a fresh block after each tool batch; without this every segment
+  // painted its own label.
+  assistantLabeled: false,
   // First-run onboarding panel
   welcomePanel: document.getElementById("welcome-panel"),
   welcomeProvider: document.getElementById("welcome-provider"),
