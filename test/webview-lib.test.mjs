@@ -21,6 +21,15 @@ test("tailTruncate snaps forward to a line boundary (never cuts markdown mid-syn
   assert.ok(out.startsWith("tail"), `expected to start at the next full line, got: ${JSON.stringify(out.slice(0, 20))}`)
 })
 
+test("tailTruncate does not collapse to empty when the only newline is the trailing char", () => {
+  const text = "a".repeat(2000) + "\n"
+  const out = tailTruncate(text, 2000)
+  // falls back to raw slice (keeps the trailing newline) instead of "" — the
+  // snap branch would slice past the last char and return an empty preview.
+  assert.equal(out.length, 2000)
+  assert.equal(out, "a".repeat(1999) + "\n")
+})
+
 test("tailTruncate falls back to raw slice when no newline exists", () => {
   const text = "x".repeat(3000)
   const out = tailTruncate(text, 100)
@@ -52,4 +61,10 @@ test("patchLineType classifies unified-diff lines", () => {
   assert.equal(patchLineType("diff --git a/x b/x"), "same")
   assert.equal(patchLineType(" context line"), "same")
   assert.equal(patchLineType(""), "same")
+})
+
+test("patchLineType colors content lines whose text starts with ++/-- (not misread as headers)", () => {
+  assert.equal(patchLineType("+++i"), "add")   // added line whose content is "++i"
+  assert.equal(patchLineType("---x"), "del")   // removed line whose content is "--x"
+  assert.equal(patchLineType("+++ /dev/null"), "same") // new-file header
 })

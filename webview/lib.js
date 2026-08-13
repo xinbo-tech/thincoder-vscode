@@ -17,7 +17,10 @@ export function tailTruncate(text, max = 2000) {
   if (t.length <= max) return t
   const start = t.length - max
   const snap = t.indexOf("\n", start)
-  return snap >= 0 ? t.slice(snap + 1) : t.slice(start)
+  // Only snap forward when the newline has content AFTER it — if the only
+  // newline in range is the trailing char, slicing past it yields "".
+  if (snap >= 0 && snap + 1 < t.length) return t.slice(snap + 1)
+  return t.slice(start)
 }
 
 /** Compact token count: 10_000 → "10k", 1_500 → "1.5k", 999 → "999". */
@@ -40,7 +43,11 @@ export function fmtTime(d) {
  * chat.js (apply_patch approval preview).
  */
 export function patchLineType(line) {
-  if (line.startsWith("+") && !line.startsWith("+++")) return "add"
-  if (line.startsWith("-") && !line.startsWith("---")) return "del"
+  // File headers are exactly "+++ <path>" / "--- <path>" (three markers +
+  // space). A content line whose TEXT begins with "++" renders as "+++…" in a
+  // unified diff — so matching the bare "+++" prefix would misclassify it.
+  if (line.startsWith("+++ ") || line.startsWith("--- ")) return "same"
+  if (line.startsWith("+")) return "add"
+  if (line.startsWith("-")) return "del"
   return "same"
 }
