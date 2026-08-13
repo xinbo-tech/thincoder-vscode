@@ -375,5 +375,25 @@ describe("bash — background process does not hang (CLI parity)", () => {
   })
 })
 
+describe("read_image — svg as text source (Kimi 400 session-poisoning regression)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("svg returns plain-text source (no image_url, JSON envelope absent)", async () => {
+    const { readImageTool } = await import("../src/tools/read_image.mjs")
+    writeFileSync(join(cwd, "a.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>')
+    const out = await readImageTool.execute({ path: "a.svg" }, ctx())
+    assert.match(out, /svg source/)
+    assert.match(out, /<rect/)
+    assert.throws(() => JSON.parse(out), "plain text, not the multimodal JSON envelope")
+  })
+
+  it("bmp is rejected with a convert-to-PNG hint", async () => {
+    const { readImageTool } = await import("../src/tools/read_image.mjs")
+    writeFileSync(join(cwd, "a.bmp"), Buffer.from([66, 77]))
+    await assert.rejects(() => readImageTool.execute({ path: "a.bmp" }, ctx()), /Convert it to PNG/)
+  })
+})
+
 
 

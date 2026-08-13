@@ -267,6 +267,42 @@ describe("token estimation", () => {
 // ─── Helpers ────────────────────────────────────────────────────
 
 /** Create a mock Response with a readable stream from SSE string array */
+// ─── stripImagesForTextModel — 按格式净化（Kimi svg 400 毒化会话回归） ───
+
+describe("stripImagesForTextModel", () => {
+  it("vision model: keeps raster png, replaces svg data-URL with text placeholder, history untouched", async () => {
+    const { stripImagesForTextModel } = await import("../src/provider.mjs")
+    const spec = { multimodal: true }
+    const msgs = [
+      { role: "user", content: [
+        { type: "text", text: "look" },
+        { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } },
+      ] },
+      { role: "user", content: [
+        { type: "text", text: "svg" },
+        { type: "image_url", image_url: { url: "data:image/svg+xml;base64,PHN2Zz4=" } },
+      ] },
+    ]
+    const out = stripImagesForTextModel(msgs, spec)
+    assert.equal(out[0], msgs[0])
+    assert.deepEqual(out[1].content, [
+      { type: "text", text: "svg" },
+      { type: "text", text: "[image omitted — unsupported format image/svg+xml]" },
+    ])
+    assert.equal(msgs[1].content[1].type, "image_url") // history not mutated
+  })
+
+  it("text-only model: strips all image parts, keeps text parts", async () => {
+    const { stripImagesForTextModel } = await import("../src/provider.mjs")
+    const msgs = [{ role: "user", content: [
+      { type: "text", text: "hi" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } },
+    ] }]
+    const out = stripImagesForTextModel(msgs, { multimodal: false })
+    assert.deepEqual(out[0].content, [{ type: "text", text: "hi" }])
+  })
+})
+
 function createMockResponse(sseLines) {
   const encoder = new TextEncoder()
   const stream = new ReadableStream({

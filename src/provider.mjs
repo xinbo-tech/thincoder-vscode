@@ -32,16 +32,34 @@ const _anySignal = AbortSignal.any || ((signals) => {
 })
 
 /**
- * Strip image parts from messages when the model doesn't support multimodal.
- * Without this, switching from a vision model to a text-only model after images
- * were injected into history → 400 Bad Request on every subsequent call.
+ * Sanitize image parts that would 400 the request (CLI core.mjs parity):
+ * - model has no vision support → strip all image parts (text-only APIs reject the
+ *   ENTIRE request if any message contains an image part, bricking the conversation);
+ * - model IS vision-capable but the data URL is not a raster format (Kimi/Anthropic/
+ *   OpenAI/Gemini are all raster-only — Kimi 400s "unsupported image format" on EVERY
+ *   subsequent request once an svg/bmp part sits in history) → replace with a text
+ *   placeholder so the model knows an image was there.
+ * History itself is left untouched, so switching back to a capable model restores images.
  */
-function stripImagesForTextModel(messages, spec) {
-  if (spec.multimodal) return messages
+const RASTER_IMAGE_URL = /^data:image\/(png|jpe?g|gif|webp);base64,/
+
+export function stripImagesForTextModel(messages, spec) {
   return messages.map((m) => {
-    if (!Array.isArray(m.content)) return m
-    const textOnly = m.content.filter((part) => part.type === "text")
-    return textOnly.length === m.content.length ? m : { ...m, content: textOnly }
+    if (!Array.isArray(m.content) || !m.content.some((p) => p?.type === "image_url")) return m
+    if (!spec.multimodal) {
+      const textOnly = m.content.filter((part) => part.type === "text")
+      return { ...m, content: textOnly }
+    }
+    let msgChanged = false
+    const parts = m.content.map((p) => {
+      if (p?.type !== "image_url") return p
+      const url = p.image_url?.url || ""
+      if (!url.startsWith("data:") || RASTER_IMAGE_URL.test(url)) return p
+      msgChanged = true
+      const fmt = url.match(/^data:([^;,]+)/)?.[1] || "unknown"
+      return { type: "text", text: `[image omitted — unsupported format ${fmt}]` }
+    })
+    return msgChanged ? { ...m, content: parts } : m
   })
 }
 

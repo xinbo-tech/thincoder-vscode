@@ -6,8 +6,11 @@
 import { readFileSync, statSync } from "node:fs"
 import { resolvePath } from "./shared.mjs"
 
-const IMAGE_MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml" }
+// Raster formats only — every mainstream vision API (Kimi, Anthropic, OpenAI, Gemini)
+// rejects svg/bmp. svg is served as text source below; bmp is refused with a hint.
+const IMAGE_MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" }
 const MAX_IMAGE_BYTES = 15_000_000 // 15MB raw ≈ 20MB base64
+const MAX_SVG_CHARS = 100_000
 
 export const readImageTool = {
   name: "read_image",
@@ -17,7 +20,7 @@ export const readImageTool = {
     "Read an image file and return it as base64 data visible to the model. " +
     "Use this to view screenshots, UI mockups, diagrams, or any visual content. " +
     "The model only sees images through this tool — it cannot 'see' files directly. " +
-    "Supports png, jpg, gif, webp, bmp, svg. " +
+    "Supports png, jpg, gif, webp. svg files are returned as text source (no vision API accepts svg). " +
     "Note: only works with models that support vision input (Kimi K3, Qwen3.7, MiniMax M3).\n" +
     "Parameters:\n" +
     "- path (required): Image file path",
@@ -32,8 +35,23 @@ export const readImageTool = {
   async execute({ path }, ctx) {
     const abs = resolvePath(path, ctx.cwd)
     const ext = abs.slice(abs.lastIndexOf(".") + 1).toLowerCase()
+
+    // SVG is text markup — return the source directly (plain text, not the multimodal
+    // JSON envelope, so the agent loop treats it as a normal tool result). Works with
+    // text-only models too, and never poisons history with an image part the API 400s on.
+    if (ext === "svg") {
+      const st = statSync(abs)
+      if (st.size > MAX_IMAGE_BYTES) throw new Error(`Image too large: ${Math.round(st.size / 1_000_000)}MB (max 15MB)`)
+      const src = readFileSync(abs, "utf8")
+      const body = src.length > MAX_SVG_CHARS ? src.slice(0, MAX_SVG_CHARS) + `\n[... truncated: ${src.length - MAX_SVG_CHARS} chars omitted]` : src
+      return `[read_image: ${path} (svg source, ${src.length} chars — no vision API accepts image/svg+xml, showing markup instead)]\n${body}`
+    }
+
     const mime = IMAGE_MIME[ext]
-    if (!mime) throw new Error(`Unsupported image format: .${ext}. Supported: ${Object.keys(IMAGE_MIME).join(", ")}`)
+    if (!mime) {
+      const hint = ext === "bmp" ? " Convert it to PNG first (no mainstream vision API accepts BMP)." : ""
+      throw new Error(`Unsupported image format: .${ext}. Supported: ${Object.keys(IMAGE_MIME).join(", ")}, svg (as text source).${hint}`)
+    }
 
     const imgStat = statSync(abs)
     if (imgStat.size > MAX_IMAGE_BYTES) {
