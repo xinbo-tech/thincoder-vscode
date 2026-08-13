@@ -239,8 +239,11 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   // Machine-only injections (editor context, etc.) — pushed to the MACHINE line ONLY,
   // never into fullHistory (CLI parity: automatic context must not pollute the
   // human-readable record or the session-restore display). Marked transient so
-  // persistence layers can drop them.
-  for (const inj of opts.injections ?? []) {
+  // persistence layers can drop them. Accepts an array OR a single message —
+  // collectEditorInjection returns one object, and a bare for...of over it threw
+  // "object is not iterable" on every send with an active editor (2211d46 bug).
+  const injections = Array.isArray(opts.injections) ? opts.injections : (opts.injections ? [opts.injections] : [])
+  for (const inj of injections) {
     if (inj && typeof inj.content === "string") {
       history.push({ role: "user", content: inj.content, transient: true })
     }

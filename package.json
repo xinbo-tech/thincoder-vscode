@@ -105,7 +105,7 @@
     "package": "vsce package",
     "publish": "vsce publish",
     "publish:ovsx": "ovsx publish",
-    "test": "node --test test/unit.test.mjs test/dual-history.test.mjs test/tools.test.mjs test/config-io.test.mjs test/settings-panel.test.mjs test/advisor.test.mjs test/execute.test.mjs test/provider-panel.test.mjs test/proxy.test.mjs test/agent.test.mjs test/mcp.test.mjs test/provider.test.mjs test/subagent.test.mjs test/permission.test.mjs test/auto-approve.test.mjs test/history-window.test.mjs test/question.test.mjs test/diff.test.mjs",
+    "test": "node --test test/unit.test.mjs test/dual-history.test.mjs test/tools.test.mjs test/config-io.test.mjs test/settings-panel.test.mjs test/advisor.test.mjs test/execute.test.mjs test/provider-panel.test.mjs test/proxy.test.mjs test/agent.test.mjs test/mcp.test.mjs test/provider.test.mjs test/subagent.test.mjs test/permission.test.mjs test/auto-approve.test.mjs test/history-window.test.mjs test/question.test.mjs test/diff.test.mjs test/injections.test.mjs",
     "lint": "eslint ."
   },
   "devDependencies": {

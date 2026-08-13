@@ -146,7 +146,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
         panel._setStatus("waiting")
         panel._panel?.webview.postMessage({ type: "question", question, options: options ?? null })
       }),
-    }, panel._abortController.signal, () => panel._autoApprove, { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: collectEditorInjection(cwd) })
+    }, panel._abortController.signal, () => panel._autoApprove, { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean) })
   } catch (e) {
     // Persist the interrupted/errored turn: the user message and any partial output
     // were already pushed into both lines by runAgent (pushReal). Without this save,
