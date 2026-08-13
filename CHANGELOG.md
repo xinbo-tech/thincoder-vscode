@@ -4,6 +4,22 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.6] — 2026-08-13
+
+### Fixed
+
+- **Repeated "❯ ThinCoder:" labels**: live streaming painted one label per LLM-response segment (every tool batch started a fresh block, each with its own label); history restore painted one per message. Both now render ONE label per turn — live via a turn-level guard, history via a `turnStart` flag computed in `historyWindow` from the raw predecessor (correct across lazy pages).
+
+### Added
+
+- **In-conversation advisor block**: advisor output now streams into a reasoning-style details block INSIDE the conversation flow — full content in a scrolling region, never truncated (was: hard-capped at 20k chars in the side tool panel), with the round number in the summary ("Advisor Review (Round N)").
+- **Question cards always accept free-text answers**: cards with preset options now also show an input — users can supplement or correct the AI's choices instead of being forced to pick.
+
+### Changed
+
+- **Removed per-message action buttons** (copy / delete / edit) — never-requested over-engineering; historical messages are now clean label + content. Code-block copy buttons are kept.
+- **Engineering-mode prompt**: open-ended questioning style (free-text by default, options only for finite enumerations, one question at a time) + five review fixes (requirements-first step, designToken via parameter only, advisor findings in sign-off, clarification done-criteria, 3-round advisor retry cap).
+
 ## [0.1.5] — 2026-08-13
 
 ### Fixed
