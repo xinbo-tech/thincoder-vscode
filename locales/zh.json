@@ -180,5 +180,9 @@
   "welcome.fullSettings": "完整设置",
   "settings.providerKey": "API Key",
   "question.customPlaceholder": "或输入你自己的回答…",
-  "advisor.round": "Advisor 审查（第 {round} 轮）"
+  "advisor.round": "Advisor 审查（第 {round} 轮）",
+  "settings.websearchSection": "联网搜索",
+  "settings.websearchLabel": "Tavily API Key",
+  "settings.websearchHelp": "可选 — Tavily 结构化搜索，无 key 时回退 Bing。",
+  "settings.advisorInherit": "继承（主模型）"
 }

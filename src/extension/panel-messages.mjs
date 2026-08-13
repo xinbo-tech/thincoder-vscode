@@ -5,7 +5,7 @@
 import * as vscode from "vscode"
 import { loadLocaleStrings } from "../i18n.mjs"
 import { saveModelPrefs, switchToSlot } from "./session-io.mjs"
-import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection, shellCandidates, saveShellSettingsFromPanel } from "./settings.mjs"
+import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection, shellCandidates, saveShellSettingsFromPanel, saveWebsearchKeyFromPanel, deleteWebsearchKeyFromPanel } from "./settings.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
 import { selectProviderModel, loadRaw } from "../config-io.mjs"
 
@@ -113,6 +113,8 @@ export async function handlePanelMessage(panel, msg) {
     case "saveEmbeddingConfig": await panel._saveEmbeddingConfig(msg.config); break
     case "saveEmbedKey": await panel._saveEmbeddingConfig({ apiKey: msg.key }); break
     case "deleteEmbedKey": await panel._saveEmbeddingConfig({ apiKey: "" }); break
+    case "saveWebsearchKey": saveWebsearchKeyFromPanel(msg.key); panel._pushSettings(); break
+    case "deleteWebsearchKey": deleteWebsearchKeyFromPanel(); panel._pushSettings(); break
     case "buildIndex": await panel._buildIndex(); break
     case "getMcpStatus": panel._pushMcpStatus(); break
     case "saveAgentSettings": {

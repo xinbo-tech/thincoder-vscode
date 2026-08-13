@@ -8,7 +8,7 @@ import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { closeAllMcp, mcpConnectedToolCounts, mcpConnect, mcpDisconnectByName } from "../mcp.mjs"
 import { listSlots, loadSlot, saveSessionToSlot, setSlotAutoApprove, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, historyWindow } from "./session-io.mjs"
-import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, agentSettings, proxySettings, shellCandidates } from "./settings.mjs"
+import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, agentSettings, proxySettings, shellCandidates, websearchSettings, saveWebsearchKeyFromPanel, deleteWebsearchKeyFromPanel } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { generateTitle } from "./generate-title.mjs"
 import { loadLocaleStrings } from "../i18n.mjs"
@@ -335,6 +335,7 @@ export class ChatPanel {
     fullStatus(this._panel)
     this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
     this._panel?.webview.postMessage({ type: "proxySettings", settings: proxySettings() })
+    this._panel?.webview.postMessage({ type: "websearchSettings", settings: websearchSettings() })
     this._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates(), current: loadRaw().shell ?? null })
     this._pushMcpStatus()
     this._pushIndexStatus()

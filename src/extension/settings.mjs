@@ -93,6 +93,32 @@ export function proxySettings() {
   return normalizeProxy(raw.proxy) ?? null
 }
 
+/** Web search (Tavily) snapshot for the panel: { provider, hasKey }. */
+export function websearchSettings() {
+  const ws = loadRaw().websearch ?? {}
+  return { provider: ws.provider ?? "tavily", hasKey: !!ws.apiKey }
+}
+
+/** Persist the Tavily web-search API key (empty → clear). */
+export function saveWebsearchKeyFromPanel(key) {
+  persistRaw((raw) => {
+    const ws = raw.websearch ?? {}
+    ws.provider = "tavily"
+    ws.apiKey = key?.trim() || ""
+    if (!ws.apiKey) delete ws.apiKey
+    raw.websearch = ws
+  })
+}
+
+/** Remove the Tavily web-search API key. */
+export function deleteWebsearchKeyFromPanel() {
+  persistRaw((raw) => {
+    const ws = raw.websearch ?? {}
+    delete ws.apiKey
+    raw.websearch = ws
+  })
+}
+
 /** Persist proxy settings from the panel. payload: { uri?, web?, model? } (uri '' = clear). */
 export function saveProxySettingsFromPanel(payload) {
   persistRaw((raw) => {

@@ -13,6 +13,10 @@ const PROVIDER_LABELS = {
 
 /** @type {{ providers?: Record<string,{configured:boolean,masked:string}>, custom?: {baseURL?:string,model?:string}, labels?: Record<string,string> }} */
 let _providerStatus = {}
+/** Model list getter (chat panel's ctx._models) — supplies the advisor model dropdown. */
+let _getModels = null
+/** @type {{ provider?: string, hasKey?: boolean }} */
+let _websearchSettings = {}
 /** Show preset info (read-only) or custom fields depending on the Add form's type select. */
 function paTypeChanged() {
   const type = document.getElementById("pa-type")?.value
@@ -30,6 +34,18 @@ function paTypeChanged() {
   }
 }
 
+/** Build the advisor-model dropdown options for a given provider (inherit + known models). */
+function buildAdvModelOptions(model, provider) {
+  const models = (_getModels?.() || []).filter((m) => m.provider === provider)
+  let opts = `<option value="">${t("settings.advisorInherit")}</option>`
+  opts += models.map((m) => `<option value="${escHtml(m.id)}" ${model === m.id ? "selected" : ""}>${escHtml(m.id)}</option>`).join("")
+  // Keep the current value selectable even if it's not in the known list (custom/retired model).
+  if (model && !models.some((m) => m.id === model)) {
+    opts += `<option value="${escHtml(model)}" selected>${escHtml(model)}</option>`
+  }
+  return opts
+}
+
 /** @type {{ built?:boolean, files?:number, chunks?:number } | null} */
 let _indexStatus = null
 /** @type {{ maxTurns?:number, subagentTurns?:number, compactThreshold?:number|null, verifyGuard?:boolean, advisor?:object } | null} */
@@ -45,7 +61,8 @@ let _proxySettings = null
  * Initialize settings panel.
  * @param {{ onClose?: Function }} deps
  */
-export function initSettings({ onClose }) {
+export function initSettings({ onClose, getModels }) {
+  _getModels = getModels
   document.getElementById("settings-btn").addEventListener("click", openSettings)
   document.getElementById("settings-close").addEventListener("click", () => {
     closeSettings()
@@ -102,6 +119,12 @@ export function initSettings({ onClose }) {
     }
   }
   window._paTypeChanged = paTypeChanged
+  // Advisor provider change → rebuild the model dropdown for that provider.
+  window._advProviderChanged = function() {
+    const p = document.getElementById("adv-provider")?.value ?? ""
+    const sel = document.getElementById("adv-model")
+    if (sel) sel.innerHTML = buildAdvModelOptions("", p)
+  }
   window._paSave = function() {
     const type = document.getElementById("pa-type")?.value
     const key = document.getElementById("pa-key")?.value?.trim() || undefined
@@ -140,6 +163,27 @@ export function initSettings({ onClose }) {
     window._confirmDelete(btn, () => window._vscode.postMessage({ type: "deleteEmbedKey" }))
   }
 
+  // Web search key (Tavily) — same row pattern as provider/embedding keys
+  window._editWebsearchKey = function() {
+    const row = document.getElementById("row-websearch")
+    row.innerHTML = `<span class="key-label">${t("settings.websearchLabel")}</span>
+      <input id="input-websearch" type="password" placeholder="tvly-..." autocomplete="off" style="flex:1;margin:0 8px;"
+        onkeydown="if(event.key==='Enter')window._saveWebsearchKey()">
+      <button class="key-btn" onclick="window._saveWebsearchKey(this)">${t("settings.save")}</button>
+      <button class="key-btn" onclick="window._cancelEditWebsearch()">${t("settings.cancel")}</button>`
+    setTimeout(() => document.getElementById("input-websearch")?.focus(), 50)
+  }
+  window._saveWebsearchKey = function(btn) {
+    const val = document.getElementById("input-websearch")?.value?.trim()
+    if (!val) { window._cancelEditWebsearch(); return }
+    window._vscode.postMessage({ type: "saveWebsearchKey", key: val })
+    flashSaved(btn)
+  }
+  window._cancelEditWebsearch = function() { buildSettings() }
+  window._delWebsearchKey = function(btn) {
+    window._confirmDelete(btn, () => window._vscode.postMessage({ type: "deleteWebsearchKey" }))
+  }
+
   window._mcpServers = {}
   // Request detected shells once (extension caches the detection — CLI /shell parity)
   window._vscode.postMessage({ type: "getShellCandidates" })
@@ -159,7 +203,7 @@ export function initSettings({ onClose }) {
     }, 2500)
   }
 
-  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
+  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateWebsearchSettings, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
 }
 
 /** Brief "✓" flash on a save button — the only save feedback the panel has. */
@@ -343,8 +387,13 @@ function buildSettings() {
   html += `<div class="settings-subtitle">${t("settings.advisorSection")}</div>`
   html += `<label class="switch" title="${t("settings.advisorEnabledHelp")}"><input type="checkbox" id="adv-enabled" ${adv.enabled ? "checked" : ""}> ${t("settings.advisorEnabled")}</label>`
   html += `<label class="switch" title="${t("settings.advisorGuardHelp")}"><input type="checkbox" id="adv-guard" ${adv.guard !== false ? "checked" : ""}> ${t("settings.advisorGuard")}</label>`
-  html += `<div class="key-field"><label title="${t("settings.advisorProviderHelp")}">${t("settings.advisorProvider")}</label><input id="adv-provider" placeholder="deepseek" value="${escHtml(adv.provider || "")}"></div>`
-  html += `<div class="key-field"><label title="${t("settings.advisorModelHelp")}">${t("settings.advisorModel")}</label><input id="adv-model" placeholder="deepseek-chat" value="${escHtml(adv.model || "")}"></div>`
+  // Provider = configured providers dropdown; model = that provider's known models.
+  const configuredNames = Object.entries(ps).filter(([, v]) => v.configured).map(([n]) => n)
+  const advProvider = adv.provider || ""
+  const provOpts = `<option value="">${t("settings.advisorInherit")}</option>` +
+    configuredNames.map((n) => `<option value="${escHtml(n)}" ${advProvider === n ? "selected" : ""}>${escHtml(_providerStatus.labels?.[n] || PROVIDER_LABELS[n] || n)}</option>`).join("")
+  html += `<div class="key-field"><label title="${t("settings.advisorProviderHelp")}">${t("settings.advisorProvider")}</label><select id="adv-provider" onchange="window._advProviderChanged()">${provOpts}</select></div>`
+  html += `<div class="key-field"><label title="${t("settings.advisorModelHelp")}">${t("settings.advisorModel")}</label><select id="adv-model">${buildAdvModelOptions(adv.model, advProvider)}</select></div>`
   html += `<button id="ag-save-btn" class="key-btn">${t("settings.save")}</button>`
   html += `</div></section>`
 
@@ -371,6 +420,20 @@ function buildSettings() {
     <div class="key-field"><label>${t("settings.shellPath")}</label><input id="sh-custom" placeholder="C:\\Program Files\\Git\\bin\\bash.exe" value="${shellIsCustom ? escHtml(_shellValue || "") : ""}" ${shellIsCustom ? "" : "disabled"}></div>
     <button id="sh-save-btn" class="key-btn">${t("settings.save")}</button>`
   })()}`
+  html += `</div></section>`
+
+  // ─── Web search card (Tavily structured search) ───
+  const ws = _websearchSettings || {}
+  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.websearchSection")}</h4><div class="settings-card-body">`
+  html += `<div class="key-row" id="row-websearch">
+    <span class="key-label">${t("settings.websearchLabel")}</span>
+    <span class="key-status ${ws.hasKey ? "ok" : ""}" id="status-websearch">${ws.hasKey ? "****" : "—"}</span>
+    ${ws.hasKey
+      ? `<button class="key-btn" onclick="window._editWebsearchKey()">${t("settings.changeKey")}</button>
+         <button class="key-btn del-key" onclick="window._delWebsearchKey(this)">✕</button>`
+      : `<button class="key-btn" onclick="window._editWebsearchKey()">${t("settings.addKey")}</button>`}
+  </div>
+  <div style="font-size:11px;opacity:0.55;padding:2px 0">${t("settings.websearchHelp")}</div>`
   html += `</div></section>`
 
   body.innerHTML = html
@@ -578,6 +641,11 @@ function updateProviderStatus(status) {
 
 function updateAgentSettings(settings) {
   _agentSettings = settings
+  rebuildIfIdle()
+}
+
+function updateWebsearchSettings(settings) {
+  _websearchSettings = settings || {}
   rebuildIfIdle()
 }
 

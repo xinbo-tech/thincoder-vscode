@@ -10,20 +10,23 @@ import { initSettings } from "../webview/settings.js"
 
 let env
 let api
+let mockModels = []
 before(() => {
   env = setupWebview()
   installSettingsFixture()
-  api = initSettings({ onClose: () => {} })
+  api = initSettings({ onClose: () => {}, getModels: () => mockModels })
 })
 after(() => env?.cleanup())
 
 // Reset module-level state between cases — update* REPLACES state wholesale and
 // settings.js keeps it across cases, so ordering would otherwise leak.
 beforeEach(() => {
+  mockModels = []
   api.updateProviderStatus({})
   api.updateAgentSettings({})
   api.updateProxySettings({})
   api.updateShellCandidates({})
+  api.updateWebsearchSettings({})
   api.updateIndexStatus(null)
 })
 
@@ -96,6 +99,70 @@ describe("buildSettings — switch toggles (agent / advisor)", () => {
     const input = body.querySelector("#ag-verifyguard")
     assert.ok(input, "verifyGuard input exists")
     assert.equal(input.closest("label")?.className, "switch", "verifyGuard is a switch toggle")
+  })
+})
+
+describe("buildSettings — advisor provider/model dropdowns", () => {
+  it("renders advisor provider/model as selects (not free-text inputs)", () => {
+    api.updateAgentSettings({ advisor: { provider: "deepseek", model: "deepseek-v4-pro" } })
+    const body = openPanel()
+    assert.equal(body.querySelector("#adv-provider")?.tagName, "SELECT")
+    assert.equal(body.querySelector("#adv-model")?.tagName, "SELECT")
+  })
+
+  it("lists only CONFIGURED providers in the advisor provider dropdown", () => {
+    api.updateProviderStatus({
+      providers: { deepseek: { configured: true }, kimi: { configured: true }, glm: { configured: false } },
+      labels: { deepseek: "DeepSeek", kimi: "Kimi", glm: "GLM" },
+    })
+    const body = openPanel()
+    const values = [...body.querySelector("#adv-provider").options].map((o) => o.value)
+    assert.ok(values.includes(""), "inherit option present")
+    assert.ok(values.includes("deepseek"))
+    assert.ok(values.includes("kimi"))
+    assert.ok(!values.includes("glm"), "unconfigured provider excluded")
+  })
+
+  it("populates the advisor model dropdown from the model list for the selected provider only", () => {
+    mockModels = [
+      { id: "deepseek-v4-pro", provider: "deepseek" },
+      { id: "deepseek-chat", provider: "deepseek" },
+      { id: "kimi-k3", provider: "kimi" },
+    ]
+    api.updateAgentSettings({ advisor: { provider: "deepseek" } })
+    const body = openPanel()
+    const values = [...body.querySelector("#adv-model").options].map((o) => o.value)
+    assert.ok(values.includes("deepseek-v4-pro"))
+    assert.ok(values.includes("deepseek-chat"))
+    assert.ok(!values.includes("kimi-k3"), "other provider's model excluded")
+  })
+})
+
+describe("buildSettings — web search card (Tavily)", () => {
+  it("renders the Tavily key row with an Add-Key button when unset", () => {
+    api.updateWebsearchSettings({ provider: "tavily", hasKey: false })
+    const body = openPanel()
+    assert.match(body.innerHTML, /Web Search/)
+    assert.match(body.innerHTML, /Tavily/)
+    assert.match(body.innerHTML, /Add Key/)
+  })
+
+  it("shows a masked key + change/delete when a key is set", () => {
+    api.updateWebsearchSettings({ provider: "tavily", hasKey: true })
+    const body = openPanel()
+    assert.match(body.innerHTML, /\*\*\*\*/)
+    assert.match(body.innerHTML, /Change/)
+  })
+
+  it("saving the key posts saveWebsearchKey", () => {
+    api.updateWebsearchSettings({ provider: "tavily", hasKey: false })
+    openPanel()
+    window._editWebsearchKey()
+    document.getElementById("input-websearch").value = "tvly-abc123"
+    window._saveWebsearchKey()
+    const last = env.capturedPosts.at(-1)
+    assert.equal(last.type, "saveWebsearchKey")
+    assert.equal(last.key, "tvly-abc123")
   })
 })
 
