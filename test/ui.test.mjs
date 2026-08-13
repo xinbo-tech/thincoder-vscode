@@ -12,7 +12,7 @@ import {
 
 let env
 before(() => { env = setupWebview() })
-after(() => env.cleanup())
+after(() => env?.cleanup())
 
 const ctx = () => ({ messagesEl: document.createElement("div") })
 
@@ -72,10 +72,15 @@ describe("buildToolHistory", () => {
 })
 
 describe("buildHistoryMessage (lazy-load dispatch)", () => {
-  it("dispatches user / assistant / tool by kind", () => {
-    assert.ok(buildHistoryMessage(ctx(), { kind: "user", text: "u", idx: 1 }))
-    assert.ok(buildHistoryMessage(ctx(), { kind: "assistant", text: "a", idx: 2 }))
-    assert.ok(buildHistoryMessage(ctx(), { kind: "tool", name: "read", text: "r", idx: 3 }))
+  it("dispatches to the right element type by kind", () => {
+    const u = buildHistoryMessage(ctx(), { kind: "user", text: "u", idx: 1 })
+    assert.ok(u.classList.contains("message") && u.classList.contains("user"), "user → .message.user")
+
+    const a = buildHistoryMessage(ctx(), { kind: "assistant", text: "a", idx: 2 })
+    assert.ok(a.classList.contains("message") && a.classList.contains("assistant"), "assistant → .message.assistant")
+
+    const t = buildHistoryMessage(ctx(), { kind: "tool", name: "read", text: "r", idx: 3 })
+    assert.ok(t.classList.contains("tool-call"), "tool → .tool-call")
   })
 
   it("returns null for unknown kind or null msg", () => {

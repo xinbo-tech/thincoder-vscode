@@ -27,7 +27,7 @@ export function setupWebview() {
   return {
     capturedPosts,
     cleanup() {
-      GlobalRegistrator.unregister()
+      try { GlobalRegistrator.unregister() } catch { /* already unregistered — no-op */ }
     },
   }
 }

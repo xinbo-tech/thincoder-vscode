@@ -1,9 +1,9 @@
 /**
  * settings.test.mjs — settings panel buildSettings (happy-dom).
- * Exercises the card layout + provider rows + switch toggles via the
- * initSettings() return value (the extension's real message-dispatch API).
+ * Exercises the card layout + provider rows + switch toggles + the save flow
+ * via the initSettings() return value (the extension's real message-dispatch API).
  */
-import { describe, it, before, after } from "node:test"
+import { describe, it, before, after, beforeEach } from "node:test"
 import assert from "node:assert/strict"
 import { setupWebview, installSettingsFixture } from "./helpers/webview-env.mjs"
 import { initSettings } from "../webview/settings.js"
@@ -15,7 +15,16 @@ before(() => {
   installSettingsFixture()
   api = initSettings({ onClose: () => {} })
 })
-after(() => env.cleanup())
+after(() => env?.cleanup())
+
+// Reset module-level state between cases — update* REPLACES state wholesale and
+// settings.js keeps it across cases, so ordering would otherwise leak.
+beforeEach(() => {
+  api.updateProviderStatus({})
+  api.updateAgentSettings({})
+  api.updateProxySettings({})
+  api.updateShellCandidates({})
+})
 
 function openPanel() {
   api.openSettings()
@@ -23,7 +32,7 @@ function openPanel() {
 }
 
 describe("buildSettings — provider cards", () => {
-  it("renders a configured provider with green dot, masked key, model·url, proxy switch", () => {
+  it("renders a configured provider with green dot, masked key, model·url, checked proxy switch", () => {
     api.updateProviderStatus({
       providers: {
         deepseek: {
@@ -39,8 +48,8 @@ describe("buildSettings — provider cards", () => {
     assert.match(body.innerHTML, /prov-dot ok/)          // green status dot
     assert.match(body.innerHTML, /sk-••••abc/)          // masked key
     assert.match(body.innerHTML, /deepseek-v4-pro · https:\/\/api\.deepseek\.com/)
-    // proxy switch is checked
-    assert.equal(body.querySelector('input[type="checkbox"][checked]')?.onchange !== undefined, true)
+    // the deepseek proxy switch is checked (precise, not "first checked checkbox")
+    assert.equal(body.querySelector('#prov-deepseek input[type="checkbox"]')?.checked, true)
   })
 
   it("renders an unconfigured provider with grey dot and 'Not configured'", () => {
@@ -75,19 +84,34 @@ describe("buildSettings — switch toggles (agent / advisor)", () => {
     assert.equal(body.querySelector("#ag-maxturns")?.value, "42")
     assert.equal(body.querySelector("#ag-subturns")?.value, "7")
     assert.equal(body.querySelector("#ag-submodel-global")?.value, "coder-1")
-    // per-role submodel inputs exist
     for (const role of ["explore", "plan", "coder", "eng-coder"]) {
       assert.ok(body.querySelector(`#ag-submodel-${role}`), `missing submodel input for ${role}`)
     }
   })
-})
 
-describe("buildSettings — switch renders as toggle (not bare checkbox)", () => {
-  it("wraps verifyGuard in a .switch label", () => {
+  it("wraps verifyGuard in a .switch label (not a bare checkbox)", () => {
     api.updateAgentSettings({ verifyGuard: true })
     const body = openPanel()
     const input = body.querySelector("#ag-verifyguard")
     assert.ok(input, "verifyGuard input exists")
     assert.equal(input.closest("label")?.className, "switch", "verifyGuard is a switch toggle")
+  })
+})
+
+describe("buildSettings — save flow (posts payload to extension)", () => {
+  it("saving agent settings posts the full payload", () => {
+    api.updateAgentSettings({ maxTurns: 10, verifyGuard: true, advisor: { enabled: true, guard: false } })
+    openPanel()
+    document.getElementById("ag-maxturns").value = "42"
+    document.getElementById("ag-submodel-global").value = "coder-1"
+    document.getElementById("adv-enabled").checked = false
+    document.getElementById("ag-save-btn").click()
+
+    const last = env.capturedPosts.at(-1)
+    assert.equal(last.type, "saveAgentSettings")
+    assert.equal(last.settings.maxTurns, "42")
+    assert.equal(last.settings.subagentModel, "coder-1")
+    assert.equal(last.settings.verifyGuard, true)
+    assert.equal(last.settings.advisor.enabled, false)
   })
 })
