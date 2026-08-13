@@ -279,11 +279,12 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       try {
         // Measured baseline path (CLI parity D3): the last response's prompt_tokens is the
         // true full-context cost; messages appended since are estimated as increments.
-        // tools schemas ride along for the pure-estimation overhead (CLI parity).
+        // tools schemas ride along for the pure-estimation overhead; the signal cancels
+        // the in-flight summary request on Stop (CLI parity).
         const compacted = await compactHistory(history, systemPrompt, provider, cfgCompactThreshold, {
           lastPromptTokens: agent._lastPromptTokens,
           usageAtLen: agent._usageAtLen,
-        }, toolSchemas)
+        }, toolSchemas, signal)
         if (compacted) {
           history.length = 0
           history.push(...compacted)

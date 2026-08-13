@@ -107,10 +107,13 @@ function estimateTokens(messages) {
  * @param {Array|null} [tools] - tool schemas for the pure-estimation overhead (CLI parity):
  *   system prompt AND tools schema are part of every request but not in history — without
  *   them the first-turn/restored estimate under-counts and may never trigger compaction.
+ * @param {AbortSignal|null} [signal] - user interrupt (CLI parity). The summary LLM call can
+ *   take minutes on slow reasoning models — without the signal, Stop waits for the summary
+ *   to finish (or the 10-minute fetch ceiling) before the loop notices the abort.
  * @throws when the summarization LLM fails — the CALLER counts consecutive failures and
  *   degrades to truncateFallback (CLI parity D6; the heuristic summary is deprecated).
  */
-export async function compactHistory(history, systemPrompt, provider, explicitThreshold = null, baseline = null, tools = null) {
+export async function compactHistory(history, systemPrompt, provider, explicitThreshold = null, baseline = null, tools = null, signal = null) {
   const threshold = explicitThreshold != null ? explicitThreshold : compactionThreshold(provider)
   const overhead = estimateText(systemPrompt) + (tools ? estimateText(JSON.stringify(tools)) : 0)
   const total = baseline?.lastPromptTokens != null
@@ -177,8 +180,11 @@ export async function compactHistory(history, systemPrompt, provider, explicitTh
     throw new Error("compaction: no provider available for summarization")
   }
   // Silent by design (D11): no streaming callbacks — the compaction process must not reach the frontend.
+  // The signal rides along (CLI parity): Stop cancels the in-flight summary instead of
+  // waiting for it to finish.
   const resp = await chat({ ...provider, thinking: null, reasoningEffort: null }, {
     messages: [{ role: "user", content: SUMMARIZE_PROMPT + serialized }],
+    signal: signal ?? null,
   })
   const summary = resp.content || ""
 

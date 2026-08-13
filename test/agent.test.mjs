@@ -301,6 +301,30 @@ describe("compaction — threshold is model-aware", () => {
     }
   })
 
+  it("abort signal cancels the in-flight summary request (Stop must not wait)", async () => {
+    const { createServer } = await import("node:http")
+    // A server that accepts but NEVER responds — simulates a slow summarization model.
+    const hanging = createServer(() => {})
+    await new Promise((r) => hanging.listen(0, "127.0.0.1", r))
+    try {
+      const port = hanging.address().port
+      const messages = []
+      for (let i = 0; i < 600; i++) {
+        messages.push({ role: "user", content: `test ${i} `.repeat(80) })
+        messages.push({ role: "assistant", content: `resp ${i} `.repeat(60) })
+      }
+      const ctrl = new AbortController()
+      const p = compactHistory(messages, "system", mockProvider("unknown-model", port), 500, null, null, ctrl.signal)
+      await new Promise((r) => setTimeout(r, 80))  // let the request reach the server
+      ctrl.abort()
+      const t0 = Date.now()
+      await assert.rejects(p, (e) => e.name === "AbortError", "abort must reject with AbortError")
+      assert.ok(Date.now() - t0 < 2000, "abort must cancel the request immediately, not wait for the summary")
+    } finally {
+      hanging.close()
+    }
+  })
+
   it("handles empty history gracefully", async () => {
     const result = await compactHistory([], "system", mockProvider())
     assert.equal(result, null)
