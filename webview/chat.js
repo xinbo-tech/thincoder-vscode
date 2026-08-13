@@ -1293,12 +1293,17 @@ function isAtDropdownOpen() {
 function navigateInputHistory(dir) {
   const h = ctx._inputHistory
   if (h.length === 0) return
-  if (ctx._historyIdx === -1) ctx._inputDraft = ctx.inputEl.value // stash live draft once
-  let idx = ctx._historyIdx + dir
-  if (idx >= h.length) idx = h.length - 1
-  if (idx < -1) idx = -1
-  ctx._historyIdx = idx
-  ctx.inputEl.value = idx === -1 ? ctx._inputDraft : h[idx]
+  if (dir < 0) {
+    // ↑ — draft → newest entry, then walk older (CLI key-handler parity).
+    if (ctx._historyIdx === -1) ctx._inputDraft = ctx.inputEl.value
+    ctx._historyIdx = ctx._historyIdx === -1 ? h.length - 1 : Math.max(0, ctx._historyIdx - 1)
+  } else {
+    // ↓ — walk newer; past the newest returns to the stashed draft.
+    if (ctx._historyIdx === -1) return
+    ctx._historyIdx++
+    if (ctx._historyIdx >= h.length) ctx._historyIdx = -1
+  }
+  ctx.inputEl.value = ctx._historyIdx === -1 ? ctx._inputDraft : h[ctx._historyIdx]
   const len = ctx.inputEl.value.length
   ctx.inputEl.setSelectionRange(len, len)
   ctx.inputEl.style.height = "auto"

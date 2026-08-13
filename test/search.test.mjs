@@ -67,3 +67,37 @@ describe("in-conversation search (Ctrl+F)", () => {
     assert.equal(messagesEl.textContent, "foo bar", "original text restored")
   })
 })
+
+describe("input history ↑/↓ — no conflict with multi-line cursor", () => {
+  it("↑ mid-text does NOT recall history (cursor moves); only the absolute start/end do", () => {
+    const input = document.getElementById("input")
+    // Seed one history entry by sending a message.
+    const before = env.capturedPosts.filter((m) => m.type === "userMessage").length
+    input.value = "sent-alpha"
+    input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+    const after = env.capturedPosts.filter((m) => m.type === "userMessage").length
+    assert.ok(after > before, "send actually ran (userMessage posted → history seeded)")
+    assert.equal(input.value, "", "input cleared after send")
+
+    // Multi-line text, cursor mid-line → ↑ must NOT recall history.
+    input.value = "line one\nline two"
+    input.selectionStart = 4
+    input.selectionEnd = 4
+    input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }))
+    assert.equal(input.value, "line one\nline two", "mid-text ↑ moves the cursor, not the history")
+
+    // Cursor at absolute start (selectionStart === 0) → ↑ recalls history.
+    input.selectionStart = 0
+    input.selectionEnd = 0
+    assert.equal(input.selectionStart, 0, "selectionStart set to 0")
+    input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }))
+    assert.equal(input.value, "sent-alpha", "↑ at absolute start recalls history")
+
+    // While showing history, cursor at absolute end → ↓ returns to the stashed draft.
+    input.selectionStart = input.value.length
+    input.selectionEnd = input.value.length
+    input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }))
+    assert.equal(input.value, "line one\nline two", "↓ at absolute end returns to the stashed draft")
+  })
+})
+
