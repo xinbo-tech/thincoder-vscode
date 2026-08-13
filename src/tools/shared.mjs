@@ -153,6 +153,26 @@ export function normalizeEOL(text) {
   return text.replace(/\r\n/g, "\n")
 }
 
+/** SSRF guard (CLI parity): TRUE for private/internal hostnames — callers block them.
+ *  Covers loopback, link-local, cloud metadata, IPv6 private ranges, and the
+ *  RFC1918 IPv4 prefixes. Invalid/unknown hosts return false (harmless for SSRF). */
+export function isPrivateHost(hostname) {
+  const h = hostname.toLowerCase()
+  if (h === "localhost" || h === "0.0.0.0" || h.endsWith(".localhost")) return true
+  if (h === "127.0.0.1" || h.startsWith("127.")) return true
+  if (h === "169.254.169.254" || h === "metadata.google.internal") return true
+  if (h.includes(":")) {
+    if (h === "::1" || h.startsWith("fc") || h.startsWith("fd")) return true
+    if (/^fe[89ab][0-9a-f]:/.test(h)) return true
+  }
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])]
+    if (a === 10 || (a === 172 && b >= 16 && b <= 31) || a === 192 && b === 168 || a === 169 && b === 254 || a === 0) return true
+  }
+  return false
+}
+
 /** Truncate text to max chars with a notice. CLI parity. */
 export function truncate(text, max = 200_000) {
   if (text.length <= max) return text
