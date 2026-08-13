@@ -5,7 +5,8 @@
 import * as vscode from "vscode"
 import { loadLocaleStrings } from "../i18n.mjs"
 import { saveModelPrefs, switchToSlot } from "./session-io.mjs"
-import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection, shellCandidates, saveShellSettingsFromPanel, saveWebsearchKeyFromPanel, deleteWebsearchKeyFromPanel } from "./settings.mjs"
+import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection, shellCandidates, saveShellSettingsFromPanel, saveWebsearchKeyFromPanel, deleteWebsearchKeyFromPanel, testProviderConnection } from "./settings.mjs"
+import { PRESETS } from "./presets.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
 import { selectProviderModel, loadRaw } from "../config-io.mjs"
 
@@ -89,8 +90,21 @@ export async function handlePanelMessage(panel, msg) {
       // No payload (model dropdown shortcut): interactive QuickPick flow.
       if (msg.preset || msg.custom) {
         const err = handleAddProvider({ preset: msg.preset, custom: msg.custom, key: msg.key })
-        if (err) panel._panel?.webview.postMessage({ type: "providerError", text: err })
+        if (err) {
+          panel._panel?.webview.postMessage({ type: "providerError", text: err })
+          panel._pushSettings()
+          break
+        }
         panel._pushSettings()
+        // Verify the connection right away — a typo'd baseURL or a bad key must
+        // not fail silently. Surfaced as the settings error banner.
+        const baseURL = msg.custom?.baseURL || PRESETS[msg.preset]?.baseURL
+        if (baseURL) {
+          const test = await testProviderConnection({ baseURL, apiKey: msg.key })
+          if (!test.ok) {
+            panel._panel?.webview.postMessage({ type: "providerError", text: `Saved, but connection check failed: ${test.error} — check the baseURL / API key.` })
+          }
+        }
       } else {
         await addProviderFlow(() => panel._pushSettings())
       }
@@ -115,6 +129,11 @@ export async function handlePanelMessage(panel, msg) {
     case "deleteEmbedKey": await panel._saveEmbeddingConfig({ apiKey: "" }); break
     case "saveWebsearchKey": saveWebsearchKeyFromPanel(msg.key); panel._pushSettings(); break
     case "deleteWebsearchKey": deleteWebsearchKeyFromPanel(); panel._pushSettings(); break
+    case "testProvider": {
+      const r = await testProviderConnection({ baseURL: msg.baseURL, apiKey: msg.apiKey })
+      panel._panel?.webview.postMessage({ type: "testProviderResult", ...r })
+      break
+    }
     case "buildIndex": await panel._buildIndex(); break
     case "getMcpStatus": panel._pushMcpStatus(); break
     case "saveAgentSettings": {

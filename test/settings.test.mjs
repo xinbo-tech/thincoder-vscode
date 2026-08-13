@@ -182,6 +182,47 @@ describe("buildSettings — web search card (Tavily)", () => {
   })
 })
 
+describe("Add-provider custom form — fetch models & pick", () => {
+  function openCustomForm() {
+    api.updateProviderStatus({ presets: [] })
+    const body = openPanel()
+    window._toggleAddForm(true)
+    document.getElementById("pa-type").value = "custom"
+    window._paTypeChanged()
+    return body
+  }
+
+  it("custom model is a select (not a free-text input)", () => {
+    openCustomForm()
+    assert.equal(document.getElementById("pa-model")?.tagName, "SELECT")
+  })
+
+  it("saving a custom provider without fetching models refuses + warns", () => {
+    openCustomForm()
+    document.getElementById("pa-url").value = "https://api.example.com/v1"
+    const before = env.capturedPosts.filter((m) => m.type === "addProvider").length
+    window._paSave()
+    const after = env.capturedPosts.filter((m) => m.type === "addProvider").length
+    assert.equal(after, before, "no addProvider posted without a fetched model")
+    assert.match(document.getElementById("pa-conn-status").textContent, /Fetch models first/)
+  })
+
+  it("updateTestProviderResult populates the model dropdown on success", () => {
+    openCustomForm()
+    api.updateTestProviderResult({ ok: true, models: ["m-a", "m-b"] })
+    const values = [...document.getElementById("pa-model").options].map((o) => o.value)
+    assert.deepEqual(values, ["m-a", "m-b"])
+    assert.match(document.getElementById("pa-conn-status").textContent, /Connected/)
+  })
+
+  it("updateTestProviderResult shows the error on failure", () => {
+    openCustomForm()
+    api.updateTestProviderResult({ ok: false, error: "401 Unauthorized" })
+    assert.match(document.getElementById("pa-conn-status").textContent, /401/)
+  })
+})
+
+
 describe("buildSettings — save flow (posts payload to extension)", () => {
   it("saving agent settings posts the full payload", () => {
     mockModels = [{ id: "deepseek-v4-pro", provider: "deepseek" }]

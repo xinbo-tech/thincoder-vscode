@@ -140,14 +140,34 @@ export function initSettings({ onClose, getModels }) {
     const sel = document.getElementById("adv-model")
     if (sel) sel.innerHTML = buildAdvModelOptions("", p)
   }
+  // Custom provider: probe baseURL+key via /models — validates the connection
+  // AND populates the model dropdown so the model is picked, not hand-typed.
+  window._paFetchModels = function() {
+    const baseURL = document.getElementById("pa-url")?.value?.trim()
+    const apiKey = document.getElementById("pa-key")?.value?.trim()
+    const status = document.getElementById("pa-conn-status")
+    if (!baseURL) {
+      if (status) { status.textContent = t("settings.providerUrlRequired"); status.style.color = "var(--red)" }
+      return
+    }
+    if (status) { status.textContent = t("settings.connecting"); status.style.color = "" }
+    window._vscode.postMessage({ type: "testProvider", baseURL, apiKey })
+  }
   window._paSave = function() {
     const type = document.getElementById("pa-type")?.value
     const key = document.getElementById("pa-key")?.value?.trim() || undefined
     if (type === "custom") {
+      const model = document.getElementById("pa-model")?.value?.trim()
+      if (!model) {
+        // Custom model comes from the probed /models dropdown — must fetch first.
+        const status = document.getElementById("pa-conn-status")
+        if (status) { status.textContent = t("settings.fetchModelsFirst"); status.style.color = "var(--red)" }
+        return
+      }
       const custom = {
         name: document.getElementById("pa-name")?.value?.trim(),
         baseURL: document.getElementById("pa-url")?.value?.trim(),
-        model: document.getElementById("pa-model")?.value?.trim(),
+        model,
         format: document.getElementById("pa-format")?.value,
       }
       window._vscode.postMessage({ type: "addProvider", custom, key })
@@ -218,7 +238,7 @@ export function initSettings({ onClose, getModels }) {
     }, 2500)
   }
 
-  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateWebsearchSettings, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
+  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
 }
 
 /** Brief "✓" flash on a save button — the only save feedback the panel has. */
@@ -336,10 +356,14 @@ function buildSettings() {
     <div id="pa-custom-fields" style="display:none">
       <div class="key-field"><label>${t("settings.providerName")}</label><input id="pa-name" placeholder="my-provider"></div>
       <div class="key-field"><label>${t("settings.baseUrl")}</label><input id="pa-url" placeholder="https://api.example.com/v1"></div>
-      <div class="key-field"><label>${t("settings.model")}</label><input id="pa-model" placeholder="model-name"></div>
       <div class="key-field"><label>${t("settings.format")}</label>
         <select id="pa-format"><option value="openai">openai (default)</option><option value="anthropic">anthropic</option><option value="google">google</option></select>
       </div>
+      <div class="key-row">
+        <button id="pa-fetch-btn" class="key-btn" type="button" onclick="window._paFetchModels()">${t("settings.fetchModels")}</button>
+        <span id="pa-conn-status" class="key-status"></span>
+      </div>
+      <div class="key-field"><label>${t("settings.model")}</label><select id="pa-model"></select></div>
     </div>
     <div class="key-field"><label>${t("settings.keyOptional")}</label><input id="pa-key" type="password" placeholder="sk-..."></div>
     <button id="pa-save-btn" class="key-btn">${t("settings.save")}</button>
@@ -662,6 +686,22 @@ function updateAgentSettings(settings) {
 function updateWebsearchSettings(settings) {
   _websearchSettings = settings || {}
   rebuildIfIdle()
+}
+
+/** Custom-provider connection probe result: populate the model dropdown or show the error. */
+function updateTestProviderResult(r) {
+  const status = document.getElementById("pa-conn-status")
+  const sel = document.getElementById("pa-model")
+  if (!status || !sel) return
+  if (r?.ok) {
+    status.textContent = t("settings.connOk", { count: r.models?.length ?? 0 })
+    status.style.color = "var(--green)"
+    sel.innerHTML = (r.models ?? []).map((m) => `<option value="${escHtml(m)}">${escHtml(m)}</option>`).join("")
+  } else {
+    status.textContent = "✗ " + (r?.error || t("settings.connFailed"))
+    status.style.color = "var(--red)"
+    sel.innerHTML = ""
+  }
 }
 
 function updateShellCandidates(payload) {

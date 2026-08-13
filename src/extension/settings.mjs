@@ -119,6 +119,26 @@ export function deleteWebsearchKeyFromPanel() {
   })
 }
 
+/**
+ * Probe a provider's connection by listing its /models. Used by the Add-Provider
+ * form: validates baseURL+key AND returns the model list so a custom provider's
+ * model can be PICKED (not hand-typed). Returns { ok, models } or { ok:false, error }.
+ */
+export async function testProviderConnection({ baseURL, apiKey }) {
+  const url = (baseURL || "").trim().replace(/\/+$/, "")
+  if (!url) return { ok: false, error: "baseURL is required" }
+  if (!/^https?:\/\//.test(url)) return { ok: false, error: "baseURL must start with http:// or https://" }
+  // Route through the configured web proxy (same as websearch/fetch).
+  const px = normalizeProxy(loadRaw().proxy)
+  const proxyUri = px && px.web !== false ? px.uri : null
+  try {
+    const models = await listModels({ baseURL: url, apiKey: apiKey || "", model: "", proxyUri })
+    return { ok: true, models }
+  } catch (e) {
+    return { ok: false, error: e.message || String(e) }
+  }
+}
+
 /** Persist proxy settings from the panel. payload: { uri?, web?, model? } (uri '' = clear). */
 export function saveProxySettingsFromPanel(payload) {
   persistRaw((raw) => {

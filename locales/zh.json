@@ -185,5 +185,11 @@
   "settings.websearchLabel": "Tavily API Key",
   "settings.websearchHelp": "可选 — Tavily 结构化搜索，无 key 时回退 Bing。",
   "settings.advisorInherit": "继承（主模型）",
-  "settings.inherit": "继承"
+  "settings.inherit": "继承",
+  "settings.fetchModels": "拉取模型",
+  "settings.connecting": "连接中…",
+  "settings.connOk": "✓ 连接成功 — {count} 个模型",
+  "settings.connFailed": "连接失败",
+  "settings.fetchModelsFirst": "请先拉取模型",
+  "settings.providerUrlRequired": "需要 baseURL"
 }

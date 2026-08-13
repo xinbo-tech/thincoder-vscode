@@ -117,7 +117,7 @@ const { showAtDropdown } = _ac
 
 // ─── Settings panel (init early so openSettings is available for toolbar binding) ──
 const _settings = initSettings({ onClose: () => ctx.inputEl.focus(), getModels: () => ctx._models })
-const { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateWebsearchSettings, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError } = _settings
+const { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError } = _settings
 
 // ─── Session bar ───────────────────────────────
 
@@ -972,6 +972,9 @@ window.addEventListener("message", (e) => {
       break
     case "websearchSettings":
       updateWebsearchSettings(m.settings || {})
+      break
+    case "testProviderResult":
+      updateTestProviderResult(m)
       break
     case "shellCandidates":
       updateShellCandidates(m)

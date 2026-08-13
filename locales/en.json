@@ -185,5 +185,11 @@
   "settings.websearchLabel": "Tavily API Key",
   "settings.websearchHelp": "Optional — Tavily structured search. Empty key falls back to Bing.",
   "settings.advisorInherit": "Inherit (main model)",
-  "settings.inherit": "Inherit"
+  "settings.inherit": "Inherit",
+  "settings.fetchModels": "Fetch Models",
+  "settings.connecting": "Connecting…",
+  "settings.connOk": "✓ Connected — {count} models",
+  "settings.connFailed": "Connection failed",
+  "settings.fetchModelsFirst": "Fetch models first",
+  "settings.providerUrlRequired": "baseURL required"
 }
