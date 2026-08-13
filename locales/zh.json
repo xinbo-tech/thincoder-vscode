@@ -14,6 +14,8 @@
   "toolbar.model": "切换模型",
   "toolbar.reasoning": "推理深度",
   "toolbar.autoApprove": "自动批准工具",
+  "toolbar.advisor": "代码改动后运行 Advisor 审查",
+  "toolbar.engineering": "工程模式（先设计后编码）",
   "toolbar.settings": "设置",
   "welcome.heading": "ThinCoder",
   "welcome.text": "让我帮你读代码、写代码、搜索代码，或者解释这个项目。",

@@ -233,6 +233,7 @@ export function loadAgentSettings() {
     subagentModels: a?.subagentModels ?? {}, // per-type overrides: explore/plan/coder/eng-coder (CLI parity)
     compactThreshold: a?.compactThreshold ?? null, // null = auto (from model context)
     verifyGuard: a?.verifyGuard ?? false,
+      engineering: a?.engineering ?? false, // engineering mode flag (VS Code: config-level; the eng tool persists here)
     advisor: a?.advisor ?? { enabled: false },
   }
 }
@@ -270,6 +271,7 @@ export function saveAgentSettingsFromPanel(payload) {
   }
   if (payload.compactThreshold !== undefined) patch.compactThreshold = payload.compactThreshold === "" ? undefined : (Number(payload.compactThreshold) || undefined)
   if (payload.verifyGuard !== undefined) patch.verifyGuard = !!payload.verifyGuard
+    if (payload.engineering !== undefined) patch.engineering = !!payload.engineering
   if (payload.advisor !== undefined) {
     // Merge with existing advisor values; "in" guards allow clearing provider/model
     const adv = payload.advisor ?? {}

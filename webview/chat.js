@@ -397,6 +397,32 @@ function renderStatusBar(m) {
 
 document.getElementById("settings-btn").addEventListener("click", openSettings)
 
+// Advisor / Engineering mode toggles (session-bar quick switches; the settings
+// panel has the full advisor configuration — these mirror config.json fields).
+let _advisorOn = false
+let _engOn = false
+
+const advisorBtn = document.getElementById("advisor-btn")
+const engBtn = document.getElementById("eng-btn")
+
+function applyModeButtons() {
+  advisorBtn.classList.toggle("active", _advisorOn)
+  advisorBtn.classList.toggle("warning", _advisorOn)
+  engBtn.classList.toggle("active", _engOn)
+  engBtn.classList.toggle("warning", _engOn)
+}
+
+advisorBtn.addEventListener("click", () => {
+  _advisorOn = !_advisorOn
+  applyModeButtons()
+  vscode.postMessage({ type: "setAdvisorEnabled", value: _advisorOn })
+})
+engBtn.addEventListener("click", () => {
+  _engOn = !_engOn
+  applyModeButtons()
+  vscode.postMessage({ type: "setEngineeringEnabled", value: _engOn })
+})
+
 const autoBtn = document.getElementById("auto-btn")
 autoBtn.addEventListener("click", () => {
   if (!_autoApprove) {
@@ -915,6 +941,9 @@ window.addEventListener("message", (e) => {
       break
     case "agentSettings":
       updateAgentSettings(m.settings || {})
+      _advisorOn = !!(m.settings?.advisor?.enabled)
+      _engOn = !!(m.settings?.engineering)
+      applyModeButtons()
       break
     case "shellCandidates":
       updateShellCandidates(m)
@@ -1229,6 +1258,8 @@ function applyI18nToDOM() {
   if (reasoningBtn) reasoningBtn.title = t("toolbar.reasoning")
   const autoBtn = document.getElementById("auto-btn")
   if (autoBtn) autoBtn.title = t("toolbar.autoApprove")
+  if (document.getElementById("advisor-btn")) document.getElementById("advisor-btn").title = t("toolbar.advisor")
+  if (document.getElementById("eng-btn")) document.getElementById("eng-btn").title = t("toolbar.engineering")
   const settingsBtn = document.getElementById("settings-btn")
   if (settingsBtn) settingsBtn.title = t("toolbar.settings")
 
@@ -1245,3 +1276,7 @@ function applyI18nToDOM() {
 function reasoningLabel(level) {
   return t("reasoning." + (level || "none"))
 }
+
+// ─── Startup: request agent settings once so the ADVISOR/ENG toolbar buttons
+// reflect the persisted state (the extension pushes updates afterwards).
+vscode.postMessage({ type: "getAgentSettings" })

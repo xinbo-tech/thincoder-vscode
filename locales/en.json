@@ -14,6 +14,8 @@
   "toolbar.model": "Change model",
   "toolbar.reasoning": "Reasoning effort",
   "toolbar.autoApprove": "Auto-approve tools",
+  "toolbar.advisor": "Advisor review on code changes",
+  "toolbar.engineering": "Engineering mode (design-before-code)",
   "toolbar.settings": "Settings",
   "welcome.heading": "ThinCoder",
   "welcome.text": "Ask me to read, write, search, or explain code in this workspace.",

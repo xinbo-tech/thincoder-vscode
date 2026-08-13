@@ -122,6 +122,16 @@ export async function handlePanelMessage(panel, msg) {
       break
     }
     case "getAgentSettings": panel._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() }); break
+    case "setAdvisorEnabled": {
+      saveAgentSettingsFromPanel({ advisor: { enabled: !!msg.value } })
+      panel._pushSettings()
+      break
+    }
+    case "setEngineeringEnabled": {
+      saveAgentSettingsFromPanel({ engineering: !!msg.value })
+      panel._pushSettings()
+      break
+    }
     case "getShellCandidates": panel._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates(), current: loadRaw().shell ?? null }); break
     case "saveShellSettings": {
       saveShellSettingsFromPanel(msg.value)

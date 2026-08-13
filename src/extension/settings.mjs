@@ -78,6 +78,7 @@ export function agentSettings() {
     subagentModels: s.subagentModels,
     compactThreshold: s.compactThreshold, // null = auto
     verifyGuard: s.verifyGuard,
+      engineering: s.engineering,
     advisor: s.advisor ?? { enabled: false },
   }
 }

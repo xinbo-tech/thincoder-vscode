@@ -16,7 +16,7 @@ import {
   selectProviderModel, providerNamesInConfig,
   loadEmbeddingConfig, saveEmbeddingConfig, migrateCore,
   loadMcpServers, addMcpServer, removeMcpServer,
-  loadAgentSettings, saveAgentSettings,
+  loadAgentSettings, saveAgentSettings, saveAgentSettingsFromPanel,
 } from "../src/config-io.mjs"
 
 let tmpDir
@@ -476,6 +476,13 @@ describe("agent settings", () => {
     assert.deepEqual(s2.subagentModels, {}, "empty object = no type overrides")
     const raw = loadRaw()
     assert.ok(!("subagentModels" in (raw.agent ?? {})), "empty subagentModels object removed from config")
+  })
+
+  it("engineering flag round-trips through the panel patch path", () => {
+    saveAgentSettingsFromPanel({ engineering: true })
+    assert.equal(loadAgentSettings().engineering, true)
+    saveAgentSettingsFromPanel({ engineering: false })
+    assert.equal(loadAgentSettings().engineering, false)
   })
 
 })
