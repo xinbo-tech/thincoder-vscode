@@ -15,6 +15,32 @@ export const workspace = {
     stat: async () => ({ type: 1 }),
   },
   onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
+  // Editor-edit dual channel (tools/shared.mjs): tests stub textDocuments and
+  // capture applyEdit calls. applyEdit must actually APPLY the recorded edits
+  // so the doc's text reflects them (the real host applies them synchronously).
+  textDocuments: [],
+  applyEditCalls: [],
+  applyEdit: async (edit) => {
+    workspace.applyEditCalls.push(edit)
+    for (const { uri, range, newText } of edit._edits ?? []) {
+      const doc = workspace.textDocuments.find((d) => d.uri.fsPath === uri.fsPath)
+      doc?._applyEdit?.(range, newText)
+    }
+    return true
+  },
+}
+
+export class Range {
+  constructor(startLine, startCol, endLine, endCol) {
+    this.start = { line: startLine, character: startCol }
+    this.end = { line: endLine, character: endCol }
+  }
+}
+
+export class WorkspaceEdit {
+  constructor() { this._edits = [] }
+  replace(uri, range, newText) { this._edits.push({ uri, range, newText }) }
+  insert(uri, position, newText) { this._edits.push({ uri, range: { start: position, end: position }, newText }) }
 }
 
 export const window = {

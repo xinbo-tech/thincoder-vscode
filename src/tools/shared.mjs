@@ -14,20 +14,27 @@ export function getOpenDoc(absPath) {
   } catch { return null }
 }
 
-/** Apply a full text replacement to an open document via WorkspaceEdit */
+/** Apply a full text replacement to an open document via WorkspaceEdit.
+ *  SAVES after applying — without the save the buffer goes dirty while the disk
+ *  stays stale: the next edit hits the isDirty guard (locked by our own edit),
+ *  and any external write races the user's later save (split-brain data loss). */
 export async function applyEditorEdit(doc, fullText) {
   const edit = new vscode.WorkspaceEdit()
   const range = new vscode.Range(0, 0, doc.lineCount, 0)
   edit.replace(doc.uri, range, fullText)
   await vscode.workspace.applyEdit(edit)
+  await doc.save()
 }
 
-/** Apply a range replacement to an open document via WorkspaceEdit */
+/** Apply a range replacement to an open document via WorkspaceEdit.
+ *  Saves after applying (see applyEditorEdit — unsaved edits self-lock the
+ *  isDirty guard and race external writers). */
 export async function applyEditorRangeEdit(doc, startLine, startCol, endLine, endCol, newText) {
   const edit = new vscode.WorkspaceEdit()
   const range = new vscode.Range(startLine, startCol, endLine, endCol)
   edit.replace(doc.uri, range, newText)
   await vscode.workspace.applyEdit(edit)
+  await doc.save()
 }
 
 /** Resolve a path relative to cwd or absolute */
