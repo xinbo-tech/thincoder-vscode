@@ -192,5 +192,10 @@
   "settings.connFailed": "Connection failed",
   "settings.fetchModelsFirst": "Fetch models first",
   "settings.providerUrlRequired": "baseURL required",
-  "input.interruptPlaceholder": "Interrupt — inject a message… (Enter to send, Esc to cancel)"
+  "input.interruptPlaceholder": "Interrupt — inject a message… (Enter to send, Esc to cancel)",
+  "search.placeholder": "Search conversation…",
+  "search.noMatch": "No match",
+  "search.prev": "Previous match",
+  "search.next": "Next match",
+  "search.close": "Close search"
 }

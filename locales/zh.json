@@ -192,5 +192,10 @@
   "settings.connFailed": "连接失败",
   "settings.fetchModelsFirst": "请先拉取模型",
   "settings.providerUrlRequired": "需要 baseURL",
-  "input.interruptPlaceholder": "中断 — 注入消息…（Enter 发送，Esc 取消）"
+  "input.interruptPlaceholder": "中断 — 注入消息…（Enter 发送，Esc 取消）",
+  "search.placeholder": "搜索会话…",
+  "search.noMatch": "无匹配",
+  "search.prev": "上一个匹配",
+  "search.next": "下一个匹配",
+  "search.close": "关闭搜索"
 }

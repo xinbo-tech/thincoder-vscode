@@ -354,6 +354,59 @@
   box-shadow: 0 0 0 1px var(--vscode-editorWarning-foreground, #cca700);
 }
 
+/* ─── In-conversation search (Ctrl+F) ─────────── */
+
+#search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+}
+
+#search-input {
+  flex: 1;
+  padding: 4px 10px;
+  background: var(--input-bg);
+  color: var(--input-fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+#search-input:focus { border-color: var(--accent); }
+
+#search-count {
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: nowrap;
+  min-width: 40px;
+  text-align: center;
+}
+
+#search-bar button {
+  padding: 2px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-family: inherit;
+}
+#search-bar button:hover { border-color: var(--accent); }
+
+mark.search-hit {
+  background: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 179, 8, 0.35));
+  color: inherit;
+  border-radius: 2px;
+}
+mark.search-hit.current {
+  background: var(--vscode-editor-findMatchBackground, #ff9632);
+  outline: 1px solid var(--accent);
+}
+
 /* ─── Loading animation ───────────────────────── */
 
 #status-line:empty {
