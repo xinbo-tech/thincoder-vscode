@@ -1,5 +1,5 @@
 /**
- * execute.test.mjs — sandboxed JS execution tool tests (VS Code port).
+ * execute.test.mjs — JS execution tool tests (VS Code port).
  * Run: node --test test/execute.test.mjs
  */
 import { describe, it, before, after } from "node:test"
@@ -82,26 +82,30 @@ describe("execute — sandbox API", () => {
       for (const f of files) count += readFile(f).split("\\n").length
       log("files", files.length, "lines", count)
     `)
-    // Just assert it ran without error by checking a known file exists
     assert(existsSync(join(tmpDir, "a.txt")))
   })
 })
 
-describe("execute — sandbox security", () => {
-  it("blocks require()", async () => {
-    const out = await run('const fs = require("node:fs")')
-    assert(out.includes("Error"))
-    assert(out.includes("require"))
+describe("execute — full Node access (no fake sandbox)", () => {
+  it("require() is available", async () => {
+    const out = await run('const fs = require("node:fs"); log(typeof fs.readFileSync)')
+    assert.equal(out, "function")
   })
 
-  it("process is undefined", async () => {
-    const out = await run('log(typeof process)')
-    assert.equal(out, "undefined")
+  it("process is available", async () => {
+    const out = await run('log(typeof process, typeof process.cwd)')
+    assert.equal(out, "object function")
   })
 
-  it("blocks dynamic import()", async () => {
-    const out = await run('await import("node:fs")')
-    assert(out.includes("dynamic import() is not allowed"))
+  it("require resolves Node builtins", async () => {
+    const out = await run('const p = require("node:path"); log(p.basename("/a/b.txt"))')
+    assert.equal(out, "b.txt")
+  })
+
+  it("require resolves project modules relative to cwd", async () => {
+    writeFileSync(join(tmpDir, "lib.js"), "module.exports = { answer: 42 }")
+    const out = await run('const lib = require("./lib.js"); log(lib.answer)')
+    assert.equal(out, "42")
   })
 
   it("denies path traversal above cwd", async () => {
@@ -113,16 +117,6 @@ describe("execute — sandbox security", () => {
     const outside = join(tmpdir(), "does-not-matter.txt")
     const out = await run(`readFile(${JSON.stringify(outside)})`)
     assert(out.includes("Path traversal denied") || out.includes("File not found"))
-  })
-
-  it("blocks fetch to cloud metadata endpoint", async () => {
-    const out = await run('fetch("http://169.254.169.254/latest/meta-data/")')
-    assert(out.includes("private/internal host not allowed"))
-  })
-
-  it("blocks fetch to RFC1918 ranges", async () => {
-    const out = await run('fetch("http://10.0.0.1/")')
-    assert(out.includes("private/internal host not allowed"))
   })
 
   it("rejects oversize scripts", async () => {
@@ -145,7 +139,6 @@ describe("execute — error handling and limits", () => {
   })
 
   it("caps timeoutMs at 60s", async () => {
-    // Just verify it doesn't crash with a huge timeout value
     const out = await run('log("ok")', { timeoutMs: 999_999_999 })
     assert.equal(out, "ok")
   })

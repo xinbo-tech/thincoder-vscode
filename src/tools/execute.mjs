@@ -1,30 +1,32 @@
 /**
- * tools/execute.mjs — sandboxed JS execution tool (VS Code port of CLI tools/codemode.mjs)
+ * tools/execute.mjs — JavaScript execution tool (VS Code port of CLI tools/codemode.mjs)
  *
- * Gives the model an `execute` tool backed by Node.js vm.Script.runInNewContext.
- * Multiple tool calls can be composed into a single script, reducing API round-trips
- * and keeping large intermediate results out of context.
+ * Backed by Node.js vm.Script.runInNewContext. Multiple tool calls can be composed
+ * into a single script, reducing API round-trips and keeping large intermediate
+ * results out of context.
  *
- * Sandbox API (all sync, no callbacks):
+ * Sandbox API:
  *   readFile(path)      — read a file relative to cwd, return string
  *   writeFile(path, c)  — write content to a file (auto-creates parent dirs)
  *   glob(pattern)        — return array of matching paths
  *   grep(pattern, file)  — return array of matching lines
  *   log(...args)         — append to output buffer
- *   fetch(url)           — HTTP GET, return string (SSRF-protected)
+ *   fetch(url)           — HTTP GET, return string
  *
- * Not available: require, import, process, child_process, setTimeout, any Node API.
+ * Full Node access via require()/process is available — no fake sandbox. The bash
+ * tool can already reach any Node API, so blocking require here only misled the
+ * model about its real capability boundary (project philosophy: no command-level
+ * sandbox; transparency + trust + audit).
  *
- * Limits:
+ * Limits (engineering guards, not security):
  *   timeout: 30s (configurable via timeoutMs param, max 60s)
  *   maxOutput: 50000 bytes
  *   maxScriptSize: 50000 bytes
- *
- * The glob/normalizeEOL/isPrivateHost helpers are inlined (CLI keeps them in shared.mjs)
- * so this module stays pure Node with no vscode import — the sandbox must not touch the editor.
+ *   file paths confined to cwd (accidental out-of-workspace writes)
  */
 
 import { Script, createContext } from "node:vm"
+import { createRequire } from "node:module"
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, readdirSync } from "node:fs"
 import { join, dirname, relative, resolve } from "node:path"
 
@@ -49,33 +51,14 @@ function globToRegex(pattern) {
   return new RegExp(`^${escaped}$`)
 }
 
-/** SSRF guard: block cloud-metadata and RFC1918 hosts (CLI shared.mjs isPrivateHost parity). */
-function isPrivateHost(hostname) {
-  const h = hostname.toLowerCase()
-  if (h === "localhost" || h === "0.0.0.0" || h.endsWith(".localhost")) return false
-  if (h === "127.0.0.1" || h.startsWith("127.")) return false
-  if (h === "169.254.169.254" || h === "metadata.google.internal") return true
-  // IPv6 private ranges — only check if host contains ":"
-  if (h.includes(":") && (h === "::1" || h === "fe80::1" || h.startsWith("fc") || h.startsWith("fd"))) return true
-  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
-  if (m) {
-    const [a, b] = [Number(m[1]), Number(m[2])]
-    if (a === 10 || (a === 172 && b >= 16 && b <= 31) || a === 192 && b === 168 || a === 169 && b === 254 || a === 0) return true
-  }
-  return false
-}
-
-/** SSRF-safe fetch: only http/https, private IP rejection, 10s timeout.
+/** fetch: only http/https (protocol guard kept; no private-host rejection — the
+ *  bash tool can reach anything anyway, so the SSRF check was a fake boundary).
  *  Validation throws SYNCHRONOUSLY so the vm sandbox's try/catch can catch it —
  *  an async throw here would become an unhandled rejection and crash the host. */
 function sandboxFetch(url) {
   const parsed = new URL(url)
   if (!["http:", "https:"].includes(parsed.protocol)) {
     throw new Error(`CodeMode fetch: protocol not allowed: ${parsed.protocol}`)
-  }
-
-  if (isPrivateHost(parsed.hostname)) {
-    throw new Error(`CodeMode fetch: private/internal host not allowed: ${parsed.hostname}`)
   }
   return doFetch(url)
 }
@@ -95,16 +78,16 @@ async function doFetch(url) {
 export const executeTool = {
   name: "execute",
   description:
-    "Execute sandboxed JavaScript code. Use this to compose multiple file operations into one call — read, write, glob, grep, and log results. No system access. Max 30s timeout, 50KB output.\n" +
+    "Execute JavaScript code with full Node access. Use this to compose multiple file operations into one call — read, write, glob, grep, log, or require() any module. Max 30s timeout, 50KB output.\n" +
     "Parameters:\n" +
-    "- code (required): JavaScript code to execute in the sandbox. Use provided functions: readFile(path), writeFile(path, content), glob(pattern), grep(pattern, file), log(...args).\n" +
+    "- code (required): JavaScript code to execute. Use provided functions: readFile(path), writeFile(path, content), glob(pattern), grep(pattern, file), log(...args). require()/process/Node modules are available.\n" +
     "- timeoutMs: Timeout in milliseconds (default 30000, max 60000)",
   parameters: {
     type: "object",
     properties: {
       code: {
         type: "string",
-        description: "JavaScript code to execute in the sandbox. Use provided functions: readFile(path), writeFile(path, content), glob(pattern), grep(pattern, file), log(...args).",
+        description: "JavaScript code to execute. Use provided functions: readFile(path), writeFile(path, content), glob(pattern), grep(pattern, file), log(...args). require()/process/Node modules are available.",
       },
       timeoutMs: {
         type: "integer",
@@ -126,7 +109,7 @@ export const executeTool = {
     const output = []
     const timeoutMs = Math.min(args.timeoutMs ?? DEFAULT_TIMEOUT, 60_000)
 
-    // File path guard: ensure paths are within cwd
+    // File path guard: ensure paths are within cwd (accidental out-of-workspace writes)
     function safePath(p) {
       if (typeof p !== "string") throw new Error(`Path must be a string, got ${typeof p}`)
       const abs = resolve(cwd, p)
@@ -135,11 +118,6 @@ export const executeTool = {
         throw new Error(`Path traversal denied: ${p}`)
       }
       return abs
-    }
-
-    // Block dynamic imports: check for import() syntax before execution
-    if (/\bimport\s*\(/.test(code)) {
-      return "Error: dynamic import() is not allowed in CodeMode sandbox. Use the provided readFile/writeFile/glob/grep/fetch functions instead."
     }
 
     const sandbox = createContext({
@@ -195,9 +173,11 @@ export const executeTool = {
         }
       },
       fetch: sandboxFetch,
-      // Block process and require access
-      require: () => { throw new Error("require() is not available in CodeMode sandbox") },
-      process: undefined,
+      // Full Node access — no fake sandbox (bash can reach it anyway).
+      require: createRequire(join(cwd, "__codemode__.js")),
+      process,
+      setTimeout,
+      clearTimeout,
     })
 
     try {
