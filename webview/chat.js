@@ -1277,6 +1277,9 @@ function reasoningLabel(level) {
   return t("reasoning." + (level || "none"))
 }
 
-// ─── Startup: request agent settings once so the ADVISOR/ENG toolbar buttons
-// reflect the persisted state (the extension pushes updates afterwards).
-vscode.postMessage({ type: "getAgentSettings" })
+// ─── Startup handshake: the extension sets webview.html then immediately
+// postMessages i18n — but the webview loads ASYNCHRONOUSLY, so that message is
+// DROPPED (restart/Reload Window made this race visible: labels showed "msg.user",
+// send felt dead). Pull instead: once THIS script runs, the listener is ready,
+// so ask the extension to push the initial state.
+vscode.postMessage({ type: "webviewReady" })

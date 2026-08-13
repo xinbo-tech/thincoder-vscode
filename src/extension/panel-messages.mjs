@@ -3,6 +3,7 @@
  * Every `case` dispatches to a ChatPanel method or a settings/provider helper.
  */
 import * as vscode from "vscode"
+import { loadLocaleStrings } from "../i18n.mjs"
 import { saveModelPrefs, switchToSlot } from "./session-io.mjs"
 import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection, shellCandidates, saveShellSettingsFromPanel } from "./settings.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
@@ -122,6 +123,15 @@ export async function handlePanelMessage(panel, msg) {
       break
     }
     case "getAgentSettings": panel._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() }); break
+    case "webviewReady": {
+      // The webview finished loading — now it's safe to push initial state.
+      // resolveWebviewView pushed i18n right after setting webview.html, which
+      // races the async load and is DROPPED on Reload Window (labels showed raw
+      // keys like "msg.user"). Re-push here, plus the settings the toolbar needs.
+      panel._panel?.webview.postMessage({ type: "i18n", strings: loadLocaleStrings(vscode.env.language) })
+      panel._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
+      break
+    }
     case "setAdvisorEnabled": {
       saveAgentSettingsFromPanel({ advisor: { enabled: !!msg.value } })
       panel._pushSettings()
