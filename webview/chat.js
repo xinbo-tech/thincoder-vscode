@@ -845,19 +845,13 @@ function showQuestion(ctx, question, options) {
     ctx.inputEl.focus()
   }
 
-  if (Array.isArray(options) && options.length > 0) {
-    for (const opt of options) {
-      const b = document.createElement("button")
-      b.className = "perm-btn approve question-option"
-      b.textContent = opt
-      b.addEventListener("click", () => answer(opt))
-      actions.appendChild(b)
-    }
-  } else {
+  // Free-text channel — ALWAYS present (options or not). Users must be able to
+  // supplement or correct the AI's preset choices with their own answer.
+  const addFreeInput = (placeholder) => {
     const input = document.createElement("input")
     input.className = "question-input"
     input.type = "text"
-    input.placeholder = t("question.placeholder")
+    input.placeholder = placeholder
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && input.value.trim()) answer(input.value.trim())
     })
@@ -867,6 +861,21 @@ function showQuestion(ctx, question, options) {
     submit.textContent = t("question.submit")
     submit.addEventListener("click", () => { if (input.value.trim()) answer(input.value.trim()) })
     actions.appendChild(submit)
+  }
+
+  if (Array.isArray(options) && options.length > 0) {
+    for (const opt of options) {
+      const b = document.createElement("button")
+      b.className = "perm-btn approve question-option"
+      b.textContent = opt
+      b.addEventListener("click", () => answer(opt))
+      actions.appendChild(b)
+    }
+    // Preset options PLUS a free-text input — the user can pick a preset or
+    // type their own answer (the AI's options are never assumed exhaustive).
+    addFreeInput(t("question.customPlaceholder"))
+  } else {
+    addFreeInput(t("question.placeholder"))
   }
 
   const cancel = document.createElement("button")

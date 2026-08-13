@@ -182,5 +182,6 @@
   "welcome.save": "Save & Start",
   "welcome.skip": "Skip for now",
   "welcome.fullSettings": "Full settings",
-  "settings.providerKey": "API Key"
+  "settings.providerKey": "API Key",
+  "question.customPlaceholder": "Or type your own answer…"
 }
