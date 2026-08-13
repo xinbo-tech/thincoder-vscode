@@ -160,8 +160,12 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       panel._panel.webview.postMessage({ type: "aborted" })
     } else {
       console.error("[chat-panel] runAgent failed:", e.message, "provider:", p.baseURL, "model:", p.model)
-      const techInfo = `→ Provider: ${p.baseURL}\n→ Model: ${p.model}`
-      panel._panel.webview.postMessage({ type: "error", text: `${e.message || String(e)}`, techInfo })
+      // Friendly surface: first line only, URLs stripped (provider errors leak
+      // the baseURL into the message). Full detail + provider/model folds away.
+      const rawMsg = e.message || String(e)
+      const text = rawMsg.split("\n")[0].replace(/https?:\/\/[^\s,)"]+/g, "[endpoint]")
+      const techInfo = [rawMsg, `→ Provider: ${p.baseURL}`, `→ Model: ${p.model}`].join("\n")
+      panel._panel.webview.postMessage({ type: "error", text, techInfo })
     }
   } finally {
     panel._turnActive = false

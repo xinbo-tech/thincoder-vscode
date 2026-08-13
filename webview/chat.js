@@ -436,6 +436,11 @@ const advisorBtn = document.getElementById("advisor-btn")
 const engBtn = document.getElementById("eng-btn")
 
 function applyModeButtons() {
+  // ADVISOR / ENG render only while enabled — the toolbar stays quiet for normal
+  // use; these advanced modes are toggled from the settings panel. (Hidden by
+  // default in the HTML so the toolbar starts minimal.)
+  advisorBtn.style.display = _advisorOn ? "" : "none"
+  engBtn.style.display = _engOn ? "" : "none"
   advisorBtn.classList.toggle("active", _advisorOn)
   advisorBtn.classList.toggle("warning", _advisorOn)
   engBtn.classList.toggle("active", _engOn)
@@ -452,6 +457,8 @@ engBtn.addEventListener("click", () => {
   applyModeButtons()
   vscode.postMessage({ type: "setEngineeringEnabled", value: _engOn })
 })
+// Initial state: both hidden until the agentSettings push flips them on.
+applyModeButtons()
 
 const autoBtn = document.getElementById("auto-btn")
 autoBtn.addEventListener("click", () => {
