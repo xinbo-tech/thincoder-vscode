@@ -4,6 +4,23 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] — 2026-08-13
+
+### Fixed
+
+- **Stop now actually stops** (the bug reported since 0.1.0): the SSE read loops never watched the abort signal — clicking Stop mid-response drained the whole stream, then tool calls kept running. All three transports now check the signal per chunk AND race an abort promise, so even a silent stream breaks. Verified end-to-end against a real HTTP server (~0.6s).
+- **"object is not iterable" on send**: with an active editor inside the workspace, the editor-context injection (a single message object) was iterated as an array on EVERY message — sending always failed. Now accepts object or array.
+- **Stop interrupts lint/verify runs**: `execSync` froze the extension-host event loop (the abort message could not even be delivered). lint and verify now run via an interruptible spawn that kills the child on Stop.
+- **Settings panel feedback gaps**: add-provider errors were silently dropped (no webview handler), MCP save/delete never refreshed the list, index build left the panel stuck on "Building…". All fixed, plus two-step delete confirmation, save-button feedback, tooltips on advanced controls, form edits surviving status pushes, and full i18n.
+
+### Added
+
+- **ADVISOR / ENG toolbar switches** next to AUTO — quick toggles for advisor review and engineering mode, mirrored with the settings panel.
+- **Status-bar run indicator**: ThinCoder status in the window status bar (idle / running / waiting for your input) — click to focus the panel.
+- **apply_patch approval preview**: multi-file patches now render in the permission prompt with +/- coloring instead of blind approval.
+- **Tool-panel output follows the stream** (no more output hidden below the fold) and a **scroll-to-bottom button** for lazy-loaded history.
+- **Engineering debt**: CI runs the full test suite on Node 24, subagent questions render inline in the panel, the legacy `thincoder.mcpServers` setting and migration code removed.
+
 ## [0.1.1] — 2026-08-13
 
 ### Fixed
