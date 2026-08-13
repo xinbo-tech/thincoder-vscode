@@ -19,7 +19,7 @@ Like the CLI, it's pure `.mjs`, zero npm dependencies, and connects directly to 
 - **Multi-session** — save and switch between conversation sessions with session bar; LLM auto-generates titles
 - **Image input** — paste or drag images into chat, or use `read_image` tool; supported on vision models (Kimi K3, Qwen3.7, MiniMax M3)
 - **Reasoning display** — collapsible "Thinking..." block shows the model's reasoning process in real-time
-- **6 providers** — DeepSeek, Kimi, GLM, Qwen, MiniMax, OpenAI + custom OpenAI-compatible endpoint
+- **17 provider presets** — DeepSeek, Kimi, GLM, Qwen, MiniMax, OpenAI, Claude, Gemini, Grok, Mistral, Volcengine, Hunyuan, SiliconFlow, OpenRouter, Groq + custom OpenAI-compatible endpoint
 - **Vector search** — semantic code search with BAAI/bge-m3 embeddings via SiliconFlow (configurable in Settings)
 - **Model selection** — choose from all available models per provider, with reasoning effort control
 - **Permission control** — session-level AUTO mode (off by default): every file-modifying tool prompts for approval until you click the AUTO toolbar button or "Approve All"; the flip takes effect immediately, even mid-turn
@@ -34,7 +34,7 @@ Like the CLI, it's pure `.mjs`, zero npm dependencies, and connects directly to 
 
 1. Install the extension from VS Code Marketplace (or `vsce package` + sideload)
 2. Press `Ctrl+Alt+T` (Mac: `Cmd+Alt+T`) — the ThinCoder panel opens in the sidebar
-3. Click ⚙ (Settings) in the toolbar, then add your API key for any supported provider
+3. First run shows a welcome panel: pick a provider, paste your API key, save (the key is verified on save). You can add more providers later via ⚙ (Settings) in the toolbar
 4. Start chatting — ThinCoder reads your workspace and responds
 
 ## Commands
@@ -75,14 +75,38 @@ No key (or a bad key) → the tool silently falls back to Bing, so agents never 
 
 | Provider | Default Model | API Endpoint |
 |----------|--------------|-------------|
-| DeepSeek | `deepseek-v4-pro` | `https://api.deepseek.com/v1` |
+| DeepSeek | `deepseek-v4-pro` | `https://api.deepseek.com` |
 | Kimi (Moonshot) | `kimi-k3` | `https://api.moonshot.cn/v1` |
 | Kimi For Coding | `k3` | `https://api.kimi.com/coding/v1` — separate platform, `sk-kimi-` keys are NOT interchangeable with Moonshot |
 | GLM (Zhipu) | `glm-5.2` | `https://open.bigmodel.cn/api/paas/v4` |
 | Qwen (Alibaba) | `qwen3.7-max` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| MiniMax | `MiniMax-M3` | `https://api.minimax.chat/v1` |
+| Qwen Token Plan | `qwen3.7-max` | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` |
+| MiniMax | `MiniMax-M3` | `https://api.minimaxi.com/v1` |
 | OpenAI | `gpt-4o` | `https://api.openai.com/v1` |
+| Claude (Anthropic) | `claude-sonnet-4` | `https://api.anthropic.com/v1` |
+| Gemini (Google) | `gemini-2.5-flash` | `https://generativelanguage.googleapis.com/v1beta` |
+| Grok (xAI) | `grok-4.5` | `https://api.x.ai/v1` |
+| Mistral | `mistral-large` | `https://api.mistral.ai/v1` |
+| Volcengine Ark (豆包) | `doubao-pro-32k` | `https://ark.cn-beijing.volces.com/api/v3` |
+| Hunyuan (腾讯混元) | `hunyuan-pro` | `https://api.hunyuan.cloud.tencent.com/v1` |
+| SiliconFlow (硅基流动) | `deepseek-ai/DeepSeek-V3` | `https://api.siliconflow.cn/v1` |
+| OpenRouter | `anthropic/claude-sonnet-4` | `https://openrouter.ai/api/v1` |
+| Groq | `llama-3.3-70b-versatile` | `https://api.groq.com/openai/v1` |
 | Custom | (user-specified) | User-configured |
+
+## Chat panel shortcuts
+
+Keyboard shortcuts inside the chat panel (CLI parity):
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+C` | Stop the running turn (a text selection still copies instead) |
+| `Ctrl+I` | Interrupt and inject a message — partial output is kept, the turn resumes with your message |
+| `Ctrl+F` | Search the conversation (live highlight, Enter/↑↓ to jump, Esc to close) |
+| `Ctrl+U` | Clear the input line |
+| `↑` / `↓` | Navigate input history (only at the absolute start/end of the input — mid-text arrows move the cursor) |
+| `Enter` / `Shift+Enter` | Send / insert newline |
+| `Esc` | Close dropdown / search bar |
 
 ## Architecture
 
@@ -170,10 +194,9 @@ thincoder-vscode/
 | Memory system | 3-layer FTS5 + vector | FTS5 + vector (embedding required) |
 | Checkpoint | Git snapshot restore | Git diff/status/log only |
 | MCP support | ✅ | ✅ |
-| Session persistence | 5 archive slots | Filesystem (storageUri) — no size limit |
+| Session persistence | 5 archive slots | Shared with the CLI — same files and slots (`~/.thincoder/sessions/`) |
 | Skill system | ✅ | ✅ |
 | Plan mode | ✅ | ✅ |
 | Subagents | ✅ | ✅ |
 | Verify guard | ✅ | ✅ |
 | Image input | `read_image` tool | ✅ |
-| MCP support | ✅ | ✅ |
