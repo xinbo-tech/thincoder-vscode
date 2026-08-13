@@ -58,6 +58,26 @@
       </div>
       <div class="panel-body" id="settings-body"></div>
     </div>
+    <!-- First-run onboarding: shown when no provider has a key configured -->
+    <div id="welcome-panel" role="dialog" aria-label="Welcome" aria-hidden="true" style="display:none">
+      <div class="welcome-inner">
+        <h2 id="welcome-heading"></h2>
+        <p id="welcome-text"></p>
+        <div class="key-field">
+          <label id="welcome-provider-label" for="welcome-provider"></label>
+          <select id="welcome-provider"></select>
+        </div>
+        <div class="key-field">
+          <label id="welcome-key-label" for="welcome-key"></label>
+          <input id="welcome-key" type="password" placeholder="sk-..." autocomplete="off">
+        </div>
+        <div class="welcome-actions">
+          <button id="welcome-save-btn" class="save-btn"></button>
+          <button id="welcome-skip-btn" class="key-btn"></button>
+          <button id="welcome-settings-btn" class="key-btn"></button>
+        </div>
+      </div>
+    </div>
   </div>
   <script type="module" src="__CHAT_URI__"></script>
 </body>

@@ -259,3 +259,60 @@
 }
 
 .settings-card-body input.input-error { border-color: var(--red); }
+
+/* ─── First-run onboarding panel ─────────────── */
+
+#welcome-panel {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.welcome-inner {
+  max-width: 400px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.welcome-inner h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.welcome-inner p {
+  font-size: 12px;
+  opacity: 0.7;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.welcome-inner select,
+.welcome-inner input {
+  padding: 6px 10px;
+  background: var(--input-bg);
+  color: var(--input-fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.welcome-inner input:focus,
+.welcome-inner select:focus { border-color: var(--accent); }
+
+.welcome-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.welcome-actions .save-btn { flex: 1; margin-top: 0; }

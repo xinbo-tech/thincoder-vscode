@@ -489,14 +489,14 @@ describe("i18n — locale loading", () => {
   // Verify English locale loads correctly (no-op since en is fallback)
   it("loads en locale", () => {
     initLocale("en")
-    assert.equal(t("welcome.heading"), "ThinCoder")
+    assert.equal(t("welcome.heading"), "Welcome to ThinCoder")
     assert.equal(t("msg.copy"), "Copy")
     assert.equal(t("settings.title"), "Settings")
   })
 
   it("falls back to en for unknown locale", () => {
     initLocale("xx-unknown")
-    assert.equal(t("welcome.heading"), "ThinCoder")
+    assert.equal(t("welcome.heading"), "Welcome to ThinCoder")
   })
 
   it("supports variable interpolation", () => {

@@ -40,6 +40,13 @@ const ctx = {
   _inputHistory: [], // sent inputs (memory, per panel session — CLI parity)
   _historyIdx: -1,   // -1 = showing the live draft
   _inputDraft: "",   // stashed in-progress text while navigating history
+  // First-run onboarding panel
+  welcomePanel: document.getElementById("welcome-panel"),
+  welcomeProvider: document.getElementById("welcome-provider"),
+  welcomeKey: document.getElementById("welcome-key"),
+  welcomeSaveBtn: document.getElementById("welcome-save-btn"),
+  welcomeSkipBtn: document.getElementById("welcome-skip-btn"),
+  welcomeSettingsBtn: document.getElementById("welcome-settings-btn"),
 }
 
 // ─── Shared mutable state (must be declared before setInterval / event handlers)
@@ -57,6 +64,9 @@ let _toolPanels = {}
 // message; _loadingOlder guards against scroll-triggered double requests.
 let _hasOlder = false
 let _loadingOlder = false
+// First-run onboarding: shown when no provider is configured; dismissed on skip
+// (stays dismissed for the webview's lifetime, reappears after a reload).
+let _welcomeDismissed = false
 // Panel preview caps (named — used by tailTruncate and the block accumulator)
 const PANEL_PREVIEW_CHARS = 2000
 const PANEL_BLOCK_MAX = 20000
@@ -380,6 +390,71 @@ function renderStatusBar(m) {
 // ─── Toolbar buttons ───────────────────────────
 
 document.getElementById("settings-btn").addEventListener("click", openSettings)
+
+// ─── First-run onboarding panel ─────────────────
+
+/** Show the onboarding panel, pre-filled with the unadded provider presets. */
+function showWelcomePanel(status) {
+  if (_welcomeDismissed) return
+  const presets = (status?.presets || []).map((p) => ({ name: p.name, label: p.desc || p.name, model: p.model }))
+  const sel = ctx.welcomeProvider
+  sel.innerHTML = presets
+    .map((p) => `<option value="${escHtml(p.name)}">${escHtml(p.label)} — ${escHtml(p.model)}</option>`)
+    .join("") + `<option value="custom">${escHtml(t("settings.customChoice"))}</option>`
+  ctx.welcomeHeading.textContent = t("welcome.heading")
+  ctx.welcomeText.textContent = t("welcome.text")
+  ctx.welcomeProviderLabel.textContent = t("settings.providersSection")
+  ctx.welcomeKeyLabel.textContent = t("settings.providerKey")
+  ctx.welcomeSaveBtn.textContent = t("welcome.save")
+  ctx.welcomeSkipBtn.textContent = t("welcome.skip")
+  ctx.welcomeSettingsBtn.textContent = t("welcome.fullSettings")
+  ctx.welcomeKey.value = ""
+  ctx.welcomePanel.style.display = "flex"
+  ctx.welcomePanel.setAttribute("aria-hidden", "false")
+}
+
+function hideWelcomePanel() {
+  ctx.welcomePanel.style.display = "none"
+  ctx.welcomePanel.setAttribute("aria-hidden", "true")
+}
+
+/** providerStatus-driven: show onboarding when NOTHING is configured; close it once a key lands. */
+function maybeShowWelcome(status, keyOk) {
+  if (keyOk) {
+    hideWelcomePanel()
+    return
+  }
+  showWelcomePanel(status)
+}
+
+ctx.welcomeSaveBtn.addEventListener("click", () => {
+  const name = ctx.welcomeProvider.value
+  const key = ctx.welcomeKey.value.trim()
+  if (!key) { ctx.welcomeKey.focus(); return }
+  if (name === "custom") {
+    // Custom providers need more fields — hand off to the settings panel's add form.
+    hideWelcomePanel()
+    openSettings()
+    window._toggleAddForm?.(true)
+    return
+  }
+  vscode.postMessage({ type: "addProvider", preset: name, key })
+  // The panel closes itself when the refreshed providerStatus reports keyOk=true.
+})
+
+ctx.welcomeSkipBtn.addEventListener("click", () => {
+  _welcomeDismissed = true
+  hideWelcomePanel()
+})
+
+ctx.welcomeSettingsBtn.addEventListener("click", () => {
+  hideWelcomePanel()
+  openSettings()
+})
+
+ctx.welcomeKey.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") ctx.welcomeSaveBtn.click()
+})
 
 // Advisor / Engineering mode toggles (session-bar quick switches; the settings
 // panel has the full advisor configuration — these mirror config.json fields).
@@ -909,6 +984,7 @@ window.addEventListener("message", (e) => {
     case "providerStatus":
       updateProviderStatus(m.status || {})
       showBanner(ctx, m.keyOk ? t("banner.configured") : t("banner.notConfigured"), m.keyOk)
+      maybeShowWelcome(m.status || {}, m.keyOk)
       break
     case "providerError":
       showSettingsError(m.text)

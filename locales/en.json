@@ -17,8 +17,8 @@
   "toolbar.advisor": "Advisor review on code changes",
   "toolbar.engineering": "Engineering mode (design-before-code)",
   "toolbar.settings": "Settings",
-  "welcome.heading": "ThinCoder",
-  "welcome.text": "Ask me to read, write, search, or explain code in this workspace.",
+  "welcome.heading": "Welcome to ThinCoder",
+  "welcome.text": "Choose a provider and enter its API key to get started.",
   "welcome.shortcuts": "Type @ for file references · Enter to send · Shift+Enter for newline",
   "welcome.shortcutsHtml": "Type <code>@</code> for file references · <code>Enter</code> to send · <code>Shift+Enter</code> for newline",
   "msg.user": "You",
@@ -178,5 +178,9 @@
   "settings.proxyUriHelp": "HTTP proxy for network access (e.g. http://127.0.0.1:7890).",
   "settings.proxyWebHelp": "Route web fetch/search through the proxy.",
   "settings.proxyModelHelp": "Route LLM API calls through the proxy.",
-  "settings.shellHelp": "Shell used by the bash tool (per-provider proxy toggles live in the Providers section)."
+  "settings.shellHelp": "Shell used by the bash tool (per-provider proxy toggles live in the Providers section).",
+  "welcome.save": "Save & Start",
+  "welcome.skip": "Skip for now",
+  "welcome.fullSettings": "Full settings",
+  "settings.providerKey": "API Key"
 }
