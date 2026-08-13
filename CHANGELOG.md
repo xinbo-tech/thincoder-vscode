@@ -4,6 +4,17 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.4] — 2026-08-13
+
+### Fixed
+
+- **i18n lost on Reload Window**: labels showed raw keys like "msg.user" after a window reload — the extension pushed i18n right after setting webview.html, but the webview loads asynchronously and the message was dropped. The webview now handshakes `webviewReady` and the extension re-pushes initial state.
+
+### Changed
+
+- **Settings panel redesign**: sections are now cards with titles, provider rows show a status dot + name + actions (model·url aligned below, proxy as a switch), all booleans are switch toggles, unified label style, removed dead CSS and hardcoded spacing.
+- **execute tool — no fake sandbox**: `require()`/Node API access is now available (the bash tool already reached it, so blocking require only misled the model). Removed the dynamic-import block and SSRF private-host rejection; kept timeout, cwd confinement, and output caps as engineering guards.
+
 ## [0.1.3] — 2026-08-13
 
 Repackaged release — 0.1.2 shipped with a stray temporary file in the vsix; `.vscodeignore` now excludes scratch files.
