@@ -46,6 +46,21 @@ function buildAdvModelOptions(model, provider) {
   return opts
 }
 
+/** Build a subagent-model dropdown (value = "provider:model"; empty = inherit). */
+function buildSubmodelOptions(current) {
+  const models = _getModels?.() || []
+  let opts = `<option value="">${t("settings.inherit")}</option>`
+  opts += models.map((m) => {
+    const v = `${m.provider}:${m.id}`
+    return `<option value="${escHtml(v)}" ${current === v ? "selected" : ""}>${escHtml(v)}</option>`
+  }).join("")
+  // Keep a non-list value (custom model name / bare provider) selectable.
+  if (current && !models.some((m) => `${m.provider}:${m.id}` === current)) {
+    opts += `<option value="${escHtml(current)}" selected>${escHtml(current)}</option>`
+  }
+  return opts
+}
+
 /** @type {{ built?:boolean, files?:number, chunks?:number } | null} */
 let _indexStatus = null
 /** @type {{ maxTurns?:number, subagentTurns?:number, compactThreshold?:number|null, verifyGuard?:boolean, advisor?:object } | null} */
@@ -379,9 +394,9 @@ function buildSettings() {
   html += `<div class="key-field"><label title="${t("settings.maxTurnsHelp")}">${t("settings.maxTurns")}</label><input id="ag-maxturns" type="number" min="1" value="${as.maxTurns ?? 100}"></div>`
   html += `<div class="key-field"><label title="${t("settings.subagentTurnsHelp")}">${t("settings.subagentTurns")}</label><input id="ag-subturns" type="number" min="1" value="${as.subagentTurns ?? 100}"></div>`
   html += `<div class="settings-subtitle">${t("settings.submodelSection")}</div>`
-  html += `<div class="key-field"><label title="${t("settings.submodelHelp")}">${t("settings.submodelGlobal")}</label><input id="ag-submodel-global" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModel || "")}"></div>`
+  html += `<div class="key-field"><label title="${t("settings.submodelHelp")}">${t("settings.submodelGlobal")}</label><select id="ag-submodel-global">${buildSubmodelOptions(as.subagentModel || "")}</select></div>`
   html += `${["explore", "plan", "coder", "eng-coder"].map((role) => `
-    <div class="key-field"><label title="${t("settings.submodelHelp")}">${role}</label><input id="ag-submodel-${role}" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModels?.[role] || "")}"></div>`).join("")}`
+    <div class="key-field"><label title="${t("settings.submodelHelp")}">${role}</label><select id="ag-submodel-${role}">${buildSubmodelOptions(as.subagentModels?.[role] || "")}</select></div>`).join("")}`
   html += `<div class="key-field"><label title="${t("settings.compactThresholdHelp")}">${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>`
   html += `<label class="switch" title="${t("settings.verifyGuardHelp")}"><input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}> ${t("settings.verifyGuard")}</label>`
   html += `<div class="settings-subtitle">${t("settings.advisorSection")}</div>`

@@ -82,15 +82,31 @@ describe("buildSettings — switch toggles (agent / advisor)", () => {
     assert.equal(body.querySelector("#adv-enabled")?.checked, false)
   })
 
-  it("renders agent numeric fields and submodel inputs", () => {
-    api.updateAgentSettings({ maxTurns: 42, subagentTurns: 7, subagentModel: "coder-1" })
+  it("renders agent numeric fields and submodel selects", () => {
+    api.updateAgentSettings({ maxTurns: 42, subagentTurns: 7, subagentModel: "deepseek:deepseek-v4-pro" })
     const body = openPanel()
     assert.equal(body.querySelector("#ag-maxturns")?.value, "42")
     assert.equal(body.querySelector("#ag-subturns")?.value, "7")
-    assert.equal(body.querySelector("#ag-submodel-global")?.value, "coder-1")
+    assert.equal(body.querySelector("#ag-submodel-global")?.tagName, "SELECT")
+    assert.equal(body.querySelector("#ag-submodel-global")?.value, "deepseek:deepseek-v4-pro")
     for (const role of ["explore", "plan", "coder", "eng-coder"]) {
-      assert.ok(body.querySelector(`#ag-submodel-${role}`), `missing submodel input for ${role}`)
+      assert.equal(body.querySelector(`#ag-submodel-${role}`)?.tagName, "SELECT", `submodel select for ${role}`)
     }
+  })
+
+  it("subagent model selects list provider:model options from the model list", () => {
+    mockModels = [
+      { id: "deepseek-v4-pro", provider: "deepseek" },
+      { id: "kimi-k3", provider: "kimi" },
+    ]
+    api.updateAgentSettings({ subagentModels: { coder: "deepseek:deepseek-v4-pro" } })
+    const body = openPanel()
+    const sel = body.querySelector("#ag-submodel-coder")
+    const values = [...sel.options].map((o) => o.value)
+    assert.ok(values.includes(""), "inherit option present")
+    assert.ok(values.includes("deepseek:deepseek-v4-pro"))
+    assert.ok(values.includes("kimi:kimi-k3"))
+    assert.equal(sel.value, "deepseek:deepseek-v4-pro")
   })
 
   it("wraps verifyGuard in a .switch label (not a bare checkbox)", () => {
@@ -168,17 +184,18 @@ describe("buildSettings — web search card (Tavily)", () => {
 
 describe("buildSettings — save flow (posts payload to extension)", () => {
   it("saving agent settings posts the full payload", () => {
+    mockModels = [{ id: "deepseek-v4-pro", provider: "deepseek" }]
     api.updateAgentSettings({ maxTurns: 10, verifyGuard: true, advisor: { enabled: true, guard: false } })
     openPanel()
     document.getElementById("ag-maxturns").value = "42"
-    document.getElementById("ag-submodel-global").value = "coder-1"
+    document.getElementById("ag-submodel-global").value = "deepseek:deepseek-v4-pro"
     document.getElementById("adv-enabled").checked = false
     document.getElementById("ag-save-btn").click()
 
     const last = env.capturedPosts.at(-1)
     assert.equal(last.type, "saveAgentSettings")
     assert.equal(last.settings.maxTurns, "42")
-    assert.equal(last.settings.subagentModel, "coder-1")
+    assert.equal(last.settings.subagentModel, "deepseek:deepseek-v4-pro")
     assert.equal(last.settings.verifyGuard, true)
     assert.equal(last.settings.advisor.enabled, false)
   })
