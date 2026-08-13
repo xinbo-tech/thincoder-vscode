@@ -3,7 +3,7 @@
   "displayName": "ThinCoder",
   "version": "0.1.0",
   "description": "ThinCoder AI coding assistant — prompts-driven, zero bloat",
-  "publisher": "thincoder",
+  "publisher": "xinbo-tech",
   "license": "MIT",
   "icon": "assets/icon.png",
   "repository": {
@@ -97,12 +97,6 @@
           "markdownDescription": "# Providers (legacy — migrated automatically)\nProvider configuration now lives in `~/.thincoder/config.json`, shared with the CLI. On first activation any keys/providers stored here (and in SecretStorage) are migrated into that file and this setting is cleared. Use the in-panel Settings (⚙) or edit `~/.thincoder/config.json` directly.",
           "deprecationMessage": "Provider config is stored in ~/.thincoder/config.json (shared with the CLI). This setting is only read once for migration."
         },
-        "thincoder.autoApprove": {
-          "type": "boolean",
-          "default": false,
-          "order": 2,
-          "markdownDescription": "# Auto-Approve Tools\nWhen enabled, the agent automatically executes file-modifying tools without asking for confirmation. **Off by default — you must explicitly opt in to automatic execution.**"
-        },
         "thincoder.mcpServers": {
           "type": "object",
           "default": {},
@@ -115,13 +109,16 @@
   "scripts": {
     "vscode:prepublish": "npm run lint",
     "package": "vsce package",
-    "test": "node --test test/unit.test.mjs test/dual-history.test.mjs test/tools.test.mjs test/config-io.test.mjs test/settings-panel.test.mjs test/advisor.test.mjs test/execute.test.mjs test/provider-panel.test.mjs test/proxy.test.mjs",
+    "publish": "vsce publish",
+    "publish:ovsx": "ovsx publish",
+    "test": "node --test test/unit.test.mjs test/dual-history.test.mjs test/tools.test.mjs test/config-io.test.mjs test/settings-panel.test.mjs test/advisor.test.mjs test/execute.test.mjs test/provider-panel.test.mjs test/proxy.test.mjs test/agent.test.mjs test/mcp.test.mjs test/provider.test.mjs test/subagent.test.mjs test/permission.test.mjs test/auto-approve.test.mjs test/history-window.test.mjs test/question.test.mjs",
     "lint": "eslint ."
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@vscode/vsce": "^3.4.0",
     "eslint": "^10.8.0",
+    "ovsx": "^1.1.1",
     "vscode": "file:test/vscode-mock"
   }
 }
