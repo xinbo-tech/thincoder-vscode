@@ -4,6 +4,21 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.7] — 2026-08-13
+
+### Fixed
+
+- **Settings panel layout collapse**: cards were shrinking into tiny clipped stubs — `.settings-card`'s `overflow: hidden` zeroed its flex min-height inside the `.panel-body` flex column, so tall content got compressed and truncated. Cards now keep their natural height (`flex-shrink: 0`) and the panel scrolls.
+- **Session deletion confirmation**: deleting a session now asks for inline confirmation (native `window.confirm` is inert in the webview sandbox). Previously an irreversible whole-session delete fired with no guard.
+
+### Security
+
+- **SSRF guard for `fetch`** (CLI parity): the VS Code port shipped `fetch` without the private-host check the CLI has. Now blocks loopback / cloud-metadata / RFC1918 / IPv6-private targets, and refuses redirects (a 3xx could bounce a public URL into a private host via native fetch auto-follow).
+
+### Added
+
+- **Tavily structured search** (optional): set `websearch.apiKey` in the shared config.json and `websearch` returns clean JSON via the Tavily API instead of scraping Bing HTML. No key → silent Bing fallback.
+
 ## [0.1.6] — 2026-08-13
 
 ### Fixed
