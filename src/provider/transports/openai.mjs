@@ -44,6 +44,23 @@ export function buildRequest(provider, messages, tools) {
 }
 
 /**
+ * Normalize provider cache fields into DeepSeek-style prompt_cache_hit/miss_tokens.
+ * DeepSeek already returns these; OpenAI/Kimi report the cache hit as
+ * prompt_tokens_details.cached_tokens; a few providers put cached_tokens at the
+ * usage top level. Miss is derived as prompt_tokens - hit when not reported.
+ */
+export function normalizeUsageCache(u) {
+  if (!u || u.prompt_cache_hit_tokens !== undefined) return u
+  const cached = u.prompt_tokens_details?.cached_tokens ?? u.cached_tokens
+  if (cached === undefined) return u
+  u.prompt_cache_hit_tokens = cached
+  if (u.prompt_cache_miss_tokens === undefined && typeof u.prompt_tokens === "number") {
+    u.prompt_cache_miss_tokens = Math.max(0, u.prompt_tokens - cached)
+  }
+  return u
+}
+
+/**
  * Parse OpenAI SSE stream. Returns { content, reasoning, toolCalls, usage, finishReason }.
  * Reads the full response body; calls onToken/onReasoning callbacks per chunk.
  * `signal` (CLI parity, sse.mjs): every chunk checks aborted; additionally the
@@ -71,7 +88,7 @@ export async function parseStream(response, { onToken, onReasoning, signal }) {
       let json
       try { json = JSON.parse(data) } catch { continue }
 
-      if (json.usage) result.usage = json.usage
+      if (json.usage) result.usage = normalizeUsageCache(json.usage)
       const choice = json.choices?.[0]
       if (!choice) continue
       hasChoices = true

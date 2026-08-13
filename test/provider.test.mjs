@@ -72,6 +72,27 @@ describe("OpenAI SSE parsing", () => {
     assert.equal(reasoning.join(""), "Let me think... about this.")
   })
 
+  it("normalizes Kimi/OpenAI-style cached_tokens into prompt_cache_hit/miss_tokens", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const sse = [
+      'data: {"id":"1","choices":[{"delta":{"content":"ok"}}]}\n',
+      'data: {"id":"1","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":10,"total_tokens":1010,"prompt_tokens_details":{"cached_tokens":800}}}\n',
+      "data: [DONE]\n",
+    ]
+    const result = await parseStream(createMockResponse(sse), { onToken: () => {}, onReasoning: () => {} })
+    assert.equal(result.usage.prompt_cache_hit_tokens, 800)
+    assert.equal(result.usage.prompt_cache_miss_tokens, 200) // 1000 - 800
+  })
+
+  it("normalizeUsageCache leaves DeepSeek-style usage untouched and ignores cache-free usage", async () => {
+    const { normalizeUsageCache } = await import("../src/provider/transports/openai.mjs")
+    const ds = { prompt_cache_hit_tokens: 500, prompt_cache_miss_tokens: 500 }
+    assert.deepEqual(normalizeUsageCache({ ...ds }), ds)
+    const plain = { prompt_tokens: 100, completion_tokens: 10 }
+    assert.equal(normalizeUsageCache({ ...plain }).prompt_cache_hit_tokens, undefined)
+  })
+
+
   it("parses tool calls", async () => {
     const { parseStream } = await import("../src/provider/transports/openai.mjs")
 
