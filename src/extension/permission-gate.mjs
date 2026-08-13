@@ -24,6 +24,7 @@ export function permissionGate(panel) {
     // permission prompts for the rest of the running turn.
     if (panel._autoApprove) { resolve(true); return }
     panel._permissionQueue.push({ resolve, toolName })
+    panel._setStatus?.("waiting")
     panel._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
   })
 }

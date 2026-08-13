@@ -34,7 +34,8 @@ export class ChatPanel {
     // it on every invocation because runAgent's startup snapshot cannot change.
     this._autoApprove = false
     this._questionQueue = []  // pending inline question-tool prompts (panel, not native popups)
-    this._statusBar = null
+    this._statusBar = null    // status-bar run indicator (idle/running/waiting)
+    this._turnActive = false  // an agent turn is running (drives the status indicator)
     // The slot number this panel is bound to. Set once when a session is opened/created,
     // then used for ALL reads and writes — we never re-read the shared manifest's active
     // pointer mid-conversation (it can be changed by a concurrently running CLI).
@@ -82,7 +83,41 @@ export class ChatPanel {
       handlePanelMessage(this, msg).catch((e) => console.error("[chat-panel] message handler:", e.message))
     })
 
+    this._initStatusBar()
     this._status()
+  }
+
+  // ─── Status bar (run-state awareness outside the panel) ───
+
+  _initStatusBar() {
+    if (this._statusBar) return
+    this._statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
+    this._statusBar.name = "ThinCoder"
+    this._statusBar.tooltip = "ThinCoder — click to open the chat panel"
+    this._statusBar.command = "thincoder.openChat"
+    this._setStatus("idle")
+    this._statusBar.show()
+  }
+
+  /** running = agent turn active; waiting = permission/question prompt pending. */
+  _setStatus(state) {
+    if (!this._statusBar) return
+    if (state === "running") {
+      this._statusBar.text = "$(sync~spin) ThinCoder"
+      this._statusBar.backgroundColor = undefined
+    } else if (state === "waiting") {
+      this._statusBar.text = "$(warning) ThinCoder: waiting for your input"
+      this._statusBar.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground")
+    } else {
+      this._statusBar.text = "$(hubot) ThinCoder"
+      this._statusBar.backgroundColor = undefined
+    }
+  }
+
+  /** Waiting prompts beat running; without pending prompts, fall back to turn state. */
+  _refreshStatus() {
+    if (this._permissionQueue.length > 0 || this._questionQueue.length > 0) { this._setStatus("waiting"); return }
+    this._setStatus(this._turnActive ? "running" : "idle")
   }
 
   sendMessage(text) {
@@ -97,6 +132,8 @@ export class ChatPanel {
   dispose() {
     closeAllMcp()
     this._abortController?.abort()
+    this._statusBar?.dispose()
+    this._statusBar = null
     this._panel?.dispose()
   }
 

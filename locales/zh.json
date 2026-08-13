@@ -25,6 +25,7 @@
   "msg.copyTitle": "复制消息",
   "msg.copied": "已复制！",
   "msg.loadingOlder": "正在加载更早的消息…",
+  "msg.scrollBottom": "滚动到底部",
   "question.label": "提问",
   "question.mark": "❯",
   "question.placeholder": "输入你的回答…",

@@ -89,6 +89,8 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   saveModelPrefs(panel._context.workspaceState, prefs)
 
   panel._panel.webview.postMessage({ type: "loading", loading: true })
+  panel._turnActive = true
+  panel._setStatus("running")
   panel._abortController?.abort()
   panel._abortController = new AbortController()
 
@@ -141,6 +143,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       // gets dismissed by an accidental click).
       onQuestion: (question, options) => new Promise((resolve) => {
         panel._questionQueue.push({ resolve })
+        panel._setStatus("waiting")
         panel._panel?.webview.postMessage({ type: "question", question, options: options ?? null })
       }),
     }, panel._abortController.signal, () => panel._autoApprove, { mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: collectEditorInjection(cwd) })
@@ -161,6 +164,8 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       panel._panel.webview.postMessage({ type: "error", text: `${e.message || String(e)}`, techInfo })
     }
   } finally {
+    panel._turnActive = false
+    panel._refreshStatus()
     panel._panel.webview.postMessage({ type: "loading", loading: false })
   }
   // Generate session title from first message (after agent completes)

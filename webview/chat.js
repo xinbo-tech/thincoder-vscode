@@ -295,6 +295,10 @@ function renderToolPanels() {
     </div>`
   }).join("")
   panel.style.display = "block"
+  // Follow the stream: the panel is capped at 200px with its own scrollbar —
+  // without this the newest output grows below the fold and looks "blocked
+  // by the bottom" (bug report). Same follow-behavior as messages/reasoning.
+  panel.scrollTop = panel.scrollHeight
   // Wire close buttons
   panel.querySelectorAll(".tool-panel-close").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -635,6 +639,48 @@ document.addEventListener("click", (e) => {
   }
 })
 
+// ─── apply_patch approval preview ────────────────
+
+/**
+ * Render a raw unified diff (apply_patch approval preview) with +/- coloring.
+ * Hunk headers (@@, diff --git, ---/+++) stay neutral; only content lines colored.
+ */
+function renderPatch(patch) {
+  const lines = String(patch || "").split("\n").map((l) => {
+    if (l.startsWith("+") && !l.startsWith("+++")) return { type: "add", text: l }
+    if (l.startsWith("-") && !l.startsWith("---")) return { type: "del", text: l }
+    return { type: "same", text: l }
+  })
+  return renderDiff(lines)
+}
+
+// ─── Scroll-to-bottom button ─────────────────────
+// Lazy history made scrolling back a long trip — a floating button returns to
+// the latest message in one click. Positioned just above the toolbar.
+
+const scrollBottomBtn = document.createElement("button")
+scrollBottomBtn.id = "scroll-bottom-btn"
+scrollBottomBtn.className = "scroll-bottom-btn"
+scrollBottomBtn.type = "button"
+scrollBottomBtn.title = t("msg.scrollBottom")
+scrollBottomBtn.textContent = "↓"
+scrollBottomBtn.addEventListener("click", () => scrollDown(ctx))
+document.getElementById("chat-container").appendChild(scrollBottomBtn)
+
+function positionScrollBottomBtn() {
+  const tb = document.getElementById("toolbar")
+  scrollBottomBtn.style.bottom = (tb ? tb.offsetHeight : 150) + 10 + "px"
+}
+positionScrollBottomBtn()
+window.addEventListener("resize", positionScrollBottomBtn)
+
+function updateScrollBottomVisibility() {
+  const el = ctx.messagesEl
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  const scrollable = el.scrollHeight > el.clientHeight + 40
+  scrollBottomBtn.classList.toggle("visible", scrollable && !nearBottom)
+}
+
 // ─── Lazy history loading ───────────────────────
 
 /** Earliest loaded global history idx (from data-idx buttons), or null if none. */
@@ -758,6 +804,7 @@ function showQuestion(ctx, question, options) {
 // Scroll-back trigger: near the top → fetch the next older page (guarded against
 // double requests; _hasOlder=false means everything is already rendered).
 ctx.messagesEl.addEventListener("scroll", () => {
+  updateScrollBottomVisibility()
   if (!_hasOlder || _loadingOlder) return
   if (ctx.messagesEl.scrollTop > 40) return
   const before = minLoadedIdx(ctx)
@@ -886,7 +933,9 @@ window.addEventListener("message", (e) => {
       el.setAttribute("aria-label", t("perm.wantsTo") + " " + m.tool)
       const argsPreview = m.args ? m.args.slice(0, 150) + (m.args.length > 150 ? "…" : "") : ""
       let diffHtml = ""
-      if (m.diff && m.diff.old !== m.diff.new) {
+      if (m.diff && m.diff.patch) {
+        diffHtml = '<div class="diff-preview"><div class="diff-header">apply_patch</div>' + renderPatch(m.diff.patch) + '</div>'
+      } else if (m.diff && m.diff.old !== m.diff.new) {
         const lines = lineDiff(m.diff.old, m.diff.new)
         diffHtml = '<div class="diff-preview"><div class="diff-header">' + escHtml(m.diff.path) + '</div>' + renderDiff(lines) + '</div>'
       }

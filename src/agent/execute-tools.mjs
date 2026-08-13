@@ -107,8 +107,12 @@ export async function executeToolBatches(agent, { response, history, fullHistory
               newContent = lines.join("\n")
             } else if (toolName === "delete") {
               newContent = "" // deletion — show all as removed
+            } else if (toolName === "apply_patch") {
+              // Unified diff is human-readable as-is — show the raw patch with
+              // +/- coloring in the panel (per-file old/new reconstruction would
+              // need full hunk parsing; the approval goal is visibility, met).
+              diffInfo = { patch: args.patch || "" }
             }
-            // apply_patch — too complex to preview inline, skip diff
             if (newContent !== oldContent) {
               diffInfo = { old: oldContent, new: newContent, path: args.path }
             }

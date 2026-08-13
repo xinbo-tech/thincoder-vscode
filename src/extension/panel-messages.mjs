@@ -62,6 +62,7 @@ export async function handlePanelMessage(panel, msg) {
     case "questionResponse": {
       const entry = panel._questionQueue.shift()
       entry?.resolve(msg.answer ?? null)  // null → tool returns "(user cancelled)"
+      panel._refreshStatus()
       break
     }
     case "setAutoApprove": await panel._setAutoApprove(!!msg.value); break
@@ -75,6 +76,7 @@ export async function handlePanelMessage(panel, msg) {
         panel._panel?.webview.postMessage({ type: "autoApprove", value: true })
       }
       entry?.resolve(msg.approved === "approveAll" ? true : !!msg.approved)
+      panel._refreshStatus()
       break
     }
     case "settings": await panel._pushSettings(); break

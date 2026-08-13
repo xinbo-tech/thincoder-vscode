@@ -25,6 +25,7 @@
   "msg.copyTitle": "Copy message",
   "msg.copied": "Copied!",
   "msg.loadingOlder": "Loading earlier messages…",
+  "msg.scrollBottom": "Scroll to bottom",
   "question.label": "Question",
   "question.mark": "❯",
   "question.placeholder": "Type your answer…",
