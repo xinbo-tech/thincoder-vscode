@@ -174,7 +174,9 @@ function buildSessionDropdown() {
     const delBtn = item.querySelector(".session-delete")
     if (delBtn) delBtn.addEventListener("click", (e) => {
       e.stopPropagation()
-      vscode.postMessage({ type: "deleteSession", slot: s.slot })
+      // Deleting a whole session is irreversible — inline confirmation (a native
+      // window.confirm does not work inside the webview sandbox).
+      showSessionDeleteConfirm(s.slot, s.title)
     })
     ctx.sessionDropdown.appendChild(item)
   }
@@ -185,6 +187,41 @@ function buildSessionDropdown() {
     empty.style.opacity = "0.5"
     ctx.sessionDropdown.appendChild(empty)
   }
+}
+
+/** Inline confirmation popover for session deletion (reuses the AUTO popover style). */
+function showSessionDeleteConfirm(slot, title) {
+  document.querySelector(".auto-confirm")?.remove()
+  document.querySelector(".auto-backdrop")?.remove()
+
+  const backdrop = document.createElement("div")
+  backdrop.className = "auto-backdrop"
+  backdrop.addEventListener("click", () => {
+    backdrop.remove()
+    document.querySelector(".auto-confirm")?.remove()
+  })
+
+  const popover = document.createElement("div")
+  popover.className = "auto-confirm"
+  popover.setAttribute("role", "alertdialog")
+  popover.setAttribute("aria-label", t("session.delete"))
+  // escHtml the title BEFORE interpolation — it lands inside innerHTML.
+  popover.innerHTML = `<div class="auto-confirm-text">${t("session.deleteConfirm", { title: escHtml(title) })}</div>
+    <div class="auto-confirm-actions">
+      <button class="auto-confirm-yes" aria-label="${t("session.delete")}">${t("session.delete")}</button>
+      <button class="auto-confirm-no" aria-label="${t("question.cancel")}">${t("question.cancel")}</button>
+    </div>`
+
+  document.body.appendChild(backdrop)
+  document.body.appendChild(popover)
+  setTimeout(() => popover.querySelector(".auto-confirm-no")?.focus(), 50) // safer default
+
+  const close = () => { popover.remove(); backdrop.remove() }
+  popover.querySelector(".auto-confirm-yes").addEventListener("click", () => {
+    close()
+    vscode.postMessage({ type: "deleteSession", slot })
+  })
+  popover.querySelector(".auto-confirm-no").addEventListener("click", close)
 }
 
 function updateSessionTitle() {

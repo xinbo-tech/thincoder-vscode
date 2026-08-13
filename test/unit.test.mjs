@@ -506,6 +506,13 @@ describe("i18n — locale loading", () => {
     assert.ok(result.includes("Failed"))
   })
 
+  it("session.deleteConfirm interpolates ${title} (session-delete confirmation)", () => {
+    initLocale("en")
+    const result = t("session.deleteConfirm", { title: 'My <b>Session' })
+    assert.ok(result.includes('My <b>Session'), "title interpolated")
+    assert.doesNotMatch(result, /\$\{title\}/, "placeholder consumed, not left literal")
+  })
+
   it("returns key for untranslated string", () => {
     initLocale("en")
     assert.equal(t("nonexistent.key"), "nonexistent.key")
