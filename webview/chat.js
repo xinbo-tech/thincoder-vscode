@@ -2,7 +2,7 @@
  * chat.js — main orchestration: state, events, token handling
  */
 import { md } from "./md.js"
-import { tailTruncate, fmtK, patchLineType } from "./lib.js"
+import { fmtK, patchLineType } from "./lib.js"
 import { renderDiff, lineDiff } from "./diff.js"
 import {
   showWelcome, showBanner, addUser, addAssistantHistory, newBlock,
@@ -64,7 +64,6 @@ let _lastCtxPct = null
 let _planActive = false
 let _subagentMap = {}
 let _goalInfo = null
-let _toolPanels = {}
 // Current live-turn advisor block (in-conversation details element) — advisor
 // output streams here like reasoning instead of the side tool panel.
 let _advisorBlock = null
@@ -75,8 +74,8 @@ let _loadingOlder = false
 // First-run onboarding: shown when no provider is configured; dismissed on skip
 // (stays dismissed for the webview's lifetime, reappears after a reload).
 let _welcomeDismissed = false
-// Panel preview caps (PANEL_PREVIEW_CHARS moved into lib.js tailTruncate's default)
-const PANEL_BLOCK_MAX = 20000
+// Panel preview caps (PANEL_PREVIEW_CHARS / PANEL_BLOCK_MAX retired with the
+// side tool panel — output now renders inline in the tool card / advisor block)
 let _currentTool = null  // name of the tool currently executing (CLI status parity)
 let _llmCalls = 0        // LLM calls this turn (CLI turn-count parity)
 let _turnStart = null    // ms timestamp of the current turn (elapsed parity)
@@ -293,63 +292,13 @@ function renderGoalPanel() {
   panel.style.display = "block"
 }
 
-function renderToolPanels() {
-  const panel = document.getElementById("tool-panels")
-  const entries = Object.entries(_toolPanels)
-  if (entries.length === 0) { panel.style.display = "none"; return }
-  panel.innerHTML = entries.map(([name, data]) => {
-    const age = data.started ? Math.round((Date.now() - data.started) / 1000) + "s ago" : ""
-    // Ordered per-kind lines (think/tool/text) — accumulated, not overwritten
-    // (CLI TUI parity: the emission order and kind styling survive).
-    const blocks = data.blocks ?? [{ kind: "text", text: data.text ?? "" }]
-    const body = blocks.slice(-10)
-      .map((b) => {
-        const kind = b.kind || "text"
-        // text-kind blocks (final review prose) get the same markdown rendering
-        // as the main conversation — **bold**, `code`, tables read naturally
-        // instead of raw markers (CLI TUI parity). md() failure on pathological
-        // input must not blank the whole panel — escHtml fallback.
-        let rendered
-        if (kind === "text") {
-          try { rendered = md(tailTruncate(b.text)) } catch { rendered = escHtml(tailTruncate(b.text)) }
-        } else {
-          rendered = escHtml(tailTruncate(b.text))
-        }
-        return `<div class="tool-panel-line tool-panel-${escHtml(kind)}">${rendered}</div>`
-      })
-      .join("")
-    return `<div class="tool-panel-item">
-      <div class="tool-panel-header">
-        <span class="tool-panel-name">${escHtml(name)}</span>
-        <span class="tool-panel-age">${age}</span>
-        <button class="tool-panel-close" data-name="${escHtml(name)}" aria-label="Close tool panel">✕</button>
-      </div>
-      <div class="tool-panel-body">${body}</div>
-    </div>`
-  }).join("")
-  panel.style.display = "block"
-  // Follow the stream: the panel is capped at 200px with its own scrollbar —
-  // without this the newest output grows below the fold and looks "blocked
-  // by the bottom" (bug report). Same follow-behavior as messages/reasoning.
-  panel.scrollTop = panel.scrollHeight
-  // Wire close buttons
-  panel.querySelectorAll(".tool-panel-close").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      delete _toolPanels[btn.dataset.name]
-      renderToolPanels()
-    })
-  })
-}
-
 function clearPanels() {
   _subagentMap = {}
   _goalInfo = null
-  _toolPanels = {}
   _taskProgress = null
   _taskStatus = null
   document.getElementById("subagent-panel").style.display = "none"
   document.getElementById("goal-panel").style.display = "none"
-  document.getElementById("tool-panels").style.display = "none"
   document.getElementById("task-panel").style.display = "none"
 }
 
@@ -360,13 +309,7 @@ function autoCleanPanels() {
     if (s.status === "done" && s.doneAt && now - s.doneAt > 3000) delete _subagentMap[id]
     if (s.status === "error" && s.doneAt && now - s.doneAt > 5000) delete _subagentMap[id]
   }
-  // Remove tool panels idle >10s — an actively running tool's panel survives
-  // (slow bash/reads must not lose accumulated output).
-  for (const [name, d] of Object.entries(_toolPanels)) {
-    if (d.started && now - d.started > 10000 && name !== _currentTool) delete _toolPanels[name]
-  }
   renderSubagentPanel()
-  renderToolPanels()
   // Refresh elapsed seconds while a turn is running (CLI 1s ticker parity)
   if (_turnStart) renderStatusBar()
 }
@@ -1129,32 +1072,11 @@ window.addEventListener("message", (e) => {
       renderGoalPanel()
       renderStatusBar()
       break
-    case "toolPanel": {
+    case "toolPanel":
       // Advisor streams into an in-conversation details block (like reasoning),
-      // round-tagged and never truncated — NOT the side tool panel.
-      if (m.name === "advisor") { advisorChunk(m); break }
-      // Accumulate per-kind blocks (think/tool/text) instead of overwriting —
-      // same emission contract as the CLI TUI. Same-kind chunks merge; hard
-      // cap per block so a runaway stream cannot balloon the panel.
-      const panel = _toolPanels[m.name] ?? { blocks: [], started: Date.now() }
-      const kind = m.kind ?? "text"
-      const text = String(m.text ?? "")
-      if (text) {
-        const last = panel.blocks[panel.blocks.length - 1]
-        if (last && last.kind === kind) {
-          last.text += text
-          if (last.text.length > PANEL_BLOCK_MAX) last.text = last.text.slice(-PANEL_BLOCK_MAX)
-        } else {
-          panel.blocks.push({ kind, text })
-        }
-        panel.started = Date.now() // refresh activity — long streams must not be reaped mid-stream
-        _toolPanels[m.name] = panel
-      }
-      renderToolPanels()
-      // Cleanup is handled by the autoCleanPanels interval (10s threshold) —
-      // a per-message setTimeout would stack one timer per streamed chunk.
+      // round-tagged and never truncated — NOT a side panel.
+      if (m.name === "advisor") advisorChunk(m)
       break
-    }
   }
 })
 

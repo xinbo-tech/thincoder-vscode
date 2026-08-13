@@ -324,7 +324,7 @@
 
 #panels:empty { display: none; }
 
-#subagent-panel, #goal-panel, #tool-panels, #task-panel {
+#subagent-panel, #goal-panel, #task-panel {
   padding: 4px 14px 6px;
   font-size: 12px;
   max-height: 200px;
@@ -505,18 +505,6 @@
   word-break: break-word;
 }
 
-.tool-panel-close {
-  background: transparent;
-  border: none;
-  color: var(--fg);
-  opacity: 0.3;
-  cursor: pointer;
-  font-size: 12px;
-  padding: 0 4px;
-  margin-left: auto;
-}
-.tool-panel-close:hover { opacity: 0.7; }
-
 .goal-status-badge {
   display: inline-block;
   padding: 1px 8px;
@@ -541,53 +529,6 @@
   color: var(--fg);
   opacity: 0.5;
 }
-
-/* ─── Tool output panels ─────────────────────── */
-
-.tool-panel-item {
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 4px;
-  margin-bottom: 4px;
-}
-
-.tool-panel-item:last-child { border-bottom: none; margin-bottom: 0; }
-
-.tool-panel-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.tool-panel-name {
-  font-weight: 600;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--accent);
-}
-
-.tool-panel-age {
-  font-size: 10px;
-  opacity: 0.5;
-}
-
-.tool-panel-body {
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  opacity: 0.7;
-  line-height: 1.45;
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-/* Advisor progress kinds (CLI TUI parity): thinking / tool progress / text */
-.tool-panel-line { white-space: pre-wrap; }
-.tool-panel-think { color: var(--vscode-descriptionForeground, #9a9a9a); font-style: italic; }
-.tool-panel-tool { color: var(--vscode-charts-blue, #4a9eff); }
-.tool-panel-text { color: inherit; }
 
 /* ─── AUTO confirm popover ───────────────────── */
 
