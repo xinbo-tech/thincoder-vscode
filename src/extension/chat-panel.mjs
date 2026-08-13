@@ -226,34 +226,6 @@ export class ChatPanel {
     this._panel?.webview.postMessage({ type: "historyPage", messages: clean, hasOlder, older })
   }
 
-  /**
-   * Edit a historical user message: load its text into the input box and truncate
-   * the session after it (message + everything after is removed from disk). The user
-   * then edits and resends — a clean "rewrite from here" semantic.
-   */
-  async _editMessage(idx) {
-    const history = this._activeHistory()
-    const m = history[idx]
-    if (!m || (m.type ?? m.role) !== "user" || typeof m.content !== "string") return
-    this._truncateSession(idx)
-    this._panel?.webview.postMessage({ type: "loadDraft", text: stripEditorInjection(m.content) })
-  }
-
-  /** Delete a historical message (and everything after it) from disk + re-render. */
-  async _deleteMessage(idx) {
-    const history = this._activeHistory()
-    if (!history[idx]) return
-    this._truncateSession(idx)
-  }
-
-  /** Persist the truncated lines (machine line reseeded from the human line — user explicitly rewrote history). */
-  _truncateSession(idx) {
-    const history = this._activeHistory()
-    const lines = history.slice(0, idx)
-    this._saveLines(lines, lines, {})
-    this._loadSession()
-  }
-
   async _newSession() {
     // Allocate a fresh slot, bind this panel to it, then load its (empty) content.
     this._slot = newSlot(_cwd())

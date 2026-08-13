@@ -24,7 +24,6 @@
   "msg.user": "你",
   "msg.assistant": "ThinCoder",
   "msg.copy": "复制",
-  "msg.copyTitle": "复制消息",
   "msg.copied": "已复制！",
   "msg.loadingOlder": "正在加载更早的消息…",
   "msg.scrollBottom": "滚动到底部",
@@ -137,9 +136,6 @@
   "paste.images": "已添加 ${count} 张图片",
   "command.prompt": "要做什么？",
   "command.placeholder": "例如：添加一个 README",
-  "msg.editTitle": "编辑此消息（从此处重写）",
-  "msg.deleteTitle": "删除此消息及其后全部内容",
-  "msg.deleteConfirm": "删除此消息及其后的全部内容？",
   "tool": {
     "error": "错误"
   },

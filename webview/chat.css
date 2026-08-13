@@ -17,23 +17,6 @@
   margin-left: 8px;
 }
 
-.msg-copy-btn {
-  float: right;
-  padding: 1px 8px;
-  font-size: 10px;
-  font-weight: 400;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg);
-  opacity: 0;
-  cursor: pointer;
-  transition: opacity 0.15s;
-  font-family: inherit;
-}
-.message.assistant:hover .msg-copy-btn { opacity: 0.45; }
-.msg-copy-btn:hover { opacity: 1 !important; background: var(--hover-bg); }
-
 .message {
   margin-top: 14px;
   max-width: 90%;

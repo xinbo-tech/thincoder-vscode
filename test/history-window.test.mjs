@@ -83,4 +83,34 @@ describe("historyWindow", () => {
     assert.equal(messages[3].timestamp, 42)
     assert.equal(hasOlder, false)
   })
+
+  it("marks turnStart only on assistant messages whose predecessor is a user message", () => {
+    const h = [
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1", tool_calls: [{ id: "t1" }] },  // turn start
+      { role: "tool", tool_call_id: "t1", content: "out" },
+      { role: "assistant", content: "a2" },  // mid-turn continuation
+      { role: "assistant", content: "a3" },  // still mid-turn
+      { role: "user", content: "u2" },
+      { role: "assistant", content: "a4" },  // new turn start
+    ]
+    const { messages } = historyWindow(h, null)
+    const flags = messages.map((m) => m.turnStart)
+    assert.deepEqual(flags, [false, true, false, false, false, false, true])
+  })
+
+  it("turnStart at a page head looks at the RAW predecessor outside the page", () => {
+    const h = []
+    for (let i = 0; i < HISTORY_PAGE_SIZE + 3; i++) {
+      h.push({ role: i % 5 === 0 ? "user" : "assistant", content: `m${i}` })
+    }
+    // first page covers idx 3..52 (total 53, page 50)
+    const first = historyWindow(h, null)
+    assert.equal(first.messages[0].idx, 3)
+    // h[2] is assistant (2%5≠0) — the page head's predecessor lives OUTSIDE the
+    // page and is mid-turn, so the page head must NOT open a label.
+    assert.equal(first.messages[0].turnStart, false, "mid-turn page head does not open a label")
+    // h[5] is user → its successor inside the page is a turn start.
+    assert.equal(first.messages.find((m) => m.idx === 6).turnStart, true)
+  })
 })

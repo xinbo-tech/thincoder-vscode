@@ -251,12 +251,23 @@ export function historyWindow(history, before, pageSize = HISTORY_PAGE_SIZE) {
     if (typeof m?.content !== "string") continue
     const kind = m.type ?? m.role
     if (kind !== "user" && kind !== "assistant" && kind !== "tool") continue
+    // turnStart: an assistant message opens a new turn only when the PREVIOUS
+    // message is a user message (or it is the first message ever). Assistant
+    // segments that follow tool/assistant messages are mid-turn continuations
+    // and must not paint a "❯ ThinCoder:" label (one label per turn).
+    let turnStart = kind === "assistant"
+    if (turnStart && i > 0) {
+      const prev = history[i - 1]
+      const prevKind = prev?.type ?? prev?.role
+      turnStart = prevKind === "user"
+    }
     messages.push({
       kind,
       text: m.content,
       name: m.name ?? null,
       timestamp: m.timestamp ?? null,
       idx: i,
+      turnStart,
     })
   }
   return { messages, hasOlder: start > 0 }

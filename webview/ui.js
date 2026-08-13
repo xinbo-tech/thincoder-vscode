@@ -35,17 +35,14 @@ export function showBanner(ctx, text, keyOk) {
 
 // ─── Messages ──────────────────────────────────
 
-/** Historical user message (idx set) gets edit + delete buttons; live ones don't. */
+/** Historical user message. `idx` (when set) is stored as data-idx on the element
+ *  for lazy-load paging (minLoadedIdx) — no action buttons on messages. */
 export function buildUserMessage(ctx, text, timestamp, idx) {
   const el = document.createElement("div")
   el.className = "message user"
   const ts = timestamp ? fmtTime(new Date(timestamp)) : fmtTime(new Date())
-  const actions = idx === undefined ? "" :
-    `<span class="msg-actions">
-      <button class="msg-edit-btn" data-idx="${idx}" title="${t("msg.editTitle")}">✎</button>
-      <button class="msg-del-btn" data-idx="${idx}" title="${t("msg.deleteTitle")}">✕</button>
-    </span>`
-  el.innerHTML = `<div class="msg-label">❯ ${t("msg.user")}: <span class="msg-time">${ts}</span>${actions}</div><div class="bubble">${mdInline(esc(text))}</div>`
+  if (idx !== undefined) el.dataset.idx = String(idx)
+  el.innerHTML = `<div class="msg-label">❯ ${t("msg.user")}: <span class="msg-time">${ts}</span></div><div class="bubble">${mdInline(esc(text))}</div>`
   return el
 }
 
@@ -55,13 +52,16 @@ export function addUser(ctx, text, timestamp, idx) {
   scrollDown(ctx)
 }
 
-/** Historical assistant message (idx set) gets a delete button; live ones don't. */
-export function buildAssistantHistory(ctx, text, timestamp, idx) {
+/** Historical assistant message. The "❯ ThinCoder:" label is painted ONLY when
+ *  `turnStart` (one label per turn — CLI parity); mid-turn segments render the
+ *  content alone. `idx` stored as data-idx for lazy-load paging. */
+export function buildAssistantHistory(ctx, text, timestamp, idx, turnStart = true) {
   const el = document.createElement("div")
   el.className = "message assistant"
   const ts = timestamp ? fmtTime(new Date(timestamp)) : ""
-  const actions = idx === undefined ? "" : `<button class="msg-del-btn" data-idx="${idx}" title="${t("msg.deleteTitle")}">✕</button>`
-  el.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}: ${ts ? `<span class="msg-time">${ts}</span>` : ""}<button class="msg-copy-btn" title="${t("msg.copyTitle")}">${t("msg.copy")}</button>${actions}</div><div class="bubble content">${md(text)}</div>`
+  if (idx !== undefined) el.dataset.idx = String(idx)
+  const label = turnStart ? `<div class="msg-label">❯ ${t("msg.assistant")}: ${ts ? `<span class="msg-time">${ts}</span>` : ""}</div>` : ""
+  el.innerHTML = `${label}<div class="bubble content">${md(text)}</div>`
   return el
 }
 
@@ -209,12 +209,12 @@ export function buildToolHistory(ctx, name, text, idx) {
   h.tabIndex = 0
   h.setAttribute("role", "button")
   h.setAttribute("aria-expanded", "false")
+  if (idx !== undefined) c.dataset.idx = String(idx) // lazy-load paging (minLoadedIdx)
   h.innerHTML =
     `<span class="tool-call-icon"></span>` +
     `<span class="tool-call-name">${esc(name)}</span>` +
     `<span class="tool-call-status" style="color:#4ec9b0">${t("tool.done")}</span>` +
-    (resultSummary(text) ? `<span class="tool-call-summary">→ ${esc(resultSummary(text))}</span>` : "") +
-    (idx !== undefined ? `<button class="msg-del-btn" data-idx="${idx}" title="${t("msg.deleteTitle")}">✕</button>` : "")
+    (resultSummary(text) ? `<span class="tool-call-summary">→ ${esc(resultSummary(text))}</span>` : "")
 
   const b = document.createElement("div")
   b.className = "tool-call-body"
@@ -222,8 +222,7 @@ export function buildToolHistory(ctx, name, text, idx) {
   b.setAttribute("aria-label", `Output of ${name}`)
   b.textContent = text || ""
 
-  h.addEventListener("click", (e) => {
-    if (e.target.closest(".msg-del-btn")) return
+  h.addEventListener("click", () => {
     h.querySelector(".tool-call-icon").classList.toggle("open")
     b.classList.toggle("open")
     h.setAttribute("aria-expanded", String(b.classList.contains("open")))
@@ -247,7 +246,7 @@ export function addToolHistory(ctx, name, text, idx) {
 export function buildHistoryMessage(ctx, msg) {
   if (!msg) return null
   if (msg.kind === "user") return buildUserMessage(ctx, msg.text, msg.timestamp, msg.idx)
-  if (msg.kind === "assistant") return buildAssistantHistory(ctx, msg.text, msg.timestamp, msg.idx)
+  if (msg.kind === "assistant") return buildAssistantHistory(ctx, msg.text, msg.timestamp, msg.idx, msg.turnStart !== false)
   if (msg.kind === "tool") return buildToolHistory(ctx, msg.name ?? "tool", msg.text, msg.idx)
   return null
 }

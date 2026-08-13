@@ -128,22 +128,6 @@ const _panelTimer = setInterval(autoCleanPanels, 2000)
 // teardown/dispose path cannot leak the interval.
 window.addEventListener("unload", () => clearInterval(_panelTimer))
 
-// ─── Historical message edit / delete (delegated — buttons carry data-idx) ──
-
-ctx.messagesEl.addEventListener("click", (e) => {
-  const editBtn = e.target.closest(".msg-edit-btn")
-  if (editBtn) {
-    vscode.postMessage({ type: "editMessage", idx: Number(editBtn.dataset.idx) })
-    return
-  }
-  const delBtn = e.target.closest(".msg-del-btn")
-  if (delBtn) {
-    const idx = Number(delBtn.dataset.idx)
-    const ok = window.confirm(t("msg.deleteConfirm") || "Delete this message and everything after it?")
-    if (ok) vscode.postMessage({ type: "deleteMessage", idx })
-  }
-})
-
 document.getElementById("new-session-btn").addEventListener("click", () => vscode.postMessage({ type: "newSession" }))
 
 ctx.sessionSelector.addEventListener("click", (e) => {
@@ -803,10 +787,7 @@ function applyHistoryPage(ctx, m) {
   for (const msg of m.messages || []) {
     const el = buildHistoryMessage(ctx, msg)
     if (!el) continue
-    if (msg.kind === "assistant") {
-      attachCopyButtons(el)
-      wireMsgCopyButton(el)
-    }
+    if (msg.kind === "assistant") attachCopyButtons(el) // code-block copy buttons only
     frag.appendChild(el)
   }
   const anchor = ctx.messagesEl.querySelector(".message, .tool-call")
@@ -917,17 +898,8 @@ window.addEventListener("message", (e) => {
     case "userMessage":      addUser(ctx, m.text, m.timestamp, m.idx); break
     case "assistantMessage": addAssistantHistory(ctx, m.text, m.timestamp, m.idx);
       attachCopyButtons(ctx.messagesEl.lastElementChild);
-      wireMsgCopyButton(ctx.messagesEl.lastElementChild);
       break
     case "token":            onToken(m.text); break
-    case "loadDraft": {
-      // Historical message edit: text was loaded back into the input box
-      ctx.inputEl.value = m.text ?? ""
-      ctx.inputEl.style.height = "auto"
-      ctx.inputEl.style.height = Math.min(ctx.inputEl.scrollHeight, 150) + "px"
-      ctx.inputEl.focus()
-      break
-    }
     case "reasoning":        onReasoning(m.text); break
     case "toolCall":         _currentTool = m.name; addTool(ctx, m.name, m.args, m.id); renderStatusBar(); break
     case "toolResult":       finishTool(ctx, m.name, m.id, m.text); _currentTool = null; renderStatusBar(); break
@@ -1285,19 +1257,6 @@ function attachCopyButtons(container) {
     })
     block.appendChild(btn)
   }
-}
-
-/** Wire the copy-message button in an assistant message element */
-function wireMsgCopyButton(el) {
-  const btn = el?.querySelector(".msg-copy-btn")
-  if (!btn) return
-  btn.addEventListener("click", async () => {
-    const bubble = el.querySelector(".bubble")
-    const text = bubble?.textContent || ""
-    try { await navigator.clipboard.writeText(text) } catch { /* */ }
-    btn.textContent = t("msg.copied")
-    setTimeout(() => { btn.textContent = t("msg.copy") }, 2000)
-  })
 }
 
 // ─── i18n DOM updates ──────────────────────────

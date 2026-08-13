@@ -50,8 +50,6 @@ export async function handlePanelMessage(panel, msg) {
       break
     }
     case "deleteSession": await panel._deleteSession(msg.slot); break
-    case "editMessage": await panel._editMessage(msg.idx); break
-    case "deleteMessage": await panel._deleteMessage(msg.idx); break
     case "retry": {
       const history = panel._activeHistory()
       const lastUser = [...history].reverse().find((m) => (m.type ?? m.role) === "user")

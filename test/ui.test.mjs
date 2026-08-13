@@ -57,42 +57,44 @@ describe("buildUserMessage", () => {
     assert.match(el.innerHTML, /hello &lt;b&gt;/) // esc before mdInline
   })
 
-  it("historical message (idx set) gets edit + delete buttons", () => {
+  it("historical message carries data-idx on the element (lazy paging) — no action buttons", () => {
     const el = buildUserMessage(ctx(), "hi", undefined, 3)
-    assert.match(el.innerHTML, /msg-edit-btn/)
-    assert.match(el.innerHTML, /data-idx="3"/)
-    assert.match(el.innerHTML, /msg-del-btn/)
+    assert.equal(el.dataset.idx, "3")
+    assert.doesNotMatch(el.innerHTML, /msg-edit-btn|msg-del-btn|msg-copy-btn/)
   })
 
-  it("live message (no idx) has no action buttons", () => {
+  it("live message (no idx) has no data-idx and no action buttons", () => {
     const el = buildUserMessage(ctx(), "hi", undefined, undefined)
-    assert.doesNotMatch(el.innerHTML, /msg-edit-btn|msg-del-btn/)
+    assert.equal(el.dataset.idx, undefined)
+    assert.doesNotMatch(el.innerHTML, /msg-edit-btn|msg-del-btn|msg-copy-btn/)
   })
 })
 
 describe("buildAssistantHistory", () => {
-  it("renders ThinCoder label, copy button, and markdown content", () => {
-    const el = buildAssistantHistory(ctx(), "**bold**", undefined, undefined)
+  it("renders ThinCoder label and markdown content (turn start)", () => {
+    const el = buildAssistantHistory(ctx(), "**bold**", undefined, undefined, true)
     assert.match(el.innerHTML, /ThinCoder:/)
-    assert.match(el.innerHTML, /msg-copy-btn/)
+    assert.doesNotMatch(el.innerHTML, /msg-copy-btn|msg-del-btn/)
     assert.match(el.innerHTML, /<strong>bold<\/strong>/)
   })
 
-  it("historical assistant message (idx) gets a delete button", () => {
-    const el = buildAssistantHistory(ctx(), "x", undefined, 5)
-    assert.match(el.innerHTML, /msg-del-btn/)
-    assert.match(el.innerHTML, /data-idx="5"/)
+  it("mid-turn segment (turnStart=false) renders NO label — one label per turn", () => {
+    const el = buildAssistantHistory(ctx(), "continuation", undefined, 5, false)
+    assert.doesNotMatch(el.innerHTML, /ThinCoder:/)
+    assert.equal(el.dataset.idx, "5") // data-idx on the element for paging
+    assert.match(el.innerHTML, /continuation/)
   })
 })
 
 describe("buildToolHistory", () => {
-  it("renders a collapsed tool card with name, done status, summary, and delete", () => {
+  it("renders a collapsed tool card with name, done status, and summary — no delete button", () => {
     const el = buildToolHistory(ctx(), "bash", "ls\napp.js", 7)
     assert.match(el.innerHTML, /tool-call-name/)
     assert.match(el.innerHTML, /bash/)
     assert.match(el.innerHTML, /app\.js/) // summary (last line)
-    assert.match(el.innerHTML, /data-idx="7"/)
+    assert.equal(el.dataset.idx, "7")
     assert.match(el.innerHTML, /aria-expanded="false"/)
+    assert.doesNotMatch(el.innerHTML, /msg-del-btn/)
   })
 })
 
