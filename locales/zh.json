@@ -95,6 +95,8 @@
   "settings.proxyWeb": "Web 工具（websearch/fetch）",
   "settings.proxyModel": "模型请求（proxy: true 的 provider）",
   "settings.proxyTest": "测试连接",
+  "settings.notConfigured": "未配置",
+  "settings.proxyRow": "代理",
   "settings.proxyRowTitle": "该 provider 的模型请求走代理（需全局 proxy.model 开启）",
   "settings.indexSection": "语义索引",
   "settings.indexBuild": "构建索引",

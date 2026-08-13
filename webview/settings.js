@@ -57,7 +57,7 @@ export function initSettings({ onClose }) {
     const row = document.getElementById("rowline-" + name)
     if (!row) return
     const label = _providerStatus.labels?.[name] || PROVIDER_LABELS[name] || name
-    row.innerHTML = `<span class="key-label">${escHtml(label)}</span>
+    row.innerHTML = `<span class="prov-name">${escHtml(label)}</span>
       <input id="input-${name}" type="password" placeholder="sk-..." style="flex:1;margin:0 8px;"
         onkeydown="if(event.key==='Enter')window._saveKey('${name}')">
       <button class="key-btn" onclick="window._saveKey('${name}', this)">${t("settings.save")}</button>
@@ -236,40 +236,44 @@ function buildSettings() {
   const vscode = window._vscode
 
   let html = ""
-  // ─── Providers section: two-line rows, proxy checkbox, Key/− buttons, [+ Add] form ───
-  html += `<h4 class="settings-section-title">${t("settings.providersSection")}</h4>`
+
+  // ─── Providers card ───
+  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.providersSection")}</h4><div class="settings-card-body">`
   html += `<div id="prov-list">`
   for (const [name, s0] of Object.entries(ps)) {
     const label = _providerStatus.labels?.[name] || PROVIDER_LABELS[name] || name
-    const active = !!s0.isActive // active provider cannot be removed (CLI parity)
+    const active = !!s0.isActive
+    const configured = !!s0.configured
     html += `<div class="prov-row" id="prov-${escHtml(name)}">
-      <div class="key-row" id="rowline-${escHtml(name)}">
-        <span class="key-label">${escHtml(label)}</span>
-        <span class="key-status ${s0.configured ? "ok" : ""}">${s0.configured ? s0.masked : "—"}</span>
-        <label class="prov-proxy" title="${t("settings.proxyRowTitle")}">
-          <input type="checkbox" ${s0.proxy ? "checked" : ""} onchange="window._setProviderProxy('${escHtml(name)}', this.checked)">
-          proxy
-        </label>
-        <button class="key-btn" onclick="window._editKey('${escHtml(name)}')">${s0.configured ? t("settings.setKey") : t("settings.addKey")}</button>
-        <button class="key-btn del-key" onclick="window._removeProvider('${escHtml(name)}', this)" ${active ? "disabled" : ""} title="${t("settings.remove")}">−</button>
+      <div class="prov-main" id="rowline-${escHtml(name)}">
+        <span class="prov-dot ${configured ? "ok" : ""}"></span>
+        <span class="prov-name">${escHtml(label)}</span>
+        <span class="key-status ${configured ? "ok" : ""}">${configured ? escHtml(s0.masked) : t("settings.notConfigured")}</span>
+        <span class="prov-actions">
+          <button class="key-btn" onclick="window._editKey('${escHtml(name)}')">${configured ? t("settings.setKey") : t("settings.addKey")}</button>
+          <button class="key-btn del-key" onclick="window._removeProvider('${escHtml(name)}', this)" ${active ? "disabled" : ""} title="${t("settings.remove")}">−</button>
+        </span>
       </div>
-      <div class="prov-sub">${escHtml(s0.model || "")}${s0.baseURL ? ` · ${escHtml(s0.baseURL)}` : ""}</div>
+      <div class="prov-sub">
+        <span class="prov-model">${escHtml(s0.model || "")}${s0.baseURL ? ` · ${escHtml(s0.baseURL)}` : ""}</span>
+        <label class="switch" title="${t("settings.proxyRowTitle")}"><input type="checkbox" ${s0.proxy ? "checked" : ""} onchange="window._setProviderProxy('${escHtml(name)}', this.checked)"> ${t("settings.proxyRow")}</label>
+      </div>
     </div>`
   }
-  html += `<button id="prov-add-btn" class="key-btn" style="margin-top:6px" onclick="window._toggleAddForm(true)">${t("settings.addProvider")}</button>`
+  html += `<button id="prov-add-btn" class="key-btn" onclick="window._toggleAddForm(true)">${t("settings.addProvider")}</button>`
   html += `</div>`
 
   // [+ Add] form (hidden until toggled): preset select or custom fields
   const presets = _providerStatus.presets || []
-  html += `<div id="prov-add-form" style="display:none;margin-top:8px">
-    <h4 class="settings-section-title">${t("settings.addProviderTitle")}</h4>
+  html += `<div id="prov-add-form" style="display:none">
+    <div class="settings-subtitle">${t("settings.addProviderTitle")}</div>
     <div class="key-field"><label>${t("settings.presetChoice")}</label>
       <select id="pa-type" onchange="window._paTypeChanged()">
         ${presets.map((p) => `<option value="${escHtml(p.name)}">${escHtml(p.name)} — ${escHtml(p.desc)} (${escHtml(p.model)})</option>`).join("")}
         <option value="custom">${t("settings.customChoice")}</option>
       </select>
     </div>
-    <div id="pa-preset-info" class="prov-sub" style="padding:2px 0"></div>
+    <div id="pa-preset-info" class="prov-model" style="padding:2px 0"></div>
     <div id="pa-custom-fields" style="display:none">
       <div class="key-field"><label>${t("settings.providerName")}</label><input id="pa-name" placeholder="my-provider"></div>
       <div class="key-field"><label>${t("settings.baseUrl")}</label><input id="pa-url" placeholder="https://api.example.com/v1"></div>
@@ -282,96 +286,92 @@ function buildSettings() {
     <button id="pa-save-btn" class="key-btn">${t("settings.save")}</button>
     <button id="pa-cancel-btn" class="key-btn">${t("settings.cancel")}</button>
   </div>`
+  html += `</div></section>`
 
-  // MCP section
-  html += `<div class="settings-sep"></div>
-    <h4 class="settings-section-title">${t("settings.mcpSection")}</h4>
-    <div id="mcp-list"></div>
-    <button id="mcp-add-btn" class="key-btn" style="margin-top:6px">${t("settings.mcpAdd")}</button>
-    <div id="mcp-form" style="display:none;margin-top:8px">
-      <div class="key-field"><label>${t("settings.mcp.name")}</label><input id="mcp-name" placeholder="my-server"></div>
-      <div class="key-field"><label>${t("settings.mcp.type")}</label><select id="mcp-type"><option value="stdio">${t("settings.mcpStdio")}</option><option value="http">${t("settings.mcpHttp")}</option><option value="ws">${t("settings.mcpWs")}</option></select></div>
-      <div id="mcp-stdio-fields">
-        <div class="key-field"><label>${t("settings.mcp.command")}</label><input id="mcp-command" placeholder="npx"></div>
-        <div class="key-field"><label>${t("settings.mcp.args")}</label><input id="mcp-args" placeholder="-y @modelcontextprotocol/server-filesystem /path"></div>
-        <div class="key-field"><label>${t("settings.mcp.env")}</label><input id="mcp-env" placeholder="KEY=value KEY2=value2 (space-separated)"></div>
-      </div>
-      <div id="mcp-http-fields" style="display:none">
-        <div class="key-field"><label>${t("settings.mcp.url")}</label><input id="mcp-url" placeholder="https://example.com/mcp"></div>
-        <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
-      </div>
-      <div id="mcp-ws-fields" style="display:none">
-        <div class="key-field"><label>${t("settings.mcp.wsUrl")}</label><input id="mcp-ws-url" placeholder="wss://example.com/mcp"></div>
-        <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-ws-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
-      </div>
-      <button id="mcp-save-btn" class="key-btn">${t("settings.save")}</button>
-      <button id="mcp-cancel-btn" class="key-btn">${t("settings.cancel")}</button>
-    </div>`
+  // ─── MCP card ───
+  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.mcpSection")}</h4><div class="settings-card-body">`
+  html += `<div id="mcp-list"></div>`
+  html += `<button id="mcp-add-btn" class="key-btn">${t("settings.mcpAdd")}</button>`
+  html += `<div id="mcp-form" style="display:none">
+    <div class="key-field"><label>${t("settings.mcp.name")}</label><input id="mcp-name" placeholder="my-server"></div>
+    <div class="key-field"><label>${t("settings.mcp.type")}</label><select id="mcp-type"><option value="stdio">${t("settings.mcpStdio")}</option><option value="http">${t("settings.mcpHttp")}</option><option value="ws">${t("settings.mcpWs")}</option></select></div>
+    <div id="mcp-stdio-fields">
+      <div class="key-field"><label>${t("settings.mcp.command")}</label><input id="mcp-command" placeholder="npx"></div>
+      <div class="key-field"><label>${t("settings.mcp.args")}</label><input id="mcp-args" placeholder="-y @modelcontextprotocol/server-filesystem /path"></div>
+      <div class="key-field"><label>${t("settings.mcp.env")}</label><input id="mcp-env" placeholder="KEY=value KEY2=value2 (space-separated)"></div>
+    </div>
+    <div id="mcp-http-fields" style="display:none">
+      <div class="key-field"><label>${t("settings.mcp.url")}</label><input id="mcp-url" placeholder="https://example.com/mcp"></div>
+      <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
+    </div>
+    <div id="mcp-ws-fields" style="display:none">
+      <div class="key-field"><label>${t("settings.mcp.wsUrl")}</label><input id="mcp-ws-url" placeholder="wss://example.com/mcp"></div>
+      <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-ws-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
+    </div>
+    <button id="mcp-save-btn" class="key-btn">${t("settings.save")}</button>
+    <button id="mcp-cancel-btn" class="key-btn">${t("settings.cancel")}</button>
+  </div>`
+  html += `</div></section>`
 
-    // Semantic index section
-    const embedConfigured = _indexStatus?.hasEmbedder || false
-    html += `<div class="settings-sep"></div>
-      <h4 class="settings-section-title">${t("settings.indexSection") || "Semantic Index"}</h4>
-      <div class="key-row" id="row-embed">
-        <span class="key-label">${t("settings.embeddingLabel")}</span>
-        <span class="key-status ${embedConfigured ? "ok" : ""}" id="status-embed">${embedConfigured ? "****" : "—"}</span>
-        ${embedConfigured
-          ? `<button class="key-btn" onclick="window._editEmbedKey()">${t("settings.changeKey")}</button>
-             <button class="key-btn del-key" onclick="window._delEmbedKey(this)">✕</button>`
-          : `<button class="key-btn" onclick="window._editEmbedKey()">${t("settings.addKey")}</button>`}
-      </div>
-      <div id="index-status" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>
-      <button id="index-build-btn" class="key-btn" style="margin-top:4px">${t("settings.indexBuild") || "Build Index"}</button>`
+  // ─── Semantic index card ───
+  const embedConfigured = _indexStatus?.hasEmbedder || false
+  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.indexSection") || "Semantic Index"}</h4><div class="settings-card-body">`
+  html += `<div class="key-row" id="row-embed">
+    <span class="key-label">${t("settings.embeddingLabel")}</span>
+    <span class="key-status ${embedConfigured ? "ok" : ""}" id="status-embed">${embedConfigured ? "****" : "—"}</span>
+    ${embedConfigured
+      ? `<button class="key-btn" onclick="window._editEmbedKey()">${t("settings.changeKey")}</button>
+         <button class="key-btn del-key" onclick="window._delEmbedKey(this)">✕</button>`
+      : `<button class="key-btn" onclick="window._editEmbedKey()">${t("settings.addKey")}</button>`}
+  </div>
+  <div id="index-status" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>
+  <button id="index-build-btn" class="key-btn">${t("settings.indexBuild") || "Build Index"}</button>`
+  html += `</div></section>`
 
-    // Agent / Advisor settings section
-    const as = _agentSettings || {}
-    const adv = as.advisor || {}
-    html += `<div class="settings-sep"></div>
-      <h4 class="settings-section-title">${t("settings.agentSection")}</h4>
-      <div class="key-field"><label title="${t("settings.maxTurnsHelp")}">${t("settings.maxTurns")}</label><input id="ag-maxturns" type="number" min="1" value="${as.maxTurns ?? 100}"></div>
-      <div class="key-field"><label title="${t("settings.subagentTurnsHelp")}">${t("settings.subagentTurns")}</label><input id="ag-subturns" type="number" min="1" value="${as.subagentTurns ?? 100}"></div>
-      <h4 class="settings-section-title">${t("settings.submodelSection")}</h4>
-      <div class="key-field"><label title="${t("settings.submodelHelp")}">${t("settings.submodelGlobal")}</label><input id="ag-submodel-global" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModel || "")}"></div>
-      ${["explore", "plan", "coder", "eng-coder"].map((role) => `
-        <div class="key-field"><label title="${t("settings.submodelHelp")}">${role}</label><input id="ag-submodel-${role}" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModels?.[role] || "")}"></div>`).join("")}
-      <div class="key-field"><label title="${t("settings.compactThresholdHelp")}">${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>
-      <div class="key-row"><span class="key-label" title="${t("settings.verifyGuardHelp")}">${t("settings.verifyGuard")}</span>
-        <input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}></div>
-      <h4 class="settings-section-title">${t("settings.advisorSection")}</h4>
-      <div class="key-row"><span class="key-label" title="${t("settings.advisorEnabledHelp")}">${t("settings.advisorEnabled")}</span>
-        <input type="checkbox" id="adv-enabled" ${adv.enabled ? "checked" : ""}></div>
-      <div class="key-row"><span class="key-label" title="${t("settings.advisorGuardHelp")}">${t("settings.advisorGuard")}</span>
-        <input type="checkbox" id="adv-guard" ${adv.guard !== false ? "checked" : ""}></div>
-      <div class="key-field"><label title="${t("settings.advisorProviderHelp")}">${t("settings.advisorProvider")}</label><input id="adv-provider" placeholder="deepseek" value="${escHtml(adv.provider || "")}"></div>
-      <div class="key-field"><label title="${t("settings.advisorModelHelp")}">${t("settings.advisorModel")}</label><input id="adv-model" placeholder="deepseek-chat" value="${escHtml(adv.model || "")}"></div>
-      <button id="ag-save-btn" class="key-btn" style="margin-top:6px">${t("settings.save")}</button>`
+  // ─── Agent / Advisor card ───
+  const as = _agentSettings || {}
+  const adv = as.advisor || {}
+  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.agentSection")}</h4><div class="settings-card-body">`
+  html += `<div class="key-field"><label title="${t("settings.maxTurnsHelp")}">${t("settings.maxTurns")}</label><input id="ag-maxturns" type="number" min="1" value="${as.maxTurns ?? 100}"></div>`
+  html += `<div class="key-field"><label title="${t("settings.subagentTurnsHelp")}">${t("settings.subagentTurns")}</label><input id="ag-subturns" type="number" min="1" value="${as.subagentTurns ?? 100}"></div>`
+  html += `<div class="settings-subtitle">${t("settings.submodelSection")}</div>`
+  html += `<div class="key-field"><label title="${t("settings.submodelHelp")}">${t("settings.submodelGlobal")}</label><input id="ag-submodel-global" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModel || "")}"></div>`
+  html += `${["explore", "plan", "coder", "eng-coder"].map((role) => `
+    <div class="key-field"><label title="${t("settings.submodelHelp")}">${role}</label><input id="ag-submodel-${role}" placeholder="${t("settings.submodelInherit")}" value="${escHtml(as.subagentModels?.[role] || "")}"></div>`).join("")}`
+  html += `<div class="key-field"><label title="${t("settings.compactThresholdHelp")}">${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>`
+  html += `<label class="switch" title="${t("settings.verifyGuardHelp")}"><input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}> ${t("settings.verifyGuard")}</label>`
+  html += `<div class="settings-subtitle">${t("settings.advisorSection")}</div>`
+  html += `<label class="switch" title="${t("settings.advisorEnabledHelp")}"><input type="checkbox" id="adv-enabled" ${adv.enabled ? "checked" : ""}> ${t("settings.advisorEnabled")}</label>`
+  html += `<label class="switch" title="${t("settings.advisorGuardHelp")}"><input type="checkbox" id="adv-guard" ${adv.guard !== false ? "checked" : ""}> ${t("settings.advisorGuard")}</label>`
+  html += `<div class="key-field"><label title="${t("settings.advisorProviderHelp")}">${t("settings.advisorProvider")}</label><input id="adv-provider" placeholder="deepseek" value="${escHtml(adv.provider || "")}"></div>`
+  html += `<div class="key-field"><label title="${t("settings.advisorModelHelp")}">${t("settings.advisorModel")}</label><input id="adv-model" placeholder="deepseek-chat" value="${escHtml(adv.model || "")}"></div>`
+  html += `<button id="ag-save-btn" class="key-btn">${t("settings.save")}</button>`
+  html += `</div></section>`
 
-    // Proxy section
-    const px = _proxySettings || {}
-    html += `<div class="settings-sep"></div>
-      <h4 class="settings-section-title">${t("settings.proxySection")}</h4>
-      <div class="key-field"><label title="${t("settings.proxyUriHelp")}">${t("settings.proxyUri")}</label><input id="px-uri" placeholder="http://127.0.0.1:7890" value="${escHtml(px.uri || "")}"></div>
-      <div class="key-row"><span class="key-label" title="${t("settings.proxyWebHelp")}">${t("settings.proxyWeb")}</span>
-        <input type="checkbox" id="px-web" ${px.web !== false ? "checked" : ""}></div>
-      <div class="key-row"><span class="key-label" title="${t("settings.proxyModelHelp")}">${t("settings.proxyModel")}</span>
-        <input type="checkbox" id="px-model" ${px.model ? "checked" : ""}></div>
-      <button id="px-save-btn" class="key-btn" style="margin-top:4px">${t("settings.save")}</button>
-      <button id="px-test-btn" class="key-btn" style="margin-top:4px">${t("settings.proxyTest")}</button>
-      <div id="px-test-result" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>
-      <div class="settings-sep"></div>
-      <h4 class="settings-section-title">${t("settings.shellSection")}</h4>
-      ${(() => {
-        const cands = _shellCandidates || []
-        // Custom path active when config.shell is set and not among the candidates
-        const shellIsCustom = _shellValue !== null && !cands.some((c) => (c.value ?? null) === _shellValue)
-        return `
-      <div class="key-field"><label title="${t("settings.shellHelp")}">${t("settings.shellSelect")}</label><select id="sh-select">
-        ${cands.map((c) => `<option value="${escHtml(c.value || "")}" ${!shellIsCustom && (c.value ?? null) === _shellValue ? "selected" : ""}>${escHtml(c.name)}</option>`).join("")}
-        <option value="__custom__" ${shellIsCustom ? "selected" : ""}>${t("settings.shellCustom")}</option>
-      </select></div>
-      <div class="key-field"><label>${t("settings.shellPath")}</label><input id="sh-custom" placeholder="C:\\Program Files\\Git\\bin\\bash.exe" value="${shellIsCustom ? escHtml(_shellValue || "") : ""}" ${shellIsCustom ? "" : "disabled"}></div>
-      <button id="sh-save-btn" class="key-btn" style="margin-top:4px">${t("settings.save")}</button>`
-      })()}`
+  // ─── Proxy card ───
+  const px = _proxySettings || {}
+  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.proxySection")}</h4><div class="settings-card-body">`
+  html += `<div class="key-field"><label title="${t("settings.proxyUriHelp")}">${t("settings.proxyUri")}</label><input id="px-uri" placeholder="http://127.0.0.1:7890" value="${escHtml(px.uri || "")}"></div>`
+  html += `<label class="switch" title="${t("settings.proxyWebHelp")}"><input type="checkbox" id="px-web" ${px.web !== false ? "checked" : ""}> ${t("settings.proxyWeb")}</label>`
+  html += `<label class="switch" title="${t("settings.proxyModelHelp")}"><input type="checkbox" id="px-model" ${px.model ? "checked" : ""}> ${t("settings.proxyModel")}</label>`
+  html += `<div><button id="px-save-btn" class="key-btn">${t("settings.save")}</button> <button id="px-test-btn" class="key-btn">${t("settings.proxyTest")}</button></div>`
+  html += `<div id="px-test-result" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>`
+  html += `</div></section>`
+
+  // ─── Shell card ───
+  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.shellSection")}</h4><div class="settings-card-body">`
+  html += `${(() => {
+    const cands = _shellCandidates || []
+    const shellIsCustom = _shellValue !== null && !cands.some((c) => (c.value ?? null) === _shellValue)
+    return `
+    <div class="key-field"><label title="${t("settings.shellHelp")}">${t("settings.shellSelect")}</label><select id="sh-select">
+      ${cands.map((c) => `<option value="${escHtml(c.value || "")}" ${!shellIsCustom && (c.value ?? null) === _shellValue ? "selected" : ""}>${escHtml(c.name)}</option>`).join("")}
+      <option value="__custom__" ${shellIsCustom ? "selected" : ""}>${t("settings.shellCustom")}</option>
+    </select></div>
+    <div class="key-field"><label>${t("settings.shellPath")}</label><input id="sh-custom" placeholder="C:\\Program Files\\Git\\bin\\bash.exe" value="${shellIsCustom ? escHtml(_shellValue || "") : ""}" ${shellIsCustom ? "" : "disabled"}></div>
+    <button id="sh-save-btn" class="key-btn">${t("settings.save")}</button>`
+  })()}`
+  html += `</div></section>`
 
   body.innerHTML = html
 
