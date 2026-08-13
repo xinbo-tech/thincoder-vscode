@@ -6,6 +6,18 @@
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 
+
+// ─── CLI parity constants ────────────────────────────────────────
+
+describe("provider parity constants", () => {
+  it("FETCH_TIMEOUT_MS is 10 minutes (CLI parity — 2 minutes aborted real requests)", async () => {
+    // Regression: VS Code had 120_000 while the CLI ships 600_000 everywhere
+    // (core/anthropic/google). Reasoning models exceed 2 minutes on long contexts
+    // and the panel showed "The operation was aborted due to timeout".
+    const { FETCH_TIMEOUT_MS } = await import("../src/provider.mjs")
+    assert.equal(FETCH_TIMEOUT_MS, 600_000)
+  })
+})
 // ─── OpenAI format parser ───────────────────────────────────────
 
 describe("OpenAI SSE parsing", () => {

@@ -14,7 +14,12 @@ import * as openaiTransport from "./provider/transports/openai.mjs"
 import * as anthropicTransport from "./provider/transports/anthropic.mjs"
 import * as googleTransport from "./provider/transports/google.mjs"
 
-const FETCH_TIMEOUT_MS = 120000
+// Hard per-request ceiling (CLI parity: core.mjs / anthropic.mjs / google.mjs all use
+// 600_000). Reasoning models on long contexts legitimately think for minutes before
+// the first token — 120s aborted real requests with "The operation was aborted due
+// to timeout". 10 minutes is the CLI-proven bound; the user's abort button is the
+// real escape hatch for anything faster.
+export const FETCH_TIMEOUT_MS = 600_000
 
 // AbortSignal.any polyfill for Node 18 / VS Code's Electron (Node 20.3+ has native)
 const _anySignal = AbortSignal.any || ((signals) => {
