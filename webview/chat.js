@@ -67,8 +67,7 @@ let _loadingOlder = false
 // First-run onboarding: shown when no provider is configured; dismissed on skip
 // (stays dismissed for the webview's lifetime, reappears after a reload).
 let _welcomeDismissed = false
-// Panel preview caps (named — used by tailTruncate and the block accumulator)
-const PANEL_PREVIEW_CHARS = 2000
+// Panel preview caps (PANEL_PREVIEW_CHARS moved into lib.js tailTruncate's default)
 const PANEL_BLOCK_MAX = 20000
 let _currentTool = null  // name of the tool currently executing (CLI status parity)
 let _llmCalls = 0        // LLM calls this turn (CLI turn-count parity)
