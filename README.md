@@ -56,6 +56,21 @@ All settings under `thincoder.*` in VS Code settings:
 
 Auto-approve is **not a VS Code setting** — it is a session-level flag stored in the shared session slot (`~/.thincoder/sessions/`), same as the CLI. Toggle it with the AUTO toolbar button in the chat panel or via a prompt's "Approve All" button; each session remembers its own state.
 
+### Web search (optional Tavily)
+
+The `websearch` tool defaults to **Bing HTML extraction** (zero-config, no key). To use **Tavily's structured search API** — stable JSON results, no HTML scraping, resilient to page-structure changes — add this to `~/.thincoder/config.json` (shared with the CLI):
+
+```jsonc
+{
+  "websearch": {
+    "provider": "tavily",
+    "apiKey": "tvly-..."   // https://tavily.com — free monthly tier available
+  }
+}
+```
+
+No key (or a bad key) → the tool silently falls back to Bing, so agents never lose search.
+
 ### Supported Providers
 
 | Provider | Default Model | API Endpoint |
