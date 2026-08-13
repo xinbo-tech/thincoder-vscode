@@ -8,7 +8,7 @@ import assert from "node:assert/strict"
 import { setupWebview } from "./helpers/webview-env.mjs"
 import {
   buildUserMessage, buildAssistantHistory, buildToolHistory, buildHistoryMessage, escHtml,
-  newBlock, addUser, buildAdvisorBlock, appendAdvisorChunk,
+  newBlock, addUser, buildAdvisorBlock, appendAdvisorChunk, finishTool,
 } from "../webview/ui.js"
 
 let env
@@ -17,8 +17,7 @@ after(() => env?.cleanup())
 
 const ctx = () => ({ messagesEl: document.createElement("div") })
 
-describe("newBlock — one ThinCoder label per turn (live streaming)", () => {
-  it("paints the label only on the turn's first block — segments after tool batches get none", () => {
+describe("newBlock — one ThinCoder label per turn (live streaming)", () => {  it("paints the label only on the turn's first block — segments after tool batches get none", () => {
     const c = { messagesEl: document.createElement("div"), assistantLabeled: false }
     newBlock(c)  // turn start
     newBlock(c)  // next LLM segment after a tool batch
@@ -112,6 +111,22 @@ describe("advisor review block (in-conversation streaming)", () => {
     const huge = "x".repeat(50000) // far beyond any panel cap
     appendAdvisorChunk(el, "text", huge)
     assert.equal(el.querySelector(".advisor-content").textContent.length, 50000)
+  })
+})
+
+describe("finishTool — scroll follow", () => {
+  it("scrolls the conversation to the bottom when a tool completes (auto-expanded output becomes visible)", () => {
+    const messagesEl = document.createElement("div")
+    let scrollCalls = 0
+    // Intercept the scrollTop setter — happy-dom has no layout, so scrollHeight is 0.
+    Object.defineProperty(messagesEl, "scrollTop", { set: () => { scrollCalls++ }, get: () => 0 })
+    const ctx = { messagesEl, _toolRefs: {}, hadToolResult: false }
+    const h = document.createElement("div")
+    const b = document.createElement("div")
+    ctx._toolRefs["t1"] = { h, b, name: "bash", id: "t1", startTime: Date.now() }
+    finishTool(ctx, "bash", "t1", "output")
+    assert.ok(scrollCalls > 0, "finishTool scrolled the conversation to the bottom")
+    assert.equal(ctx.hadToolResult, true)
   })
 })
 

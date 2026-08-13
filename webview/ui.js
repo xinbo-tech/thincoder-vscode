@@ -225,6 +225,7 @@ export function finishTool(ctx, name, id, text) {
   if (ref) {
     finishToolCard(ref, text)
     ctx.hadToolResult = true
+    scrollDown(ctx) // the auto-expanded output must scroll into view, not sit below the fold
     return
   }
   // Fallback: DOM traversal for any reason the map missed
@@ -234,6 +235,7 @@ export function finishTool(ctx, name, id, text) {
     const body = card?.querySelector(".tool-call-body")
     finishToolCard({ h: card, b: body, startTime: card?.dataset.startTime ? Number(card.dataset.startTime) : Date.now() }, text)
     ctx.hadToolResult = true
+    scrollDown(ctx)
   }
 }
 
