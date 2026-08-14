@@ -486,26 +486,7 @@ export function showSettingsError(text) {
   setTimeout(() => el.remove(), 6000)
 }
 
-/**
- * A full rebuild wipes any in-progress form (add-provider / add-MCP) and steals
- * focus from the field the user is typing in. Status pushes must not do that —
- * skip the rebuild while a form is open or an input has focus.
- */
-function panelHasActiveForm() {
-  const panel = document.getElementById("settings-panel")
-  if (!panel || panel.style.display === "none") return false
-  // An ABSENT form element is not an active form — `el?.style.display !== "none"`
-  // evaluates true when el is undefined, permanently suppressing rebuilds.
-  const mcpForm = document.getElementById("mcp-form")
-  if (mcpForm && mcpForm.style.display !== "none") return true
-  const addForm = document.getElementById("prov-add-form")
-  if (addForm && addForm.style.display !== "none") return true
-  return !!panel.querySelector("input:focus, select:focus, textarea:focus")
-}
 
-function rebuildIfIdle() {
-  if (!panelHasActiveForm()) buildSettings()
-}
 
 function openSettings() {
   const panel = document.getElementById("settings-panel")
@@ -904,18 +885,15 @@ function renderMcpList() {
 }
 
 function updateProviderStatus(status) {
-  _providerStatus = status
-  rebuildIfIdle()
+  _providerStatus = status
 }
 
 function updateAgentSettings(settings) {
-  _agentSettings = { ...(_agentSettings || {}), ...settings }
-  rebuildIfIdle()
+  _agentSettings = { ...(_agentSettings || {}), ...settings }
 }
 
 function updateWebsearchSettings(settings) {
-  _websearchSettings = settings || {}
-  rebuildIfIdle()
+  _websearchSettings = settings || {}
 }
 
 /** Custom-provider connection probe result: populate the model dropdown or show the error. */
@@ -936,13 +914,11 @@ function updateTestProviderResult(r) {
 
 function updateShellCandidates(payload) {
   _shellCandidates = payload?.candidates || []
-  _shellValue = payload?.current ?? null
-  rebuildIfIdle()
+  _shellValue = payload?.current ?? null
 }
 
 function updateProxySettings(settings) {
-  _proxySettings = settings
-  rebuildIfIdle()
+  _proxySettings = settings
 }
 
 function updateProxyTestResult(result) {
@@ -955,8 +931,7 @@ function updateProxyTestResult(result) {
 
 function updateIndexStatus(s) {
   _indexStatus = s
-  renderIndexStatus()
-  rebuildIfIdle()
+  renderIndexStatus()
 }
 
 function renderIndexStatus() {
