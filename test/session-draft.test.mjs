@@ -98,6 +98,20 @@ describe("native diff viewer button on large permission diffs", () => {
   })
 })
 
+describe("consult panel — per-model status blocks (reuses the subagent channel)", () => {
+  it("consult children render in the subagent panel with status transitions", () => {
+    postToWebview({ type: "subagent", id: "c1", role: "consult", model: "deepseek:m-a", status: "started" })
+    postToWebview({ type: "subagent", id: "c2", role: "consult", model: "openai:m-b", status: "started" })
+    postToWebview({ type: "subagent", id: "c1", role: "consult", model: "deepseek:m-a", status: "answered" })
+    postToWebview({ type: "subagent", id: "c2", role: "consult", model: "openai:m-b", status: "terminated" })
+    const panel = document.getElementById("subagent-panel")
+    assert.ok(panel, "subagent panel exists")
+    assert.match(panel.textContent, /consult/, "consult role visible")
+    assert.match(panel.textContent, /answered/, "answered status shown")
+    assert.match(panel.textContent, /terminated/, "terminated status shown")
+  })
+})
+
 describe("needsSetup error re-opens the welcome panel", () => {
   const welcomePanel = () => document.getElementById("welcome-panel")
   const visible = () => welcomePanel().style.display !== "none"

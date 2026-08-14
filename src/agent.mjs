@@ -12,9 +12,10 @@ import { builtinTools, toOpenAISchema, readImageTool } from "./tools.mjs"
 import {
   taskTool, recentChangesTool, subagentTool,
   planTool, goalTool, skillTool, verifyTool, timerTool,
-  advisorTool, engTool,
+  advisorTool, engTool, consultStartTool, consultCheckTool, consultStopTool,
 } from "./agent-tools.mjs"
 import { compactHistory, truncateFallback, COMPRESS_FAILURE_LIMIT } from "./compact.mjs"
+import { cleanupConsultSessions } from "./agent-tools/consult.mjs"
 import { injectContext } from "./context.mjs"
 import { loadRaw, normalizeProxy, resolveProviders } from "./config-io.mjs"
 import * as os from "node:os"
@@ -71,7 +72,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const getAuto = typeof autoApprove === "function" ? autoApprove : () => autoApprove
 
   const agentTools = depth === 0
-    ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool, advisorTool, engTool]
+    ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool, advisorTool, engTool, consultStartTool, consultCheckTool, consultStopTool]
     : role === "eng-coder"
       ? [taskTool, recentChangesTool, planTool, timerTool, advisorTool, verifyTool] // eng-coder: design review + verify gates
       : [taskTool, recentChangesTool] // subagents get fewer meta-tools
@@ -96,6 +97,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     ...(specForModel(provider.model).multimodal ? [readImageTool] : []),
     ...agentTools,
     ...mcpTools,
+    ...(opts.extraTools ?? []), // caller-injected tools (e.g. consult's main_history)
   ]
   const toolSchemas = tools.map(toOpenAISchema)
   const toolByName = new Map(tools.map((t) => [t.name, t]))
@@ -112,6 +114,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   let cfgSubagentModels = null
   let cfgSubagentTurns = 100
   let cfgMaxTurns = 100
+  let cfgConsultModels = []
   let cfgProviders = []
   let cfgWebsearch = { provider: "tavily", apiKey: "" } // structured search; empty key → Bing fallback
   try {
@@ -126,6 +129,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     cfgSubagentModels = raw.agent?.subagentModels ?? {} // per-type subagent model overrides (CLI parity)
     cfgSubagentTurns = raw.agent?.subagentTurns ?? 100 // subagent turn cap (CLI parity)
     cfgMaxTurns = raw.agent?.maxTurns ?? 100
+    cfgConsultModels = raw.agent?.consultModels ?? [] // consultation model list (CONSULTATION.md)
     cfgProviders = resolveProviders().providers // for subagent model overrides
     cfgWebsearch = raw.websearch ?? { provider: "tavily", apiKey: "" }
   } catch { /* config unreadable — defaults */ }
@@ -151,7 +155,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     _lastEngState: engineering, _pendingReminders: [],
     config: {
       advisor: advisorCfg,
-      agent: { engineering, subagentModel: cfgSubagentModel, subagentModels: cfgSubagentModels, subagentTurns: cfgSubagentTurns, maxTurns: cfgMaxTurns, verifyGuard: cfgVerifyGuard, compactThreshold: cfgCompactThreshold },
+      agent: { engineering, subagentModel: cfgSubagentModel, subagentModels: cfgSubagentModels, subagentTurns: cfgSubagentTurns, maxTurns: cfgMaxTurns, verifyGuard: cfgVerifyGuard, compactThreshold: cfgCompactThreshold, consultModels: cfgConsultModels },
       proxy: cfgProxy, shell: cfgShell, providersList: cfgProviders,
       websearch: cfgWebsearch,
     },
@@ -277,6 +281,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   let guardPushbacks = 0
   let advisorPushbacks = 0
 
+  try {
   for (let turn = 0; turn < maxTurns; turn++) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
 
@@ -509,5 +514,10 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   }
 
   throw new ContinueError(maxTurns)
+  } finally {
+    // Turn-bound cleanup (CONSULTATION.md): abort any leftover consultation sessions
+    // started during this turn — no orphan sub-agents past the turn's end.
+    cleanupConsultSessions(agent)
+  }
 }
 

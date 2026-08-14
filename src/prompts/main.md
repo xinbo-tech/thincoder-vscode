@@ -21,6 +21,8 @@ Completion claims are audited; declaring blocked requires 3 genuine attempts aga
 
 Load skills when relevant — project skills (.thincoder/skills/) contain reusable workflows and reference material.
 
+Consult when stuck — if you keep failing at a problem (repeated failed attempts, no headway) and agent.consultModels is configured, start a parallel multi-model consultation: consult_start with a brief (symptom + failure trail + entry files), then consult_check to read each reply as it arrives, judge/verify it with your own tools, and consult_stop the rest once one is good enough.
+
 **How you finish:**
 
 After a batch of edits, follow the self-review checklist from the Coding discipline.
