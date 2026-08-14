@@ -4,10 +4,17 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.11] — 2026-08-14
+
+### Changed
+
+- **Tool cards auto-collapse on completion**: a successful tool call folds to one line — name, elapsed time, and the → last-line summary in the header (CLI outputPanel parity). Errors stay expanded so failures are visible without a click. Session-restored cards already behaved this way; live and restored states now match.
+
 ## [0.1.10] — 2026-08-13
 
 ### Fixed
 
+- **Editor dual-channel data loss**: file tools edited open documents via WorkspaceEdit but never saved, leaving the buffer dirty while disk stayed stale — the next edit self-locked on the isDirty guard and external writes raced the user's later save. Edits now save immediately after applying.
 - **SVG images bricked the whole session** (Kimi 400 "unsupported image format" on every subsequent request): a read_image on an .svg put an `image_url` part into history that raster-only vision APIs reject, and it was re-sent on every turn. Image parts are now sanitized per-format at send time — non-png/jpeg/gif/webp data URLs become text placeholders, history untouched, so already-poisoned sessions recover on the next send. (CLI 0.12.23 parity)
 
 ### Changed
