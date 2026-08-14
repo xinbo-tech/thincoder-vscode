@@ -144,15 +144,15 @@ export async function handlePanelMessage(panel, msg) {
       break
     case "setProviderProxy": {
       handleSetProviderProxy(msg.name, msg.proxy === true)
-      panel._pushSettings()
+      panel._pushSettingsLight()
       break
     }
     case "setKey": await setKeyFlow(() => panel._pushSettings()); break
     case "saveEmbeddingConfig": await panel._saveEmbeddingConfig(msg.config); break
     case "saveEmbedKey": await panel._saveEmbeddingConfig({ apiKey: msg.key }); break
     case "deleteEmbedKey": await panel._saveEmbeddingConfig({ apiKey: "" }); break
-    case "saveWebsearchKey": saveWebsearchKeyFromPanel(msg.key); panel._pushSettings(); break
-    case "deleteWebsearchKey": deleteWebsearchKeyFromPanel(); panel._pushSettings(); break
+    case "saveWebsearchKey": saveWebsearchKeyFromPanel(msg.key); panel._pushSettingsLight(); break
+    case "deleteWebsearchKey": deleteWebsearchKeyFromPanel(); panel._pushSettingsLight(); break
     case "testProvider": {
       const r = await testProviderConnection({ baseURL: msg.baseURL, apiKey: msg.apiKey })
       panel._panel?.webview.postMessage({ type: "testProviderResult", ...r })
@@ -162,7 +162,7 @@ export async function handlePanelMessage(panel, msg) {
     case "getMcpStatus": panel._pushMcpStatus(); break
     case "saveAgentSettings": {
       saveAgentSettingsFromPanel(msg.settings ?? {})
-      panel._pushSettings()
+      panel._pushSettingsLight()
       break
     }
     case "getAgentSettings": panel._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() }); break
@@ -177,23 +177,23 @@ export async function handlePanelMessage(panel, msg) {
     }
     case "setAdvisorEnabled": {
       saveAgentSettingsFromPanel({ advisor: { enabled: !!msg.value } })
-      panel._pushSettings()
+      panel._pushSettingsLight()
       break
     }
     case "setEngineeringEnabled": {
       saveAgentSettingsFromPanel({ engineering: !!msg.value })
-      panel._pushSettings()
+      panel._pushSettingsLight()
       break
     }
     case "getShellCandidates": panel._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates(), current: loadRaw().shell ?? null }); break
     case "saveShellSettings": {
       saveShellSettingsFromPanel(msg.value)
-      panel._pushSettings()
+      panel._pushSettingsLight()
       break
     }
     case "saveProxySettings": {
       saveProxySettingsFromPanel(msg.settings ?? {})
-      panel._pushSettings()
+      panel._pushSettingsLight()
       break
     }
     case "testProxy": {

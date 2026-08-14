@@ -283,7 +283,6 @@ function bindConsultRows() {
 let _indexStatus = null
 /** @type {{ maxTurns?:number, subagentTurns?:number, compactThreshold?:number|null, verifyGuard?:boolean, advisor?:object } | null} */
 let _agentSettings = null
-let _agentDirtyUntil = 0 // suppress push-rebuilds right after our own saves
 /** @type {{ name:string, value:string|null }[] | null} — detected shells (extension sends once) */
 let _shellCandidates = null
 /** @type {string|null} — current config.shell value */
@@ -758,7 +757,6 @@ function buildSettings() {
       // Optimistic merge: the shadow IS what we just saved — merge the whole payload so
       // push echoes and later rebuilds never resurrect a value the user just cleared.
       _agentSettings = { ...(_agentSettings || {}), ...settings }
-      _agentDirtyUntil = Date.now() + 1500
       window._vscode.postMessage({ type: "saveAgentSettings", settings })
       const badge = document.getElementById("agent-saved-badge")
       if (badge) { badge.textContent = t("settings.autoSaved"); badge.classList.add("visible"); setTimeout(() => badge.classList.remove("visible"), 1200) }
@@ -911,13 +909,7 @@ function updateProviderStatus(status) {
 }
 
 function updateAgentSettings(settings) {
-  // Suppress the rebuild ONLY for the exact echo of our own save (same consultModels) —
-  // but ALWAYS merge the incoming settings into the shadow copy so later renders see them.
   _agentSettings = { ...(_agentSettings || {}), ...settings }
-  if (Date.now() < _agentDirtyUntil
-    && JSON.stringify(settings?.consultModels ?? null) === JSON.stringify(_agentSettings?.consultModels ?? null)) {
-    return // echo — rows already merged in autoSaveAgent; skip the flicker rebuild
-  }
   rebuildIfIdle()
 }
 

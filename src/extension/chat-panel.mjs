@@ -333,6 +333,16 @@ export class ChatPanel {
     pushStatus(this._panel)
   }
 
+  /** Settings snapshot push WITHOUT the provider-model network probe (fullStatus).
+   *  Used for save acknowledgements — the panel already shows what the user typed;
+   *  a full re-probe would rebuild the settings panel and drop in-progress edits. */
+  _pushSettingsLight() {
+    this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
+    this._panel?.webview.postMessage({ type: "proxySettings", settings: proxySettings() })
+    this._panel?.webview.postMessage({ type: "websearchSettings", settings: websearchSettings() })
+    this._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates() })
+  }
+
   _pushSettings() {
     fullStatus(this._panel)
     this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
