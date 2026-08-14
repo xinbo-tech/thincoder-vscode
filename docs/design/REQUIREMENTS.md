@@ -53,8 +53,7 @@
 - repo_outline + context compaction
 
 **暂未做（v1.x / v2）：**
-- LSP 集成
-- ~~三层记忆体系~~（已有文件式记忆：`.thincoder/memory/` markdown + frontmatter，CLI 格式兼容）、~~MCP 客户端~~（stdio/http/ws 已实现）、~~read_image UI~~（read_image 工具 + 粘贴图片已实现）、~~编辑器上下文感知~~（editor-context 注入已实现）（08-13 注）
+- ~~三层记忆体系~~（文件式记忆已实现）、~~MCP 客户端~~（stdio/http/ws 已实现）、~~read_image UI~~（已实现）、~~编辑器上下文感知~~（editor-context 注入已实现）、~~LSP 集成~~（`tools/lsp.mjs` 已实现——直接用 VS Code 语言服务 API，无需自起语言服务器）（08-14 注：v1 范围已全部覆盖）
 
 ## 待决策
 

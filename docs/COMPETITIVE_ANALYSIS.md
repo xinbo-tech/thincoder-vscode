@@ -1,5 +1,56 @@
 # thincoder-vscode vs 行业竞品 — 能力对比
 
+## 2026-08-14 重评（联网核实竞品现状后，取代 08-13 增量中偏乐观的评分）
+
+> 信息来源：VS Code 1.105（2025-10）/ 1.103（2025-08）/ 1.131（2026-07-29）官方 release notes、Cline 4.1.x CHANGELOG。这次重评的结论比基线和 08-13 增量都更冷。
+
+### 基线"独有能力"核销表（多数已被追平，部分在写作时点就不准）
+
+| 基线声称 | 核销证据 |
+|---|---|
+| Subagent 并行子任务"独有" | **Copilot 2025-09 已有**（1.105 "Use subagents to improve context management"）；1.131（2026-07）还加了 Agents 窗口可视化（子代理的 model/耗时/正在调用的工具）；Cline SDK 有（扩展内重构中）；Cursor 2025 已有 |
+| Plan 模式"Copilot ❌" | **Copilot 2025-09 已有**（1.105 "Plan and hand off complex coding tasks"）；Cline Plan/Act 一直有 |
+| 会话管理"业界最佳" | Copilot 1.103 起有 chat checkpoints + coding agent 会话专用视图；Cline 4.x 有 SDK checkpoints + View Changes |
+| Task 清单"仅 Copilot 弱" | Copilot tasks 已成型 |
+| MCP 三 transport 优势 | VS Code 已**原生内建 MCP**（tool picker、128+ 工具上限），Copilot 直接受益——MCP 不再稀缺 |
+
+### 仍然真实独有的（逐条核实过，未被追平）
+
+1. **Advisor 独立评审**：第二个 agent 审第一个的代码改动，带收敛协议——主流插件无对应物
+2. **Verify 守卫**：声称完成前必须跑真实校验，否则打回——没有竞品强制这个
+3. **Goal 工具**：机器可验证的完成标准（不是待办清单，是可证伪的退出条件）
+4. **Engineering 模式**：设计文档先行 + eng-coder 硬门（设计评审不过不能改代码）
+5. **CLI 双端共享**：同一套会话/配置在终端 CLI 和 VS Code 面板间无缝接续——GUI 插件里没有第二个
+6. **Ctrl+I 打断注入**等终端级键盘交互（部分提交 + 注入 + 同源恢复）
+7. **国内供应商直连全家桶**：17 预设含 CN 厂商，添加即验证——Cline/Continue 走 OpenRouter 更全但没有 CN 直连优化
+8. **工程密度**：零运行时依赖、437 测试、76 src 文件——这个体量里仍罕见
+
+### 结构性威胁（比功能差距更重要）
+
+- **VS Code 正在把 agent 平台化**：1.131 的 Agent Host Protocol（AHP）让 Copilot/Claude/Codex 等 harness 住进专用进程，多窗口接入同一会话。独立 webview 面板的形态本身可能被平台吸收——第三方 agent 挂进原生 Agents 窗口后，自建面板的边际价值递减
+- **后台/云端 agent**（Copilot coding agent、Cursor background agents、Cline 计划任务/CLI）是下一个主战场，ThinCoder 没有入口
+- 商业模式差距不变：零分发、零订阅、无一方模型
+
+### 诚实评分（★ 为 08-14 重打，括号内为基线旧评）
+
+```
+                    08-14 重评   基线旧评    说明
+Agent 循环          ★★★★        ★★★★★      subagent/plan/checkpoint 已商品化；纪律工具链（advisor/verify/goal/eng）仍独家
+供应商              ★★★★        ★★★★★      CN 直连是利基；广度上 Cline/Continue 经聚合商更全
+编辑体验            ★★★         ★★★        行内补全仍主动不做
+会话管理            ★★★★        ★★★★★      CLI 共享仍独特；无云端/后台会话
+扩展性              ★★★         ★★★★       MCP 已普及；skill/rules 仍扎实
+工程品质            ★★★★★       ★★★★★      成立且继续扩大（437 测试）
+安全                ★★★★        ★★★★★      key 明文存储诚实降级后无满分理由
+易用性              ★★★½        ★★★        welcome/键盘/搜索/折叠已补；认知负荷仍高
+```
+
+### 结论
+
+基线报告的"业界领先/碾压"在写作时点就偏乐观（Copilot 2025 年底已有 plan/subagents），到 2026-08 大面积核销。**ThinCoder 的真实位置：纪律工程（advisor/verify/goal/eng-mode）+ CLI 双端 + 工程密度是独家且扎实的利基；但 agent 基础能力已商品化，分发为零，且 VS Code 平台化（AHP）是悬在独立面板形态头上的结构性问题。** 定位从"功能领先"修正为"纪律工作流利基 + 工程工艺差异化"。下一步杠杆：认知负荷、分发、以及评估是否接入 AHP 而非对抗它。
+
+---
+
 ## 2026-08-13 增量评估（v0.1.9 发布后）
 
 > 基线为下方 2026-07-28 评估。本次只记增量：基线诊断修了多少、新增了什么、还缺什么。
