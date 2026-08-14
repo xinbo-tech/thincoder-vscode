@@ -177,7 +177,12 @@ function providerRow(provider, group, models, value, onPick, overlay) {
   let flyout = null
   const closeFlyout = () => { flyout?.remove(); flyout = null; delete item.dataset.flyoutOpen }
   const openFlyout = () => {
-    if (flyout) return
+    // The overlay-level mouseover handler removes flyouts from the DOM WITHOUT touching
+    // this closure — a stale `flyout` reference made "hover back onto the same row" a
+    // permanent no-op (first open works, every later hover dead). Trust the DOM, not the
+    // closure: isConnected === genuinely open.
+    if (flyout && flyout.isConnected) return
+    flyout = null
     overlay.querySelectorAll(".mm-flyout").forEach((f) => f.remove()) // one flyout at a time
     overlay.querySelectorAll(".mm-row[data-flyout-open]").forEach((r) => delete r.dataset.flyoutOpen)
     flyout = document.createElement("div")
