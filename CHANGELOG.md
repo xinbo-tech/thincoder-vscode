@@ -4,6 +4,12 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.16] — 2026-08-14
+
+### Fixed
+
+- Removed a stray empty file that slipped into the 0.1.15 package (shell-escaping artifact; no functional change).
+
 ## [0.1.15] — 2026-08-14
 
 ### Added
