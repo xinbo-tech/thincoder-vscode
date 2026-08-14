@@ -3,7 +3,7 @@
  */
 import { escHtml } from "./ui.js"
 import { t } from "./i18n.js"
-import { modelMenuTrigger } from "./model-menu.js"
+import { openModelMenu } from "./model-menu.js"
 
 const PROVIDER_LABELS = {
   deepseek: "DeepSeek", kimi: "Kimi (Moonshot)", glm: "GLM (Zhipu)",
@@ -92,16 +92,21 @@ function mountModelMenus() {
     const raw = slot.dataset.value || ""
     const sep = raw.indexOf(":")
     const value = sep > 0 ? { provider: raw.slice(0, sep), model: raw.slice(sep + 1) } : null
-    const btn = modelMenuTrigger({
-      label: raw || t("settings.inherit"),
-      models,
-      value,
-      onPick: ({ provider, model }) => {
-        const v = provider + ":" + model
-        slot.dataset.value = v
-        slot.querySelector(".model-menu-btn").textContent = v
-        fireAgentSave()
-      },
+    const btn = document.createElement("button")
+    btn.type = "button"
+    btn.className = "key-btn model-menu-btn"
+    btn.textContent = raw || t("settings.inherit")
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation()
+      openModelMenu({
+        anchorEl: btn, models, value,
+        onPick: ({ provider, model }) => {
+          const v = provider + ":" + model
+          slot.dataset.value = v
+          btn.textContent = v
+          fireAgentSave()
+        },
+      })
     })
     slot.replaceChildren(btn)
   }
@@ -126,9 +131,15 @@ function mountSlot(slot, { provider, model, onPick }) {
   if (!slot || slot.dataset.mounted === "1") return
   slot.dataset.mounted = "1"
   const models = _getModels?.() || []
-  const label = provider && model ? labelFor(provider) + " · " + model : t("settings.pickModel")
-  const trig = modelMenuTrigger({ label, models, value: provider && model ? { provider, model } : null, onPick })
-  slot.replaceChildren(trig)
+  const btn = document.createElement("button")
+  btn.type = "button"
+  btn.className = "key-btn model-menu-btn"
+  btn.textContent = provider && model ? labelFor(provider) + " · " + model : t("settings.pickModel")
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation()
+    openModelMenu({ anchorEl: btn, models, value: provider && model ? { provider, model } : null, onPick })
+  })
+  slot.replaceChildren(btn)
 }
 
 function setRowModel(row, provider, model) {

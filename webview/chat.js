@@ -2,7 +2,7 @@
  * chat.js — main orchestration: state, events, token handling
  */
 import { md } from "./md.js"
-import { buildModelMenuDropdown } from "./model-menu.js"
+import { openModelMenu, closeModelMenu } from "./model-menu.js"
 import { fmtK, patchLineType } from "./lib.js"
 import { renderDiff, lineDiff } from "./diff.js"
 import {
@@ -699,54 +699,28 @@ function showAutoConfirm() {
   })
   popover.querySelector(".auto-confirm-no").addEventListener("click", close)
 }
-ctx.modelBtn.addEventListener("click", () => toggleDropdown(ctx.dropdown, () => buildModelDropdown()))
+ctx.modelBtn.addEventListener("click", (e) => {
+    e.stopPropagation()
+    openModelMenu({
+      anchorEl: ctx.modelBtn,
+      models: ctx._models,
+      value: { provider: ctx.selectedProvider, model: ctx.selectedModel },
+      onPick: ({ provider, model }) => {
+        const m = ctx._models.find((x) => x.id === model && (x.provider || "") === provider)
+        if (m) selectModel(m)
+      },
+      footer: [
+        { label: t("model.addProvider"), onClick: () => vscode.postMessage({ type: "addProvider" }) },
+        { label: t("model.removeProvider"), onClick: () => vscode.postMessage({ type: "removeProvider" }) },
+        { label: t("model.setKey"), onClick: () => vscode.postMessage({ type: "setKey" }) },
+      ],
+      up: true,
+    })
+  })
 ctx.reasoningBtn.addEventListener("click", () => toggleDropdown(ctx.reasoningDropdown, () => buildReasoningDropdown()))
 
 // ─── Model selector ────────────────────────────
 
-// Two-level hover submenu: Level 1 lists providers; hovering (or clicking) a provider opens a
-// flyout submenu on its right with that provider's models. Clicking a model selects + closes.
-
-function buildModelDropdown() {
-  ctx.dropdown.innerHTML = ""
-  if (ctx._models.length === 0) {
-    ctx.dropdown.appendChild(sectionEl(t("model.loading")))
-    return
-  }
-  // Delegates to the shared component (MODEL-PICKER-UNIFY.md) — same hover submenu as settings cards
-  ctx.dropdown.appendChild(buildModelMenuDropdown({
-    models: ctx._models,
-    value: { provider: ctx.selectedProvider, model: ctx.selectedModel },
-    onPick: ({ provider, model }) => {
-      const m = ctx._models.find((x) => x.id === model && (x.provider || "") === provider)
-      if (m) selectModel(m)
-    },
-  }))
-  // Bottom management entries (CLI: add / remove / key flows at the picker footer)
-  const sep = document.createElement("div")
-  sep.className = "dropdown-sep"
-  ctx.dropdown.appendChild(sep)
-  ctx.dropdown.appendChild(manageEntry(t("model.addProvider"), "addProvider"))
-  ctx.dropdown.appendChild(manageEntry(t("model.removeProvider"), "removeProvider"))
-  ctx.dropdown.appendChild(manageEntry(t("model.setKey"), "setKey"))
-}
-
-// A management entry at the dropdown footer — posts the flow request to the extension host.
-function manageEntry(label, type) {
-  const item = document.createElement("div")
-  item.className = "dropdown-item dropdown-manage"
-  item.tabIndex = 0
-  item.setAttribute("role", "menuitem")
-  item.innerHTML = `<span>${label}</span>`
-  item.addEventListener("click", (e) => {
-    e.stopPropagation()
-    ctx.dropdown.style.display = "none"
-    vscode.postMessage({ type })
-  })
-  return item
-}
-
-// A Level-1 provider row with a hover flyout of its models on the right.
 function buildReasoningDropdown() {
   ctx.reasoningDropdown.innerHTML = ""
   const model = ctx._models.find((m) => m.id === ctx.selectedModel)
@@ -789,7 +763,7 @@ function sectionEl(text) {
 
 function selectModel(m) {
   ctx.selectedModel = m.id; ctx.selectedProvider = m.provider || ""
-  ctx.modelBtn.textContent = m.id; ctx.dropdown.style.display = "none"
+  ctx.modelBtn.textContent = m.id; closeModelMenu()
   vscode.postMessage({ type: "selectModel", model: m.id, provider: m.provider || "" })
   const levels = m.reasoning || []
   if (levels.length > 0 && !levels.includes(ctx.selectedReasoning)) ctx.selectedReasoning = levels[0]
@@ -801,21 +775,20 @@ function selectModel(m) {
 function toggleDropdown(el, build) {
   const open = el.style.display !== "none"
   // Close all dropdowns first
-  ctx.dropdown.style.display = "none"
+  closeModelMenu()
   ctx.reasoningDropdown.style.display = "none"
   ctx.sessionDropdown.style.display = "none"
   if (ctx.sessionSelector) ctx.sessionSelector.setAttribute("aria-expanded", "false")
   el.style.display = open ? "none" : "block"
   if (!open) build()
   // Update aria-expanded on the trigger button
-  if (el === ctx.dropdown) ctx.modelBtn.setAttribute("aria-expanded", String(!open))
   if (el === ctx.reasoningDropdown) ctx.reasoningBtn.setAttribute("aria-expanded", String(!open))
 }
 
 // Close all dropdowns on Escape
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    ctx.dropdown.style.display = "none"
+    closeModelMenu()
     ctx.reasoningDropdown.style.display = "none"
     ctx.sessionDropdown.style.display = "none"
     if (ctx.sessionSelector) ctx.sessionSelector.setAttribute("aria-expanded", "false")
@@ -838,7 +811,7 @@ document.addEventListener("keydown", (e) => {
 })
 
 document.addEventListener("click", (e) => {
-  if (!ctx.dropdown.contains(e.target) && e.target !== ctx.modelBtn) ctx.dropdown.style.display = "none"
+  // model menu is overlay-managed (self-closing); no legacy dropdown containment needed
   if (!ctx.reasoningDropdown.contains(e.target) && e.target !== ctx.reasoningBtn) ctx.reasoningDropdown.style.display = "none"
   if (!ctx.sessionDropdown.contains(e.target) && !ctx.sessionSelector.contains(e.target)) {
     ctx.sessionDropdown.style.display = "none"

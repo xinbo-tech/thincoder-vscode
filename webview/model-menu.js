@@ -1,161 +1,195 @@
 /**
- * model-menu.js — the reusable two-level hover model menu (provider row → flyout model list).
+ * model-menu.js — THE one model picker (design: docs/design/MODEL-PICKER-UNIFY.md).
  *
- * Extracted from chat.js's buildModelDropdown/providerRow so EVERY model selection in the
- * panel uses ONE interaction (design: docs/design/MODEL-PICKER-UNIFY.md — no native
- * dropdowns, no search box; a provider may list dozens of models).
+ * Overlay/modal paradigm — NO CSS positioning wars:
+ *   - a full-screen fixed overlay captures outside clicks/scroll (closes the menu)
+ *   - the menu panel is position:fixed at the trigger's viewport rect (flip up when no room below)
+ *   - the provider flyout is ALSO fixed on the overlay, positioned from the row's rect —
+ *     never inside any scrolling/clipping ancestor, so it can never be cut off
+ *   - fresh class names (mm-*), zero inheritance from the legacy .dropdown styles
  *
- * Usage:
- *   openModelMenu({ anchorEl, value, onPick })
- *     anchorEl — the trigger button; the menu renders inside anchorEl's positioned parent
- *     value    — { provider, model } | null (marks the ✓ row)
- *     onPick   — ({ provider, model }) => void; called once, menu closes
+ * Every model selection in the panel (main model button, subagent slots, advisor, consult rows)
+ * goes through openModelMenu(). No search box (user decision).
  */
+import { t } from "./i18n.js"
 
-/** Build the full dropdown DOM for a model list. */
-export function buildModelMenuDropdown({ models, value, onPick, footerEntries = [] }) {
-  const frag = document.createDocumentFragment()
-  if (!models || models.length === 0) return frag
-
-  const byProvider = new Map()
-  for (const m of models) {
-    const key = m.provider || m.group || ""
-    if (!byProvider.has(key)) byProvider.set(key, { group: m.group || key, models: [] })
-    byProvider.get(key).models.push(m)
-  }
-  // Scroll layer for the provider rows — the popup itself must stay overflow:visible
-  // so the flyout submenu can extend past its right edge.
-  const list = document.createElement("div")
-  list.className = "model-menu-list"
-  for (const [provider, { group, models: provModels }] of byProvider) {
-    list.appendChild(providerRow(provider, group, provModels, value, onPick))
-  }
-  frag.appendChild(list)
-  for (const entry of footerEntries) frag.appendChild(entry)
-  return frag
+let _stylesInjected = false
+function injectStyles() {
+  if (_stylesInjected || typeof document === "undefined") return
+  _stylesInjected = true
+  const st = document.createElement("style")
+  st.textContent = `
+.mm-overlay { position: fixed; inset: 0; z-index: 1000; }
+.mm-panel {
+  position: fixed; z-index: 1001; min-width: 260px; max-width: 420px; max-height: 340px;
+  overflow-y: auto; overflow-x: visible;
+  background: var(--vscode-dropdown-background, #252526);
+  border: 1px solid var(--border, #454545); border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 12px;
+  color: var(--fg, #ccc);
+}
+.mm-row {
+  padding: 6px 12px; cursor: pointer; display: flex; align-items: center;
+  justify-content: space-between; gap: 8px; white-space: nowrap;
+}
+.mm-row:hover { background: var(--vscode-list-hoverBackground, rgba(255,255,255,.06)); }
+.mm-row .mm-sub { opacity: .55; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.mm-row .mm-arrow { opacity: .5; margin-left: 4px; }
+.mm-row[aria-selected="true"] { background: var(--vscode-list-activeSelectionBackground, rgba(0,120,212,.25)); }
+.mm-sep { height: 1px; background: var(--border, #454545); opacity: .5; margin: 4px 0; }
+.mm-manage { opacity: .75; font-size: 11px; }
+.mm-flyout {
+  position: fixed; z-index: 1002; min-width: 180px; max-height: 320px; overflow-y: auto;
+  background: var(--vscode-dropdown-background, #252526);
+  border: 1px solid var(--border, #454545); border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 12px; color: var(--fg, #ccc);
+}
+.mm-flyout .mm-row .mm-check { color: var(--accent, #4ec9b0); }
+.mm-loading { padding: 8px 12px; opacity: .6; }
+`
+  document.head.appendChild(st)
 }
 
-function providerRow(provider, group, models, value, onPick) {
+/** The current open menu's overlay element (or null). */
+let _openOverlay = null
+
+/** Close the open menu (idempotent). */
+export function closeModelMenu() {
+  _openOverlay?.remove()
+  _openOverlay = null
+  document.removeEventListener("keydown", onEsc, true)
+  window.removeEventListener("resize", closeModelMenu)
+}
+
+function onEsc(e) { if (e.key === "Escape") closeModelMenu() }
+
+/**
+ * Open the model menu anchored to a trigger element.
+ * @param anchorEl  the trigger (button) — menu positions from its viewport rect
+ * @param models    [{ id, provider, group, label, reasoning, ... }]
+ * @param value     { provider, model } | null — marks the current row with a check
+ * @param onPick    ({ provider, model }) => void — menu closes before the callback
+ * @param footer    [{ label, onClick }] — management entries (add/remove provider, set key)
+ * @param up        force upward opening (main panel bottom bar); default auto-flip by space
+ */
+export function openModelMenu({ anchorEl, models, value, onPick, footer = [], up = false }) {
+  injectStyles()
+  closeModelMenu()
+
+  const overlay = document.createElement("div")
+  overlay.className = "mm-overlay"
+  const panel = document.createElement("div")
+  panel.className = "mm-panel"
+  overlay.appendChild(panel)
+
+  // ── content ──
+  if (!models || models.length === 0) {
+    const d = document.createElement("div")
+    d.className = "mm-loading"
+    d.textContent = t("model.loading") || "…"
+    panel.appendChild(d)
+  } else {
+    const byProvider = new Map()
+    for (const m of models) {
+      const key = m.provider || m.group || ""
+      if (!byProvider.has(key)) byProvider.set(key, { group: m.group || key, models: [] })
+      byProvider.get(key).models.push(m)
+    }
+    for (const [provider, { group, models: provModels }] of byProvider) {
+      panel.appendChild(providerRow(provider, group, provModels, value, onPick, overlay))
+    }
+  }
+  if (footer.length > 0) {
+    const sep = document.createElement("div")
+    sep.className = "mm-sep"
+    panel.appendChild(sep)
+    for (const f of footer) {
+      const item = document.createElement("div")
+      item.className = "mm-row mm-manage"
+      item.textContent = f.label
+      item.addEventListener("click", (e) => { e.stopPropagation(); closeModelMenu(); f.onClick() })
+      panel.appendChild(item)
+    }
+  }
+
+  // ── positioning: viewport rect, flip up when no room below ──
+  const place = () => {
+    const r = anchorEl.getBoundingClientRect()
+    const ph = Math.min(panel.offsetHeight || 200, 340)
+    const below = window.innerHeight - r.bottom - 4
+    const openUp = up || below < Math.min(ph, 180)
+    panel.style.left = Math.max(4, Math.min(r.left, window.innerWidth - 270)) + "px"
+    panel.style.top = openUp ? Math.max(4, r.top - ph - 4) + "px" : (r.bottom + 4) + "px"
+  }
+
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModelMenu() })
+  overlay.addEventListener("wheel", closeModelMenu, { passive: true })
+  document.addEventListener("keydown", onEsc, true)
+  window.addEventListener("resize", closeModelMenu)
+
+  document.body.appendChild(overlay)
+  _openOverlay = overlay
+  place()
+  // measure after first paint for accurate height, then re-place
+  window.requestAnimationFrame(place)
+}
+
+function providerRow(provider, group, models, value, onPick, overlay) {
   const current = models.find((m) => m.id === value?.model && (m.provider || "") === (value?.provider || ""))
   const shown = current || models[0]
 
   const item = document.createElement("div")
-  item.className = "dropdown-item has-submenu"
-  item.tabIndex = 0
+  item.className = "mm-row"
   item.setAttribute("role", "option")
   item.setAttribute("aria-selected", String(!!current))
-  item.innerHTML = `<span>${group}</span><span class="dropdown-sub">${shown ? shown.label : ""}</span><span class="submenu-arrow">›</span>`
+  const name = document.createElement("span")
+  name.textContent = group
+  const sub = document.createElement("span")
+  sub.className = "mm-sub"
+  sub.textContent = shown ? shown.label : ""
+  const arrow = document.createElement("span")
+  arrow.className = "mm-arrow"
+  arrow.textContent = "›"
+  item.append(name, sub, arrow)
 
-  const sub = document.createElement("div")
-  sub.className = "dropdown submenu model-menu-flyout"
-  for (const m of models) {
-    const si = document.createElement("div")
-    si.className = "dropdown-item"
-    si.tabIndex = 0
-    si.setAttribute("role", "option")
-    si.setAttribute("aria-selected", String(m.id === value?.model && (m.provider || "") === (value?.provider || "")))
-    si.innerHTML = `<span>${m.label}</span>${m.id === value?.model && (m.provider || "") === (value?.provider || "") ? '<span class="check">✓</span>' : ""}`
-    si.addEventListener("click", (e) => { e.stopPropagation(); onPick({ provider: m.provider || provider, model: m.id }) })
-    sub.appendChild(si)
-  }
-
-  // Flyout must NOT live inside the scrolling list (overflow-y:auto forces
-  // overflow-x:hidden in CSS and hard-clips it). Render it as a popup-level child,
-  // positioned at the row's right edge, anchored to the row's top.
-  const open = () => {
-    const popupEl = item.closest(".model-menu-popup")
-    if (!popupEl) return
-    closeSiblingSubmenus(item)
-    for (const f of popupEl.querySelectorAll(":scope > .model-menu-flyout")) f.remove()
-    popupEl.appendChild(sub)
-    const pr = popupEl.getBoundingClientRect()
-    const rr = item.getBoundingClientRect()
-    sub.style.left = (popupEl.offsetWidth - 2) + "px"
-    sub.style.top = Math.max(0, rr.top - pr.top) + "px"
-    sub.style.display = "block"
-  }
-  const close = () => { sub.style.display = "none" }
-  item.addEventListener("mouseenter", open)
-  item.addEventListener("mouseleave", close)
-  sub.addEventListener("mouseleave", close)
-  // Keyboard / touch fallback: click toggles the flyout.
-  item.addEventListener("click", (e) => { if (e.target.closest(".model-menu-flyout")) return; e.stopPropagation(); sub.style.display === "block" ? close() : open() })
-  return item
-}
-
-/** Only one flyout open at a time (flyouts are popup-level children). */
-function closeSiblingSubmenus(except) {
-  const popup = except.closest(".model-menu-popup")
-  if (!popup) return
-  for (const el of popup.querySelectorAll(":scope > .model-menu-flyout")) el.style.display = "none"
-}
-
-/**
- * A self-contained trigger button + popup for settings cards.
- * The popup is position:FIXED and attached to document.body — settings cards use
- * overflow:hidden (rounded corners) and the panel body scrolls (overflow-y:auto),
- * both of which would clip an absolutely-positioned child. Fixed positioning
- * escapes both; the popup closes on scroll (position would drift) and outside click.
- * Returns the trigger element (caller places it in the DOM).
- */
-export function modelMenuTrigger({ label, models, value, onPick, className = "key-btn model-menu-btn" }) {
-  const wrap = document.createElement("span")
-  wrap.className = "model-menu-root"
-  const btn = document.createElement("button")
-  btn.type = "button"
-  btn.className = className
-  btn.textContent = label
-  const popup = document.createElement("div")
-  popup.className = "dropdown model-menu-popup"
-  popup.style.display = "none"
-
-  const close = () => { popup.style.display = "none" }
-  // Position relative to the settings panel (a containing block with no clipping);
-  // panel-body scrolls but the popup re-follows the trigger on scroll instead of closing.
-  const position = () => {
-    const panel = document.getElementById("settings-panel") || document.body
-    const pr = panel.getBoundingClientRect()
-    const r = btn.getBoundingClientRect()
-    popup.style.left = Math.max(8, r.left - pr.left) + "px"
-    popup.style.top = (r.bottom - pr.top + 4) + "px"
-  }
-  const open = () => {
-    closeAllPopups()
-    popup.innerHTML = ""
-    popup.appendChild(buildModelMenuDropdown({ models, value, onPick: (v) => { close(); onPick(v) } }))
-    const panel = document.getElementById("settings-panel") || document.body
-    if (popup.parentElement !== panel) panel.appendChild(popup)
-    position()
-    popup.style.display = ""
-  }
-  const onScroll = () => { if (popup.style.display !== "none") position() }
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation()
-    bindOutsideClick()
-    if (popup.style.display === "none") {
-      open()
-      const scroller = document.querySelector("#settings-panel .panel-body")
-      scroller?.addEventListener("scroll", onScroll)
-    } else {
-      close()
-      document.querySelector("#settings-panel .panel-body")?.removeEventListener("scroll", onScroll)
+  let flyout = null
+  const closeFlyout = () => { flyout?.remove(); flyout = null; overlay.querySelectorAll(".mm-flyout").forEach((f) => f.remove()) }
+  const openFlyout = () => {
+    closeFlyout()
+    flyout = document.createElement("div")
+    flyout.className = "mm-flyout"
+    for (const m of models) {
+      const row = document.createElement("div")
+      row.className = "mm-row"
+      row.setAttribute("role", "option")
+      const sel = m.id === value?.model && (m.provider || "") === (value?.provider || "")
+      if (sel) row.setAttribute("aria-selected", "true")
+      const lbl = document.createElement("span")
+      lbl.textContent = m.label
+      row.appendChild(lbl)
+      if (sel) { const c = document.createElement("span"); c.className = "mm-check"; c.textContent = "✓"; row.appendChild(c) }
+      row.addEventListener("click", (e) => {
+        e.stopPropagation()
+        closeModelMenu()
+        onPick({ provider: m.provider || provider, model: m.id })
+      })
+      flyout.appendChild(row)
     }
-  })
-  wrap.appendChild(btn)
-  return wrap
-}
+    overlay.appendChild(flyout)
+    const rr = item.getBoundingClientRect()
+    const fh = Math.min(flyout.offsetHeight || models.length * 26, 320)
+    let left = rr.right + 2
+    if (left + 190 > window.innerWidth) left = rr.left - 192 // flip left when no room on the right
+    flyout.style.left = Math.max(4, left) + "px"
+    flyout.style.top = Math.max(4, Math.min(rr.top, window.innerHeight - fh - 4)) + "px"
+  }
 
-/** Close every open model-menu popup (document-level). */
-export function closeAllPopups() {
-  for (const el of document.querySelectorAll(".model-menu-popup")) el.style.display = "none"
-}
-
-// Click-outside closes any open popup (registered lazily — import must work pre-DOM, e.g. in tests)
-let _outsideBound = false
-function bindOutsideClick() {
-  if (_outsideBound || typeof document === "undefined") return
-  _outsideBound = true
-  document.addEventListener("click", (e) => {
-    if (!e.target.closest(".model-menu-root")) closeAllPopups()
+  item.addEventListener("mouseenter", openFlyout)
+  item.addEventListener("mouseleave", (e) => {
+    // stay open when the pointer moves into the flyout
+    if (flyout && e.relatedTarget && flyout.contains(e.relatedTarget)) return
+    setTimeout(() => { if (flyout && !flyout.matches(":hover") && !item.matches(":hover")) closeFlyout() }, 120)
   })
+  item.addEventListener("click", (e) => { e.stopPropagation(); flyout ? closeFlyout() : openFlyout() })
+  return item
 }

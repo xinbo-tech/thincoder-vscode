@@ -346,44 +346,7 @@
 .agent-saved-badge { font-size: 11px; color: #4ec9b0; opacity: 0; transition: opacity .3s; height: 14px; }
 .agent-saved-badge.visible { opacity: 1; }
 
-/* model-menu triggers inside settings cards (MODEL-PICKER-UNIFY.md)
-   The popup is position:ABSOLUTE inside #settings-panel (a containing block with
-   no clipping) and re-follows its trigger while the panel-body scrolls.
-   It overrides the .dropdown base class (bottom:100% is the main panel's upward
-   popup) and stays overflow:visible so the flyout submenu extends past its edge;
-   provider rows scroll inside .model-menu-list. */
+
+/* model picker trigger button (menu itself = overlay, styles self-injected by model-menu.js) */
 .model-menu-root { display: inline-flex; min-width: 0; flex: 1; }
 .model-menu-btn { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-menu-popup {
-  position: absolute !important;
-  top: auto !important;
-  bottom: auto !important;
-  margin: 0 !important;
-  z-index: 100;
-  min-width: 420px;
-  max-width: 480px;
-  overflow: visible !important;
-  box-shadow: 0 6px 24px rgba(0,0,0,.35);
-}
-.model-menu-popup .model-menu-list {
-  max-height: 320px;
-  overflow-y: auto;
-  overflow-x: visible;
-}
-.model-menu-popup .dropdown-item { display: flex; gap: 8px; align-items: center; }
-
-/* Detached flyout (popup-level child) — escapes the .model-menu-list scroll clip */
-.model-menu-flyout {
-  position: absolute;
-  display: none;
-  min-width: 180px;
-  max-height: 320px;
-  overflow-y: auto;
-  background: var(--vscode-dropdown-background, #252526);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: var(--shadow);
-  z-index: 110;
-}
-/* the popup contains the list + flyouts; make it the positioning parent */
-.model-menu-popup { position: absolute !important; }
