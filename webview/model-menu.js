@@ -135,7 +135,10 @@ export function openModelMenu({ anchorEl, models, value, onPick, footer = [], up
   }
 
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModelMenu() })
-  overlay.addEventListener("wheel", closeModelMenu, { passive: true })
+  // Wheel closes the menu only when scrolling the BACKDROP — wheel events from the
+  // panel/flyout bubble up and would otherwise kill the menu mid-scroll (Qwen's model
+  // list needs scrolling inside the flyout).
+  overlay.addEventListener("wheel", (e) => { if (e.target === overlay) closeModelMenu() }, { passive: true })
   // Flyout territory rule (event-driven, no timers): pointer over the open row or the
   // flyout keeps it open; over anything else (another row, the panel, the backdrop) closes
   // it — the row's own mouseenter will open ITS flyout on the same move.
