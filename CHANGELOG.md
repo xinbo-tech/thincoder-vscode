@@ -4,6 +4,12 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.18] — 2026-08-14
+
+### Fixed
+
+- **Consult model settings UX rebuilt**: the model dropdown now always offers the provider entry's current model as an offline fallback (no more dead-end empty dropdown when the model-list probe failed); half-filled rows block the save flagged red with a status hint (never silently dropped); the sole configured provider is preselected in new rows; a status line shows whether consultation is active (N models) or off.
+
 ## [0.1.17] — 2026-08-14
 
 ### Fixed
