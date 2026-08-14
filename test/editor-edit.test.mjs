@@ -32,6 +32,36 @@ beforeEach(() => {
   vscode.workspace.applyEditCalls.length = 0
 })
 
+describe("markdown preview refresh after agent writes", () => {
+  it("writing a .md file refreshes the built-in markdown preview", async () => {
+    const calls = []
+    const orig = vscode.commands.executeCommand
+    vscode.commands.executeCommand = async (cmd) => { calls.push(cmd) }
+    try {
+      const doc = makeDoc("old", "d:\\proj\\README.md")
+      vscode.workspace.textDocuments.push(doc)
+      await applyEditorEdit(doc, "new")
+      assert.deepEqual(calls, ["markdown.preview.refresh"])
+    } finally {
+      vscode.commands.executeCommand = orig
+    }
+  })
+
+  it("writing a non-markdown file does NOT touch the preview", async () => {
+    const calls = []
+    const orig = vscode.commands.executeCommand
+    vscode.commands.executeCommand = async (cmd) => { calls.push(cmd) }
+    try {
+      const doc = makeDoc("old", "d:\\proj\\app.mjs")
+      vscode.workspace.textDocuments.push(doc)
+      await applyEditorEdit(doc, "new")
+      assert.deepEqual(calls, [])
+    } finally {
+      vscode.commands.executeCommand = orig
+    }
+  })
+})
+
 describe("editor dual channel saves after WorkspaceEdit", () => {
   it("applyEditorEdit applies the edit THEN saves the document", async () => {
     const doc = makeDoc("old content\nline2")

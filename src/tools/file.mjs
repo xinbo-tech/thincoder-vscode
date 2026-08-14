@@ -6,7 +6,7 @@
 
 import { readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { resolvePath, getOpenDoc, applyEditorEdit, applyEditorRangeEdit, normalizeEOL, gitDiffOne, hashLine } from "./shared.mjs"
+import { resolvePath, getOpenDoc, applyEditorEdit, applyEditorRangeEdit, normalizeEOL, gitDiffOne, hashLine, refreshMarkdownPreview } from "./shared.mjs"
 
 export const readTool = {
   name: "read",
@@ -75,6 +75,7 @@ export const writeTool = {
 
     // Not open — write to disk directly
     await writeFile(abs, content, "utf8")
+    refreshMarkdownPreview(abs)
     return `Wrote ${content.length} chars to ${path}`
   },
 }
@@ -130,6 +131,7 @@ export const editTool = {
     // Not open — write to disk
     const result = replace_all ? text.replaceAll(old_string, new_string) : text.replace(old_string, new_string)
     await writeFile(abs, result, "utf8")
+    refreshMarkdownPreview(abs)
     return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path}`
   },
 }
@@ -217,6 +219,7 @@ export const hashlineEditTool = {
       await applyEditorEdit(doc, updated)
     } else {
       await writeFile(abs, updated, "utf8")
+      refreshMarkdownPreview(abs)
     }
     const diff = gitDiffOne(ctx.cwd, abs)
     return `Edited ${path}: replaced ${target.length} line(s) at L${pos + 1} with ${newLines.length} line(s)${diff ? "\n" + diff : ""}`

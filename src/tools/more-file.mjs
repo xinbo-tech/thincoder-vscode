@@ -5,7 +5,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
-import { resolvePath, formatSize, getOpenDoc, applyEditorRangeEdit } from "./shared.mjs"
+import { resolvePath, formatSize, getOpenDoc, applyEditorRangeEdit, refreshMarkdownPreview } from "./shared.mjs"
 
 export const insertAfterTool = {
   name: "insert_after",
@@ -70,6 +70,7 @@ export const insertAfterTool = {
     // Not open — write to disk
     lines.splice(target + 1, 0, content)
     await writeFile(abs, lines.join("\n"), "utf8")
+    refreshMarkdownPreview(abs)
     return `Inserted after line ${target + 1} in ${path}`
   },
 }
@@ -161,6 +162,7 @@ export const applyPatchTool = {
       const dirtyErr = getOpenDoc(abs)?.isDirty ? `File has unsaved changes in the editor: ${abs}. Save or discard first.` : null
       if (dirtyErr) return `Error: ${dirtyErr}`
       await writeFile(abs, lines.join("\n"), "utf8")
+      refreshMarkdownPreview(abs)
       results.push(`Patched ${filePath}: ${applied} hunk(s) applied`)
     }
 

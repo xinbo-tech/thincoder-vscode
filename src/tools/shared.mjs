@@ -14,6 +14,15 @@ export function getOpenDoc(absPath) {
   } catch { return null }
 }
 
+/** Refresh the built-in Markdown preview after writing a .md file — the preview
+ *  caches rendered content and can keep showing stale output after agent-side
+ *  writes (2026-08-14 user report). No-op for non-markdown paths / when no
+ *  preview is open. */
+export function refreshMarkdownPreview(absPath) {
+  if (!/\.(?:md|markdown|mdown)$/i.test(absPath)) return
+  vscode.commands.executeCommand("markdown.preview.refresh").then(undefined, () => { /* no preview open — fine */ })
+}
+
 /** Apply a full text replacement to an open document via WorkspaceEdit.
  *  SAVES after applying — without the save the buffer goes dirty while the disk
  *  stays stale: the next edit hits the isDirty guard (locked by our own edit),
@@ -24,6 +33,7 @@ export async function applyEditorEdit(doc, fullText) {
   edit.replace(doc.uri, range, fullText)
   await vscode.workspace.applyEdit(edit)
   await doc.save()
+  refreshMarkdownPreview(doc.uri.fsPath)
 }
 
 /** Apply a range replacement to an open document via WorkspaceEdit.
@@ -35,6 +45,7 @@ export async function applyEditorRangeEdit(doc, startLine, startCol, endLine, en
   edit.replace(doc.uri, range, newText)
   await vscode.workspace.applyEdit(edit)
   await doc.save()
+  refreshMarkdownPreview(doc.uri.fsPath)
 }
 
 /** Resolve a path relative to cwd or absolute */
