@@ -4,6 +4,23 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.15] — 2026-08-14
+
+### Added
+
+- **glm-code provider preset** — the Zhipu GLM Coding Plan endpoint (`https://open.bigmodel.cn/api/coding/paas/v4`, glm-5.2, same key as the standard GLM entry; note: that endpoint forces thinking server-side and ignores `thinking: disabled`).
+
+### Fixed
+
+- **GLM/Kimi never thought unless the provider entry said so** — thinking-capable models now default `thinking: {type: "enabled"}` when the entry omits the field (zhipu-plan entries are created without one). Explicit values, including the panel's off, always win.
+- **The panel's reasoning "off" button never actually disabled thinking** — the UI sends `"none"` (the effort enum's lowest level) but the wiring only recognized the literal `"off"`; both now map to a true off. (Endpoints that force thinking server-side — e.g. the Zhipu coding plan — will still emit reasoning regardless.)
+- **Model specs synced with official vendor docs (verified 2026-08)** — kimi-k3/k3 maxOutput 128K→131072 + cache auto; qwen3.x maxOutput→131072 (qwen-plus was 32K) and 3.7/3.8-max flagged thinking; DeepSeek v4-flash context 256K→1M and thinking→true, effort enum +low, cache auto.
+- **Retired models dropped** — kimi-k2, moonshot v1, deepseek-chat, deepseek-reasoner (per vendor shutdown announcements; unknown IDs fall back to the 128K default spec).
+
+### Changed
+
+- Repository/homepage/bugs URLs → github.com/xinbo-tech/thincoder-vscode.
+
 ## [0.1.14] — 2026-08-14
 
 ### Added
