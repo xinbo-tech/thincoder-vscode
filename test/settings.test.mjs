@@ -281,3 +281,45 @@ describe("consultModels panel persistence", () => {
     }
   })
 })
+
+
+// ─── consult rows: add button wiring regression (0.1.16 hot bug) ──
+// Bug: dynamic add passed the FULL provider-status object where a providers MAP
+// was expected — the filter saw no .configured entries and the provider dropdown
+// rendered empty. Also: binding lived inside the agSave guard — any upstream
+// bind failure silently killed the add button.
+
+describe("settings consult rows", () => {
+  it("Add button appends a row whose provider dropdown lists CONFIGURED providers", async () => {
+    const { initSettings } = await import("../webview/settings.js")
+    document.body.innerHTML = '<div id="settings-panel"><div id="settings-body"></div></div><button id="settings-btn"></button><button id="settings-close"></button>'
+    const api = initSettings({ onClose: () => {}, getModels: () => [
+      { provider: "deepseek", id: "deepseek-v4-pro" },
+      { provider: "zhipu-plan", id: "glm-5.2" },
+    ] })
+    api.updateProviderStatus({ providers: {
+      deepseek: { configured: true, masked: "sk-***", model: "deepseek-v4-pro" },
+      "zhipu-plan": { configured: true, masked: "sk-***", model: "glm-5.2" },
+      neverused: { configured: false },
+    }, labels: {} })
+    api.updateAgentSettings({ maxTurns: 100 }) // consultModels absent — fresh state
+    api.openSettings()
+
+    const before = document.querySelectorAll("#consult-rows .consult-row").length
+    document.getElementById("consult-add").click()
+    const rows = document.querySelectorAll("#consult-rows .consult-row")
+    assert.equal(rows.length, before + 1, "row appended")
+
+    const provOpts = rows[rows.length - 1].querySelectorAll(".consult-provider option")
+    const values = [...provOpts].map((o) => o.value).filter(Boolean)
+    assert.ok(values.includes("deepseek") && values.includes("zhipu-plan"), "configured providers listed: " + values)
+    assert.ok(!values.includes("neverused"), "unconfigured provider excluded")
+
+    // cascade: choosing a provider populates the model dropdown
+    const p = rows[rows.length - 1].querySelector(".consult-provider")
+    p.value = "deepseek"
+    p.dispatchEvent(new Event("change"))
+    const models = [...rows[rows.length - 1].querySelectorAll(".consult-model option")].map((o) => o.value)
+    assert.ok(models.includes("deepseek-v4-pro"), "model cascade works: " + models)
+  })
+})

@@ -79,14 +79,23 @@ function collectConsultRows() {
 function bindConsultRows() {
   const rows = document.getElementById("consult-rows")
   const addBtn = document.getElementById("consult-add")
-  if (!rows || !addBtn) return
+  if (!rows || !addBtn) {
+    console.error("[consult] container or add button missing — rows:", !!rows, "add:", !!addBtn)
+    return
+  }
   addBtn.onclick = () => {
-    if (rows.querySelectorAll(".consult-row").length >= 5) return
-    const div = document.createElement("div")
-    div.className = "key-field consult-row"
-    div.innerHTML = `<select class="consult-provider">${consultProvOptions(currentProviderStatus(), "")}</select><select class="consult-model">${consultModelOptions("", "")}</select><button class="consult-del" title="${t("settings.consultRemove")}">✕</button>`
-    rows.appendChild(div)
-    wireRow(div)
+    try {
+      if (rows.querySelectorAll(".consult-row").length >= 5) return
+      const div = document.createElement("div")
+      div.className = "key-field consult-row"
+      // NOTE: pass the PROVIDERS MAP, not the full status object — the full shape
+      // filters to an empty provider list (every entry lacks .configured).
+      div.innerHTML = `<select class="consult-provider">${consultProvOptions(currentProviderStatus().providers || {}, "")}</select><select class="consult-model">${consultModelOptions("", "")}</select><button class="consult-del" title="${t("settings.consultRemove")}">✕</button>`
+      rows.appendChild(div)
+      wireRow(div)
+    } catch (e) {
+      console.error("[consult] add row failed:", e)
+    }
   }
   for (const row of rows.querySelectorAll(".consult-row")) wireRow(row)
   function wireRow(row) {
@@ -599,8 +608,13 @@ function buildSettings() {
       })
       flashSaved(agSave)
     })
-    // Consult rows: add / remove / provider→model cascade
+  }
+  // Consult rows: bind OUTSIDE the agSave guard — a missing save button must not
+  // silently kill the add/remove wiring (invisible dead button symptom).
+  try {
     bindConsultRows()
+  } catch (e) {
+    console.error("[consult] bindConsultRows failed:", e)
   }
 
   // Bind Shell save: select (default/candidate/custom) + custom path input
