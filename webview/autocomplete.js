@@ -100,10 +100,12 @@ export function initAutocomplete({ inputEl, atDropdown, vscode, pastedImages }) 
     }
   })
 
-  // Detect @ typing to activate autocomplete
+  // Detect @ typing to activate autocomplete. After typing "@", selectionStart
+  // is AFTER the @, so the @ is at pos - 1 (the previous pos - 2 checked the
+  // character BEFORE the @ — never matched, so the dropdown never activated).
   inputEl.addEventListener("input", (_e) => {
     const pos = inputEl.selectionStart
-    const prevChar = inputEl.value[pos - 2]
+    const prevChar = inputEl.value[pos - 1]
     if (prevChar === "@") {
       _atActive = true
       handleAtInput()
