@@ -40,7 +40,7 @@ src/mcp.mjs           Re-export shim → src/mcp/ (stdio/http transport, MCP cli
 src/provider.mjs      LLM provider (fetch + SSE, non-retryable error detection, rate-limit retry) + re-exports rate gate
 src/provider/rate.mjs TPM rate limiting gate
 src/context.mjs       Context compaction + repo outline builder + context injection
-src/memory.mjs        Long-term memory (FTS5 full-text search, no vector/embedding)
+src/memory.mjs        Long-term memory (file-based Markdown entries + frontmatter, CLI entry-format compatible; vector semantic search when an embedding key is configured, keyword fallback — no FTS5)
 src/repomap.mjs       Repository dependency graph parsing
 src/config.mjs        Model capability specs (context, thinkApi, thinkEnabledValue, noUsageStream, temp ranges)
 src/specs.mjs         Re-export from config.mjs (backward compat)

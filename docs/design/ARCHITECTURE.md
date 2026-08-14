@@ -201,7 +201,7 @@ user input
 
 | 功能 | 状态 | 备注 |
 |------|------|------|
-| Memory 三层体系 | ✅ 基础 | JSON 文件存储（put/search/list/remove），Type/tag/title/content 结构化。暂不依赖 better-sqlite3 |
+| Memory 三层体系 | ✅ 基础 | 文件式 markdown 条目 + frontmatter（CLI 条目格式兼容，put/search/list/remove）；配 embedding key 时走向量语义检索，否则关键词回退；不依赖 sqlite |
 | MCP 支持 | ✅ | stdio + HTTP/WS transport，工具**动态展开为原生工具**（`{server}_{tool}` 前缀，CLI parity——统一规范见 thincoder `docs/design/MCP.md`；旧 `mcpTool` 网关已废弃）。配置存 `~/.thincoder/config.json` 的 `mcp.servers[]`（面板 Settings 可管理；旧 `thincoder.mcpServers` 设置已随迁移删除） |
 | Checkpoint (git snapshot) | ✅ | git stash 快照 + list/create/rewind/cat，支持单文件恢复 |
 | Image input | ✅ | 粘贴/拖拽 + 附加按钮（`attach-btn`），`read_image` 工具；多模态模型支持（Kimi K3、Qwen、GPT-4o、MiniMax M3），非多模态模型自动剥离图片部分 |
@@ -220,7 +220,7 @@ user input
 | 文件打开 | TUI 内显示 | VS Code 编辑器标签页 |
 | 权限审批 | TUI 内交互式（y/n/a；a = approve + AUTO ON） | webview 逐工具弹窗（approve / deny / approve-all）；autoApprove 会话级槽位字段，两端语义一致 |
 | 配置存储 | `~/.thincoder/config.json`（共享） | 同上（共享同一文件；apiKey 回退环境变量） |
-| 记忆系统 | 3-layer FTS5 + vector | JSON 文件存储（单层） |
+| 记忆系统 | 3-layer FTS5 + vector | 文件式 markdown 条目（CLI 兼容格式；可选向量检索，无 FTS5） |
 | MCP | ✅ | ✅ stdio + HTTP（`~/.thincoder/config.json` 的 `mcp.servers[]`） |
 
 > **字段往返完整（已落地）**：共享槽位文件是全量覆盖写。`chat-panel._saveLines` 现以 `...existing` 展开式透传（不认识的字段原样保留），仅覆盖扩展自己拥有的字段——CLI 写入的 `activeModel`/`engineering`/`engDesignToken` 等字段在 VS Code 侧往返不丢。契约详见 CLI `docs/design/ARCHITECTURE.md`「会话存储统一 → 字段往返完整」。

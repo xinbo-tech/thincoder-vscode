@@ -191,7 +191,7 @@ thincoder-vscode/
 | Feature | CLI (`thincoder`) | VS Code Extension |
 |---------|-------------------|-------------------|
 | Interface | Terminal TUI (ANSI) | VS Code side panel |
-| Memory system | 3-layer FTS5 + vector | FTS5 + vector (embedding required) |
+| Memory system | 3-layer FTS5 + vector | File-based Markdown entries (CLI-compatible format); vector semantic search when embedding key configured, keyword fallback — no FTS5 |
 | Checkpoint | Git snapshot restore | Git diff/status/log only |
 | MCP support | ✅ | ✅ |
 | Session persistence | Unlimited archive slots | Shared with the CLI — same files and slots (`~/.thincoder/sessions/`) |
