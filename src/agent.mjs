@@ -16,6 +16,7 @@ import {
 } from "./agent-tools.mjs"
 import { compactHistory, truncateFallback, COMPRESS_FAILURE_LIMIT } from "./compact.mjs"
 import { cleanupConsultSessions } from "./agent-tools/consult.mjs"
+import { traceStop } from "./extension/stop-trace.mjs"
 import { injectContext } from "./context.mjs"
 import { loadRaw, normalizeProxy, resolveProviders } from "./config-io.mjs"
 import * as os from "node:os"
@@ -283,7 +284,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
 
   try {
   for (let turn = 0; turn < maxTurns; turn++) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+    if (signal?.aborted) { traceStop(`agent loop turn ${turn}: aborted at loop head`) ; throw new DOMException("Aborted", "AbortError") }
 
     // Context compaction check — only at safe points: history ends with a complete
     // exchange (user input or tool result), never mid-assistant (CLI parity D1).
@@ -342,6 +343,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     }
 
     const messages = [{ role: "system", content: systemPrompt }, ...history]
+    traceStop(`turn ${turn}: calling LLM (history ${history.length} msgs)`)
     const response = await chat(provider, {
       messages,
       tools: toolSchemas,
@@ -350,6 +352,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       onWait: callbacks.onWait,
       signal,
     })
+    traceStop(`turn ${turn}: LLM stream ended`)
 
     // Interrupt (Ctrl+I, CLI agent.mjs parity): the SSE stream returned the
     // partial result — commit the partial assistant output, inject the user's
@@ -486,6 +489,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     })
 
     await executeToolBatches(agent, { response, history, fullHistory, toolByName, getAuto, callbacks, signal, cwd, recentSigs, depth })
+    traceStop(`turn ${turn}: tool batches complete`)
 
     // Ctrl+I interrupt during tool execution (CLI agent.mjs parity): skip committing
     // partial tool results — they'd mislead the model. Inject the interrupt and retry.

@@ -10,6 +10,7 @@ import { PRESETS } from "./presets.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
 import { selectProviderModel, loadRaw } from "../config-io.mjs"
 import { openDiffPreview } from "./diff-preview.mjs"
+import { traceStop } from "./stop-trace.mjs"
 
 /** Current workspace folder (or process cwd) — shared with chat-panel. */
 export const _cwd = () => vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
@@ -58,10 +59,14 @@ export async function handlePanelMessage(panel, msg) {
       if (lastUser) panel._chat(lastUser.content, lastUser.provider, undefined, lastUser.provider)
       break
     }
-    case "abort": panel._abortController?.abort(); break
+    case "abort":
+      panel._stopClickTs = Date.now()
+      traceStop("click received — abort() called", panel._stopClickTs)
+      panel._abortController?.abort()
+      break
     // Ctrl+I inject (CLI parity): abort with an interrupt reason — the agent loop
     // commits partial output, injects the message, and resumes from the same context.
-    case "interrupt": panel._abortController?.abort({ interrupt: true, message: msg.message }); break
+    case "interrupt": panel._stopClickTs = Date.now(); traceStop("interrupt received", panel._stopClickTs); panel._abortController?.abort({ interrupt: true, message: msg.message }); break
     // Clickable file paths in tool cards — open in the editor, at the line if given.
     case "openFile": {
       try {

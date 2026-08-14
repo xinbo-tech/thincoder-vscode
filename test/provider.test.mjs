@@ -319,3 +319,56 @@ function createMockResponse(sseLines) {
     headers: new Map([["content-type", "text/event-stream"]]),
   }
 }
+
+// ─── Abort-aware sleeps (Stop during retry backoff / rate waits) ───
+
+describe("abortableSleep", () => {
+  it("rejects immediately with AbortError when the signal fires mid-sleep", async () => {
+    const { abortableSleep } = await import("../src/provider/rate.mjs")
+    const ctrl = new AbortController()
+    const t0 = Date.now()
+    const p = abortableSleep(30_000, ctrl.signal)
+    setTimeout(() => ctrl.abort(), 30)
+    await assert.rejects(() => p, (e) => e.name === "AbortError")
+    assert.ok(Date.now() - t0 < 1000, "released promptly, not after the full 30s backoff")
+  })
+
+  it("resolves normally without a signal; rejects immediately when already aborted", async () => {
+    const { abortableSleep } = await import("../src/provider/rate.mjs")
+    await abortableSleep(5) // no signal → plain sleep
+    const ctrl = new AbortController()
+    ctrl.abort()
+    await assert.rejects(() => abortableSleep(1000, ctrl.signal), (e) => e.name === "AbortError")
+  })
+})
+
+// ─── stop-trace (click→stop latency observability) ──────────────
+
+describe("stop trace", () => {
+  it("traceStop emits lines with click latency to subscribers when enabled", async () => {
+    const { traceStop, onTrace, setTraceEnabled } = await import("../src/extension/stop-trace.mjs")
+    const lines = []
+    const off = onTrace((l) => lines.push(l))
+    setTraceEnabled(true)
+    try {
+      const t0 = Date.now() - 123
+      traceStop("hop under test", t0)
+      assert.equal(lines.length, 1)
+      assert.match(lines[0], /hop under test/)
+      assert.match(lines[0], /\+123ms since click/)
+    } finally {
+      setTraceEnabled(false)
+      off()
+    }
+  })
+
+  it("disabled by default — no output, zero overhead", async () => {
+    const { traceStop, onTrace, setTraceEnabled } = await import("../src/extension/stop-trace.mjs")
+    const lines = []
+    const off = onTrace((l) => lines.push(l))
+    setTraceEnabled(false)
+    traceStop("should not appear")
+    assert.equal(lines.length, 0)
+    off()
+  })
+})

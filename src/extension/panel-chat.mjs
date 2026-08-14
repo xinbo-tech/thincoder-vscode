@@ -17,6 +17,7 @@ import { injectAtRefs } from "./file-refs.mjs"
 import { permissionGate } from "./permission-gate.mjs"
 import { notifyCompletionIfUnfocused } from "./notify.mjs"
 import { extractFileLinks } from "./file-links.mjs"
+import { traceStop } from "./stop-trace.mjs"
 import { t } from "../i18n.mjs"
 
 /**
@@ -167,8 +168,11 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   })
   const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume })
   try {
+    traceStop("runAgent: turn starting (no pending click)", panel._stopClickTs)
     await runAgent(p, cwd, text, buildCallbacks(), panel._abortController.signal, () => panel._autoApprove, runOpts(false))
+    traceStop("runAgent: turn ended normally", panel._stopClickTs)
   } catch (e) {
+    traceStop(`runAgent: threw ${e?.name} — unwinding`, panel._stopClickTs)
     // Ctrl+I interrupt: the abort carries reason.interrupt — rebuild the
     // controller and RESUME the same turn (the interrupt message is already in
     // history; the model continues from there). CLI agent-turn.mjs parity.
@@ -197,6 +201,8 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       }
     }
   } finally {
+    traceStop("finally: turn complete — UI released", panel._stopClickTs)
+    panel._stopClickTs = null
     panel._turnActive = false
     panel._refreshStatus()
     panel._panel.webview.postMessage({ type: "loading", loading: false })

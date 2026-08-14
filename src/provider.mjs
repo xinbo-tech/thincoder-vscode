@@ -5,10 +5,11 @@
 
 import { specForModel } from "./specs.mjs"
 import { proxyFetch } from "./proxy.mjs"
+import { traceStop } from "./extension/stop-trace.mjs"
 import {
   RETRYABLE_STATUS, MAX_RETRIES, MAX_CONTINUATIONS,
   RATE_LIMIT_BACKOFF_MS, _rateHooks,
-  estimateRequestTokens, rateGate, recordRate,
+  estimateRequestTokens, rateGate, recordRate, abortableSleep,
 } from "./provider/rate.mjs"
 import * as openaiTransport from "./provider/transports/openai.mjs"
 import * as anthropicTransport from "./provider/transports/anthropic.mjs"
@@ -92,10 +93,14 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
   const normalizedTools = transport.normalizeTools(tools)
   const req = transport.buildRequest(provider, messages, normalizedTools)
   const estimated = estimateRequestTokens(JSON.parse(req.body))
+  traceStop(`chat: awaiting rate gate (est ${estimated} tokens)`)
   await rateGate(provider, estimated, onWait, signal)
+  traceStop("chat: rate gate passed — issuing request")
 
   const response = await requestWithRetry(provider, req.url, req.headers, req.body, signal, onWait)
+  traceStop("chat: response ok — parsing stream")
   const result = await transport.parseStream(response, { onToken, onReasoning, signal })
+  traceStop("chat: stream parsed — returning to agent loop")
   recordRate(provider, estimated, result.usage)
 
   // Continuation handling (OpenAI-format only — Claude/Gemini handle truncation differently)
@@ -177,7 +182,8 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
   let lastWas429 = false
   let rateLimitHits = 0
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    if (attempt > 0 && !lastWas429) await _rateHooks.sleep(2 ** (attempt - 1) * 1000)
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+    if (attempt > 0 && !lastWas429) await abortableSleep(2 ** (attempt - 1) * 1000, signal)
     lastWas429 = false
 
     let response
@@ -221,7 +227,7 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
       lastWas429 = true
       if (attempt < MAX_RETRIES) {
         onWait?.({ phase: "retry", seconds: Math.ceil(waitMs / 1000) })
-        await _rateHooks.sleep(waitMs)
+        await abortableSleep(waitMs, signal)
       }
       continue
     }

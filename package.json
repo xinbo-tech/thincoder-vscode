@@ -96,6 +96,11 @@
           "order": 1,
           "markdownDescription": "# Providers (legacy — migrated automatically)\nProvider configuration now lives in `~/.thincoder/config.json`, shared with the CLI. On first activation any keys/providers stored here (and in SecretStorage) are migrated into that file and this setting is cleared. Use the in-panel Settings (⚙) or edit `~/.thincoder/config.json` directly.",
           "deprecationMessage": "Provider config is stored in ~/.thincoder/config.json (shared with the CLI). This setting is only read once for migration."
+        },
+        "thincoder.stopTrace": {
+          "type": "boolean",
+          "default": false,
+          "description": "Trace Stop/abort propagation hops to the \"ThinCoder Stop Trace\" output channel (latency debugging)."
         }
       }
     }

@@ -18,6 +18,7 @@ import { runPanelChat } from "./panel-chat.mjs"
 import { stripEditorInjection } from "./editor-context.mjs"
 import { loadEmbeddingConfig, saveEmbeddingConfig, loadRaw } from "../config-io.mjs"
 import { buildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../indexer.mjs"
+import { initStopTrace } from "./stop-trace.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -78,6 +79,7 @@ export class ChatPanel {
 
     webviewView.webview.html = this._html()
     webviewView.webview.postMessage({ type: "i18n", strings: loadLocaleStrings(vscode.env.language) })
+    initStopTrace(this._context, vscode)
 
     webviewView.webview.onDidReceiveMessage((msg) => {
       handlePanelMessage(this, msg).catch((e) => console.error("[chat-panel] message handler:", e.message))
