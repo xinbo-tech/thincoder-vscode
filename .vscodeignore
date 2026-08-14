@@ -14,3 +14,4 @@ docs/**
 AGENTS.md
 eslint.config.mjs
 package-lock.json
+assets/candidates/**
