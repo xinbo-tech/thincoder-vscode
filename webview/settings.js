@@ -755,9 +755,9 @@ function buildSettings() {
   const autoSaveAgent = () => {
     try {
       const { settings } = buildAgentPayload()
-      // Optimistic merge: keep consultModels in the shadow copy so the push echo
-      // doesn't rebuild with stale data (the "rows vanish after picking" race).
-      if (settings.consultModels) _agentSettings = { ...(_agentSettings || {}), consultModels: settings.consultModels }
+      // Optimistic merge: the shadow IS what we just saved — merge the whole payload so
+      // push echoes and later rebuilds never resurrect a value the user just cleared.
+      _agentSettings = { ...(_agentSettings || {}), ...settings }
       _agentDirtyUntil = Date.now() + 1500
       window._vscode.postMessage({ type: "saveAgentSettings", settings })
       const badge = document.getElementById("agent-saved-badge")
