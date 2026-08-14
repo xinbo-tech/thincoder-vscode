@@ -711,6 +711,7 @@ function buildSettings() {
       if (v) subModels[role] = v
     }
     const models = collectConsultRows()
+    console.error("[thincoder] consult collect:", models.length, "complete;", JSON.stringify(readConsultRowsFromDom()))
     return {
       settings: {
         maxTurns: get("ag-maxturns") || undefined,
