@@ -136,6 +136,17 @@ export function openModelMenu({ anchorEl, models, value, onPick, footer = [], up
 
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModelMenu() })
   overlay.addEventListener("wheel", closeModelMenu, { passive: true })
+  // Flyout territory rule (event-driven, no timers): pointer over the open row or the
+  // flyout keeps it open; over anything else (another row, the panel, the backdrop) closes
+  // it — the row's own mouseenter will open ITS flyout on the same move.
+  overlay.addEventListener("mouseover", (e) => {
+    const row = overlay.querySelector(".mm-row[data-flyout-open]")
+    if (!row) return
+    const fly = overlay.querySelector(".mm-flyout")
+    if (row.contains(e.target) || (fly && fly.contains(e.target))) return
+    for (const f of overlay.querySelectorAll(".mm-flyout")) f.remove()
+    delete row.dataset.flyoutOpen
+  })
   document.addEventListener("keydown", onEsc, true)
   window.addEventListener("resize", closeModelMenu)
 
@@ -160,29 +171,18 @@ function providerRow(provider, group, models, value, onPick, overlay) {
   arrow.textContent = "›"
   item.append(name, arrow)
 
+  // Flyout open/close is PURELY event-driven — no timers, no grace windows.
+  // Close condition: a mouseover bubbles up landing OUTSIDE (row ∪ flyout).
+  // A stationary pointer generates no events → nothing closes. Ever.
   let flyout = null
-  let closeTimer = null
-  const cancelClose = () => { clearTimeout(closeTimer); closeTimer = null }
-  const closeFlyout = () => { cancelClose(); flyout?.remove(); flyout = null; overlay.querySelectorAll(".mm-flyout").forEach((f) => f.remove()) }
-  // Event pairing is unreliable here: the flyout materializes UNDER the pointer (flush
-  // positioning), Chromium fires the row's mouseleave immediately but the flyout's
-  // mouseenter only on the next ACTUAL pointer move. If the user hovers still, the timer
-  // fires with no cancel — the flyout dies under a stationary pointer.
-  // Fix: on timer expiry, check the LIVE :hover state instead of trusting events.
-  const scheduleClose = () => {
-    cancelClose()
-    closeTimer = setTimeout(() => {
-      if (!item.matches(":hover") && !(flyout && flyout.matches(":hover"))) closeFlyout()
-    }, 350)
-  }
+  const closeFlyout = () => { flyout?.remove(); flyout = null; delete item.dataset.flyoutOpen }
   const openFlyout = () => {
-    cancelClose()
-    // already open for this row → nothing to do
-    if (flyout && flyout._row === item) return
-    closeFlyout()
+    if (flyout) return
+    overlay.querySelectorAll(".mm-flyout").forEach((f) => f.remove()) // one flyout at a time
+    overlay.querySelectorAll(".mm-row[data-flyout-open]").forEach((r) => delete r.dataset.flyoutOpen)
     flyout = document.createElement("div")
     flyout.className = "mm-flyout"
-    flyout._row = item
+    item.dataset.flyoutOpen = "1"
     for (const m of models) {
       const row = document.createElement("div")
       row.className = "mm-row"
@@ -203,21 +203,16 @@ function providerRow(provider, group, models, value, onPick, overlay) {
     overlay.appendChild(flyout)
     const rr = item.getBoundingClientRect()
     const fh = Math.min(flyout.offsetHeight || models.length * 26, 320)
-    // FLUSH against the row's right edge (and 1px vertical overlap) — any gap is a dead
-    // zone that closes the flyout while the pointer crosses it.
+    // FLUSH against the row's right edge (1px overlap) — no dead zone crossing.
     let left = rr.right - 1
     if (left + 190 > window.innerWidth) left = rr.left - 191 // flip left when no room on the right
     flyout.style.left = Math.max(4, left) + "px"
     flyout.style.top = Math.max(0, Math.min(rr.top - 1, window.innerHeight - fh - 4)) + "px"
-    // pointer entering the flyout cancels any pending close
-    flyout.addEventListener("mouseenter", cancelClose)
-    flyout.addEventListener("mouseleave", scheduleClose)
   }
 
   item.addEventListener("mouseenter", openFlyout)
-  // 350ms grace — enough time to cross into the flush-positioned flyout; entering the
-  // flyout cancels the close outright.
-  item.addEventListener("mouseleave", scheduleClose)
+  // Leaving the row alone does NOT close — the shared overlay mouseover handler decides
+  // based on where the pointer actually lands (row ∪ flyout stays open, anything else closes).
   item.addEventListener("click", (e) => { e.stopPropagation(); flyout ? closeFlyout() : openFlyout() })
   return item
 }
