@@ -66,3 +66,40 @@ describe("@ autocomplete trigger", () => {
     assert.equal(posts.filter((m) => m.type === "atComplete").length, 0)
   })
 })
+
+// mid-line @: activation, query tracking, and whitespace close
+it("mid-line @ activates and tracks the query", async () => {
+  const { initAutocomplete } = await import("../webview/autocomplete.js")
+  const posts = []
+  const inputEl = document.createElement("textarea")
+  const dd = document.createElement("div")
+  const ab = document.createElement("button"); ab.id = "attach-btn"
+  const fi = document.createElement("input"); fi.id = "file-input"
+  document.body.append(inputEl, dd, ab, fi)
+  initAutocomplete({ inputEl, atDropdown: dd, vscode: { postMessage: (m) => posts.push(m) }, pastedImages: [] })
+
+  // "解释 @" — @ typed mid-line, cursor right after it
+  inputEl.value = "解释 @"
+  inputEl.selectionStart = 4
+  inputEl.dispatchEvent(new window.Event("input"))
+  await sleep(200)
+  const at = posts.filter((m) => m.type === "atComplete")
+  assert.equal(at.length, 1, "mid-line @ activates")
+  assert.equal(at[0].query, "@")
+
+  // keep typing: "解释 @pac"
+  inputEl.value = "解释 @pac"
+  inputEl.selectionStart = 7
+  inputEl.dispatchEvent(new window.Event("input"))
+  await sleep(200)
+  const at2 = posts.filter((m) => m.type === "atComplete")
+  assert.equal(at2[at2.length - 1].query, "@pac")
+
+  // whitespace ends the completion: "解释 @pac 还"
+  inputEl.value = "解释 @pac 还"
+  inputEl.selectionStart = 9
+  inputEl.dispatchEvent(new window.Event("input"))
+  await sleep(200)
+  assert.equal(dd.style.display, "none", "space after the query closes the dropdown")
+})
+
