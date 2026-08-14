@@ -139,6 +139,16 @@ describe("finishTool — scroll follow + auto-collapse", () => {
     assert.match(h.querySelector(".tool-call-summary").textContent, /→ Wrote 42 chars/)
   })
 
+  it("bash wrapper lines are skipped in the collapsed summary ('(exit code 0)' never shows)", () => {
+    const { ctx } = setup()
+    const h = document.createElement("div")
+    h.innerHTML = `<span class="tool-call-icon"></span><span class="tool-call-status"></span>`
+    const b = document.createElement("div")
+    ctx._toolRefs["t3"] = { h, b, name: "bash", id: "t3", startTime: Date.now() }
+    finishTool(ctx, "bash", "t3", "[stdout]:\nbuild succeeded\n[stderr]:\n(exit code 0)")
+    assert.match(h.querySelector(".tool-call-summary").textContent, /→ build succeeded/)
+  })
+
   it("error stays expanded — the user must see what failed", () => {
     const { ctx } = setup()
     const h = document.createElement("div")

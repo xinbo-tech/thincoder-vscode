@@ -247,31 +247,40 @@ export const bashTool = {
         ].filter(Boolean).join("\n")
         finish(out)
       })
+      // Incremental capture (CLI parity): buffer stdout/stderr as they arrive so the
+      // grace/abort paths can report REAL output instead of a hardcoded "(empty)" —
+      // the old exit-grace raced the exec callback and discarded everything it had
+      // written (the "command ran but no output came back" bug).
+      let outBuf = "", errBuf = ""
+      child.stdout?.on("data", (d) => { outBuf += d.toString() })
+      child.stderr?.on("data", (d) => { errBuf += d.toString() })
       // Stop: resolve IMMEDIATELY on abort (don't wait for stdio pipes to close —
       // exec's callback hangs when a grandchild survives the kill). Kill the WHOLE
       // process tree (CLI killProcessTree parity: Windows taskkill /T /F, POSIX
       // group-kill) so grandchildren (npm test's subprocesses, etc.) don't leak.
       if (ctx.signal) {
-        const onAbort = () => { killProcessTree(child); finish("(stopped)") }
+        const onAbort = () => {
+          killProcessTree(child)
+          const partial = outBuf.trim() || errBuf.trim()
+          finish(partial ? `(stopped)\n[stdout]:\n${outBuf.trim()}${errBuf.trim() ? `\n[stderr]:\n${errBuf.trim()}` : ""}` : "(stopped)")
+        }
         if (ctx.signal.aborted) onAbort()
         else ctx.signal.addEventListener("abort", onAbort, { once: true })
       }
       // exec's callback waits for the stdio pipes to close. A BACKGROUND child
       // (start /b, &, …) inherits them, so the callback never fires and the tool
-      // hangs until the timeout — resolve after a grace period instead (CLI parity).
-      child.once("exit", () => {
+      // hangs until the timeout — resolve after a grace period instead, reporting
+      // whatever output was collected (CLI parity).
+      child.once("exit", (code, exitSignal) => {
         setTimeout(() => {
-          finish(
-            "(background) the shell exited but a child process still holds the output pipe — output may be incomplete; the process may still be running\n" +
-            "[stdout]:\n(empty)"
-          )
-        }, 1000)
+          const status = exitSignal ? `killed: ${exitSignal}` : `exit code ${code ?? 0}`
+          const parts = [`[stdout]:\n${outBuf.trim() || "(empty)"}`]
+          if (errBuf.trim()) parts.push(`[stderr]:\n${errBuf.trim()}`)
+          parts.push(`(${status})`)
+          parts.push("[background] the shell exited but a child process still holds the output pipe — output may be incomplete; the process may still be running")
+          finish(parts.join("\n"))
+        }, 1500)
       })
-      // Wire abort signal
-      if (ctx.signal) {
-        ctx.signal.addEventListener("abort", () => { child.kill() }, { once: true })
-        if (ctx.signal.aborted) child.kill()
-      }
     })
   },
   outputPanel: true,

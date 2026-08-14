@@ -175,11 +175,16 @@ export function addTool(ctx, name, args, id) {
   scrollDown(ctx)
 }
 
-/** Last line of a tool result (CLI-style completion summary, ≤80 chars). */
+/** Last line of a tool result (CLI-style completion summary, ≤80 chars).
+ *  Wrapper lines ([stdout]:/[stderr]:/(exit code N)/(stopped)/[background]…)
+ *  are skipped — for bash the literal last line is "(exit code 0)", which as a
+ *  collapsed-card summary looks like "no output came back". */
 function resultSummary(text) {
+  const WRAPPER = /^(?:\[(?:stdout|stderr|background)\]|\((?:exit code|killed|stopped|background))/
   const trimmed = (text || "").trim()
   if (!trimmed) return ""
-  const last = trimmed.split("\n").filter(Boolean).pop() ?? ""
+  const lines = trimmed.split("\n").map((l) => l.trim()).filter((l) => l && !WRAPPER.test(l))
+  const last = lines.pop() ?? trimmed.split("\n").filter(Boolean).pop() ?? ""
   return last.length > 80 ? last.slice(0, 79) + "…" : last
 }
 

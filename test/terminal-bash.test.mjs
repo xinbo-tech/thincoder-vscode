@@ -27,6 +27,19 @@ beforeEach(() => {
   vscode.window.activeTerminal = undefined
 })
 
+describe("bash child-process incremental capture", () => {
+  it("Stop mid-run returns the partial output already collected (not a bare '(stopped)')", async () => {
+    const ctrl = new AbortController()
+    setTimeout(() => ctrl.abort(), 200)
+    const r = await bashTool.execute(
+      { command: "node -e \"console.log('partial-out'); setTimeout(()=>{},60000)\"", timeout: 90000 },
+      { cwd: process.cwd(), signal: ctrl.signal },
+    )
+    assert.match(r, /\(stopped\)/)
+    assert.match(r, /partial-out/, "partial stdout survives the abort")
+  })
+})
+
 describe("bash terminal modes", () => {
   it("inject: fills the command into the terminal WITHOUT executing", async () => {
     const term = fakeTerminal()

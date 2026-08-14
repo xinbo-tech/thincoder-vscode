@@ -347,7 +347,7 @@ describe("bash — background process does not hang (CLI parity)", () => {
       const r = await bashTool.execute({ command: cmd }, { cwd: bgDir })
       const elapsed = Date.now() - t0
       assert.ok(elapsed < 10000, `应在 grace 后返回而非卡到超时，实际 ${elapsed}ms`)
-      assert.match(r, /\(background\)/, "提示后台进程持有管道: " + r.slice(0, 120))
+      assert.match(r, /\[background\]/, "提示后台进程持有管道: " + r.slice(0, 120))
     } finally {
       // 后台子进程 cwd 是 bgDir，5 秒自退后才可删除——轮询等待
       for (let i = 0; i < 20; i++) {
