@@ -52,8 +52,7 @@
 - `autoApprove` 会话级开关（槽位字段，与 CLI 共享），默认 `false`；AUTO 按钮 / approve-all 翻转，mid-turn 立即生效
 - repo_outline + context compaction
 
-**暂未做（v1.x / v2）：**
-- ~~三层记忆体系~~（文件式记忆已实现）、~~MCP 客户端~~（stdio/http/ws 已实现）、~~read_image UI~~（已实现）、~~编辑器上下文感知~~（editor-context 注入已实现）、~~LSP 集成~~（`tools/lsp.mjs` 已实现——直接用 VS Code 语言服务 API，无需自起语言服务器）（08-14 注：v1 范围已全部覆盖）
+**v1 范围已全部覆盖（08-14）：** 文件式记忆（`.thincoder/memory/` markdown + frontmatter，CLI 格式兼容）、MCP 客户端（stdio/http/ws）、read_image（工具 + 粘贴图片）、编辑器上下文感知（editor-context 注入）、LSP 集成（`tools/lsp.mjs`，直接用 VS Code 语言服务 API）均已实现。v2 待定项暂无。
 
 ## 待决策
 
@@ -77,21 +76,21 @@
 > 目标是所有文件夹对 Agent 可见。v0.1.0 先用 `workspaceFolders[0]`，后续补全。
 > 当前在状态栏上标明工作目录，用户知道有限制。
 
-### API Key 存储（✅ 已定 → 已变更）
+### API Key 存储（✅ 已定）
 
-> ~~迁 `SecretStorage`（系统密钥链）。~~ **（08-13 变更：key 最终落在 `~/.thincoder/config.json` 明文，与 CLI 共享同一份配置——SecretStorage 仅用于旧版一次性迁移，迁移后清除。决策动因：两端共享配置 > 密钥链隔离。）**
+> Key 落在 `~/.thincoder/config.json` 明文，与 CLI 共享同一份配置（决策动因：两端共享配置 > 密钥链隔离）。旧版 SecretStorage 仅用于一次性迁移，迁移后清除。
 
 ### Webview 技术选型（✅ 已定）
 
-> 继续 vanilla JS。~~当前 ~600 行~~（现约 3000+ 行，08-13），仍不值得引入框架。撑不住了再迁。
+> 继续 vanilla JS。现约 5000+ 行（08-14），仍不值得引入框架。撑不住了再迁。
 
 ### 与 CLI 记忆互通（✅ 已定）
 
-> 暂不处理。~~等 VS Code 扩展先有自己的记忆体系再讨论互通方案。~~（08-13：VS Code 已有自己的文件式记忆——`.thincoder/memory/` markdown + frontmatter，与 CLI 条目格式兼容；但自动互通/合并检索仍未做，决策保留。）
+> 暂不处理。VS Code 已有自己的文件式记忆（`.thincoder/memory/` markdown + frontmatter，与 CLI 条目格式兼容）；自动互通/合并检索仍未做，决策保留。
 
 ### 国际化（✅ 已定 → 已变更）
 
-> ~~全英文。架构上留扩展位~~ **（已变更为中英双语：`locales/en.json` + `locales/zh.json`，UI 文本集中在 i18n 常量文件，webview 启动注入——扩展位按原设计启用了。）**
+> 中英双语：`locales/en.json` + `locales/zh.json`，UI 文本集中在 i18n 常量文件，webview 启动注入。
 
 ## 与 thincoder CLI 的关系
 
