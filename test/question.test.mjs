@@ -41,3 +41,35 @@ test("no callback → native fallback path is not entered (callback-less ctx nev
   // does not provide — assert the contract of the callback guard instead.
   assert.ok(typeof questionTool.execute === "function")
 })
+
+test("a parked question is released (null) when the turn's signal aborts — panel-side wiring", async () => {
+  // Mirrors the onQuestion wiring in panel-chat.mjs: Stop must resolve the parked
+  // promise, remove the queue entry, and tell the webview to dismiss the card.
+  const ctrl = new AbortController()
+  const queue = []
+  const posts = []
+  const onQuestion = (question, options) => new Promise((resolve) => {
+    const entry = { resolve }
+    queue.push(entry)
+    posts.push({ type: "question", question, options })
+    const onAbort = () => {
+      const i = queue.indexOf(entry)
+      if (i >= 0) queue.splice(i, 1)
+      posts.push({ type: "questionCancelled" })
+      resolve(null)
+    }
+    if (ctrl.signal.aborted) onAbort()
+    else ctrl.signal.addEventListener("abort", onAbort, { once: true })
+  })
+  const pending = onQuestion("Stuck?", ["a", "b"])
+  ctrl.abort()
+  assert.equal(await pending, null, "Stop resolves the parked question with null")
+  assert.equal(queue.length, 0, "queue entry removed")
+  assert.ok(posts.some((m) => m.type === "questionCancelled"), "webview told to dismiss")
+})
+
+test("the question tool returns '(user cancelled)' on a null answer", async () => {
+  const ctx = { callbacks: { onQuestion: async () => null } }
+  const r = await questionTool.execute({ question: "x?" }, ctx)
+  assert.equal(r, "(user cancelled)")
+})

@@ -23,8 +23,19 @@ export function permissionGate(panel) {
     // flag after this gate was built. Honoring it immediately stops repeated
     // permission prompts for the rest of the running turn.
     if (panel._autoApprove) { resolve(true); return }
-    panel._permissionQueue.push({ resolve, toolName })
+    const entry = { resolve, toolName }
+    panel._permissionQueue.push(entry)
     panel._setStatus?.("waiting")
     panel._panel?.webview.postMessage({ type: "permissionRequest", tool: toolName, args: JSON.stringify(args, null, 2), diff: diffInfo })
+    // Stop must release a permission-parked turn — otherwise the loop hangs on
+    // this promise until the user answers the (now irrelevant) prompt.
+    const onAbort = () => {
+      const i = panel._permissionQueue.indexOf(entry)
+      if (i >= 0) panel._permissionQueue.splice(i, 1)
+      resolve(false)
+    }
+    const sig = panel._abortController?.signal
+    if (sig?.aborted) onAbort()
+    else sig?.addEventListener("abort", onAbort, { once: true })
   })
 }

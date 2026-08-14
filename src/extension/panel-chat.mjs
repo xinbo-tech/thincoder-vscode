@@ -148,9 +148,21 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     },
     onPermissionRequired: permissionGate(panel),
     onQuestion: (question, options) => new Promise((resolve) => {
-      panel._questionQueue.push({ resolve })
+      const entry = { resolve }
+      panel._questionQueue.push(entry)
       panel._setStatus("waiting")
       panel._panel?.webview.postMessage({ type: "question", question, options: options ?? null })
+      // Stop must release the waiting agent turn — an unanswered question would
+      // otherwise keep the loop hung on this promise forever (user presses Stop,
+      // UI stays "running" until the question card is answered).
+      const onAbort = () => {
+        const i = panel._questionQueue.indexOf(entry)
+        if (i >= 0) panel._questionQueue.splice(i, 1)
+        panel._panel?.webview.postMessage({ type: "questionCancelled" })
+        resolve(null)
+      }
+      if (panel._abortController?.signal.aborted) onAbort()
+      else panel._abortController?.signal.addEventListener("abort", onAbort, { once: true })
     }),
   })
   const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume })

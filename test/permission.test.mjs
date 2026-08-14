@@ -72,3 +72,16 @@ test("approve-all clears every pending prompt in the queue (panel-messages seman
 
   assert.deepEqual(await Promise.all([p1, p2]), [true, true])
 })
+
+test('aborting the turn releases a parked permission prompt with false', async () => {
+  const ctrl = new AbortController()
+  const panel = fakePanel(false)
+  panel._abortController = ctrl
+  panel._setStatus = () => {}
+  const gate = permissionGate(panel)
+  const pending = gate('write', { path: 'x' }, null)
+  assert.equal(panel._permissionQueue.length, 1)
+  ctrl.abort()
+  assert.equal(await pending, false, 'Stop denies the parked permission')
+  assert.equal(panel._permissionQueue.length, 0, 'queue drained')
+})

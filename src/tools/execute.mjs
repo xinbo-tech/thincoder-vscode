@@ -183,9 +183,13 @@ export const executeTool = {
     try {
       const script = new Script(code, { filename: "codemode.js" })
       // timeout goes to runInContext, not the Script constructor (CLI bug: constructor ignores it)
+      // NOTE: vm script run is SYNCHRONOUS — an async abort cannot preempt it mid-run;
+      // the vm timeout stays the hard ceiling. Refuse to START when already aborted.
+      if (ctx.signal?.aborted) throw new DOMException("Aborted", "AbortError")
       script.runInContext(sandbox, { timeout: timeoutMs })
       return output.join("\n") || "(no output)"
     } catch (err) {
+      if (err?.name === "AbortError" || ctx.signal?.aborted) throw err
       const out = output.join("\n")
       const prefix = out ? `${out}\n\n` : ""
       return `${prefix}Error: ${err.message}`
