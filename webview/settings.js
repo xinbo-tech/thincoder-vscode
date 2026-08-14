@@ -3,6 +3,7 @@
  */
 import { escHtml } from "./ui.js"
 import { t } from "./i18n.js"
+import { modelMenuTrigger } from "./model-menu.js"
 
 const PROVIDER_LABELS = {
   deepseek: "DeepSeek", kimi: "Kimi (Moonshot)", glm: "GLM (Zhipu)",
@@ -35,44 +36,33 @@ function paTypeChanged() {
 }
 
 /** Build the advisor-model dropdown options for a given provider (inherit + known models). */
-function buildAdvModelOptions(model, provider) {
-  const models = (_getModels?.() || []).filter((m) => m.provider === provider)
-  let opts = `<option value="">${t("settings.advisorInherit")}</option>`
-  opts += models.map((m) => `<option value="${escHtml(m.id)}" ${model === m.id ? "selected" : ""}>${escHtml(m.id)}</option>`).join("")
-  // Keep the current value selectable even if it's not in the known list (custom/retired model).
-  if (model && !models.some((m) => m.id === model)) {
-    opts += `<option value="${escHtml(model)}" selected>${escHtml(model)}</option>`
-  }
-  return opts
+
+/** Effort enum for a model id — the panel's model entries carry spec reasoning arrays. */
+function effortEnumFor(modelId) {
+  const entry = (_getModels?.() || []).find((m) => m.id === modelId)
+  const levels = entry?.reasoning || []
+  // drop "enabled" (a mode flag, not an effort level) for the effort dropdown
+  return levels.filter((x) => x !== "enabled")
+}
+/** Model-official default effort: spec reasoningEffortDefault (falls back to the highest level). */
+function defaultEffortFor(modelId) {
+  const entry = (_getModels?.() || []).find((m) => m.id === modelId)
+  const levels = effortEnumFor(modelId)
+  return (entry && entry.effortDefault) || levels[levels.length - 1] || null
+}
+/** Provider display label. */
+function labelFor(provider) {
+  return _providerStatus.labels?.[provider] || PROVIDER_LABELS[provider] || provider
 }
 
 /** Consult row: provider dropdown over CONFIGURED providers (consultation calls them directly).
  *  Null-safe: status entries may be null (e.g. custom: null) — guard before .configured. */
-function consultProvOptions(ps, selected) {
-  const names = Object.entries(ps || {}).filter(([, v]) => v && v.configured).map(([n]) => n)
-  let opts = `<option value="">${escHtml(t("settings.consultPickProvider"))}</option>`
-  opts += names.map((n) => `<option value="${escHtml(n)}" ${selected === n ? "selected" : ""}>${escHtml(_providerStatus.labels?.[n] || PROVIDER_LABELS[n] || n)}</option>`).join("")
-  return opts
-}
 
 /** Consult row: model dropdown for the chosen provider. Sources (union, deduped):
  *  1. the panel's model list (_getModels — populated by the extension's listModels probe),
  *  2. the provider entry's CURRENT model from providerStatus — always available offline,
  *     so a provider whose model probe failed still offers its configured model instead of
  *     a dead-end empty dropdown. */
-function consultModelOptions(provider, selected) {
-  if (!provider) return `<option value="">${escHtml(t("settings.consultPickModel"))}</option>`
-  const fromList = (_getModels?.() || []).filter((m) => m.provider === provider).map((m) => m.id)
-  const entryModel = _providerStatus.providers?.[provider]?.model
-  const ids = [...new Set([...fromList, ...(entryModel ? [entryModel] : [])])]
-  let opts = ids.map((id) => `<option value="${escHtml(id)}" ${selected === id ? "selected" : ""}>${escHtml(id)}</option>`).join("")
-  // Keep a saved value selectable even if it's gone from every source (retired model).
-  if (selected && !ids.includes(selected)) {
-    opts += `<option value="${escHtml(selected)}" selected>${escHtml(selected)}</option>`
-  }
-  if (!opts) opts = `<option value="">${escHtml(t("settings.consultPickModel"))}</option>`
-  return opts
-}
 
 /** Collect consult rows → [{provider, model}] (≤5). Returns {models, invalid} —
  *  incomplete rows are REPORTED (for save-time validation), never silently dropped. */
@@ -80,15 +70,105 @@ function collectConsultRows() {
   const models = []
   const invalid = []
   document.querySelectorAll("#consult-rows .consult-row").forEach((row) => {
-    const provider = row.querySelector(".consult-provider")?.value || ""
-    const model = row.querySelector(".consult-model")?.value || ""
-    if (provider && model) models.push({ provider, model })
-    else if (provider || model) invalid.push(row) // half-filled — needs the user's attention
+    const slot = row.querySelector(".consult-model-slot")
+    const provider = row.dataset.provider || ""
+    const model = row.dataset.model || slot?.dataset.model || ""
+    if (provider && model) {
+      const effSel = row.querySelector(".consult-effort")
+      models.push({ provider, model, effort: effSel ? effSel.value : null })
+    } else if (provider || model) invalid.push(row) // half-filled — needs the user's attention
   })
   return { models: models.slice(0, 5), invalid }
 }
 
 /** Wire add/remove/cascade for consult rows (idempotent — called after each buildSettings). */
+function mountModelMenus() {
+  // subagent slots (stored as "provider:model" — CLI compatible)
+  for (const id of ["global", "explore", "plan", "coder", "eng-coder"]) {
+    const slot = document.getElementById("submodel-slot-" + id)
+    if (!slot || slot.dataset.mounted === "1") continue
+    slot.dataset.mounted = "1"
+    const models = _getModels?.() || []
+    const raw = slot.dataset.value || ""
+    const sep = raw.indexOf(":")
+    const value = sep > 0 ? { provider: raw.slice(0, sep), model: raw.slice(sep + 1) } : null
+    const btn = modelMenuTrigger({
+      label: raw || t("settings.inherit"),
+      models,
+      value,
+      onPick: ({ provider, model }) => {
+        const v = provider + ":" + model
+        slot.dataset.value = v
+        slot.querySelector(".model-menu-btn").textContent = v
+        fireAgentSave()
+      },
+    })
+    slot.replaceChildren(btn)
+  }
+  document.querySelectorAll("#consult-rows .consult-row").forEach((row) => {
+    mountSlot(row.querySelector(".consult-model-slot"), {
+      provider: row.dataset.provider || "",
+      model: row.dataset.model || "",
+      onPick: ({ provider, model }) => setRowModel(row, provider, model),
+    })
+  })
+  const advSlot = document.getElementById("adv-model-slot")
+  if (advSlot) {
+    mountSlot(advSlot, {
+      provider: advSlot.dataset.provider || "",
+      model: advSlot.dataset.model || "",
+      onPick: ({ provider, model }) => { advSlot.dataset.provider = provider; advSlot.dataset.model = model; refreshAdvisorEffort(model); fireAgentSave() },
+    })
+  }
+}
+
+function mountSlot(slot, { provider, model, onPick }) {
+  if (!slot || slot.dataset.mounted === "1") return
+  slot.dataset.mounted = "1"
+  const models = _getModels?.() || []
+  const label = provider && model ? labelFor(provider) + " · " + model : t("settings.pickModel")
+  const trig = modelMenuTrigger({ label, models, value: provider && model ? { provider, model } : null, onPick })
+  slot.replaceChildren(trig)
+}
+
+function setRowModel(row, provider, model) {
+  row.dataset.provider = provider
+  row.dataset.model = model
+  const btn = row.querySelector(".consult-model-slot .model-menu-btn")
+  if (btn) btn.textContent = labelFor(provider) + " · " + model
+  refreshRowEffort(row, model)
+  document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true }))
+}
+
+function refreshRowEffort(row, model) {
+  let sel = row.querySelector(".consult-effort")
+  const enum_ = model ? effortEnumFor(model) : null
+  if (!enum_ || enum_.length === 0) { sel?.remove(); return }
+  const current = sel?.value || defaultEffortFor(model)
+  if (!sel) {
+    sel = document.createElement("select")
+    sel.className = "consult-effort"
+    sel.addEventListener("change", () => document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true })))
+    row.insertBefore(sel, row.querySelector(".consult-del"))
+  }
+  sel.innerHTML = enum_.map((e) => '<option value="' + escHtml(e) + '" ' + (current === e ? "selected" : "") + ">" + escHtml(e) + "</option>").join("")
+}
+
+function refreshAdvisorEffort(model) {
+  const wrap = document.getElementById("adv-effort")?.closest(".key-field")
+  const enum_ = model ? effortEnumFor(model) : null
+  if (!enum_ || enum_.length === 0) { wrap?.remove(); return }
+  if (wrap) {
+    const sel = wrap.querySelector("select")
+    const current = sel?.value || defaultEffortFor(model)
+    sel.innerHTML = enum_.map((e) => '<option value="' + escHtml(e) + '" ' + (current === e ? "selected" : "") + ">" + escHtml(e) + "</option>").join("")
+  }
+}
+
+function fireAgentSave() {
+  document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true }))
+}
+
 function bindConsultRows() {
   const rows = document.getElementById("consult-rows")
   const addBtn = document.getElementById("consult-add")
@@ -101,47 +181,22 @@ function bindConsultRows() {
       if (rows.querySelectorAll(".consult-row").length >= 5) return
       const div = document.createElement("div")
       div.className = "key-field consult-row"
-      // NOTE: pass the PROVIDERS MAP, not the full status object — the full shape
-      // filters to an empty provider list (every entry lacks .configured).
-      div.innerHTML = `<select class="consult-provider">${consultProvOptions(currentProviderStatus().providers || {}, "")}</select><select class="consult-model">${consultModelOptions("", "")}</select><button class="consult-del" title="${t("settings.consultRemove")}">✕</button>`
+      div.innerHTML = '<span class="consult-model-slot"></span><button class="consult-del" title="' + t("settings.consultRemove") + '">✕</button>'
       rows.appendChild(div)
-      wireRow(div)
+      mountSlot(div.querySelector(".consult-model-slot"), { provider: "", model: "", onPick: ({ provider, model }) => setRowModel(div, provider, model) })
       rows.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true }))
     } catch (e) {
       console.error("[consult] add row failed:", e)
     }
   }
-  for (const row of rows.querySelectorAll(".consult-row")) wireRow(row)
-  function wireRow(row) {
-    row.querySelector(".consult-provider")?.addEventListener("change", (e) => {
-      const modelSel = row.querySelector(".consult-model")
-      modelSel.innerHTML = consultModelOptions(e.target.value, "")
-      document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true }))
-    })
-    row.querySelector(".consult-model")?.addEventListener("change", () => {
-      document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true }))
-    })
-    row.querySelector(".consult-del")?.addEventListener("click", () => { row.remove(); document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true })) })
+  for (const row of rows.querySelectorAll(".consult-row")) {
+    row.querySelector(".consult-del")?.addEventListener("click", () => { row.remove(); rows.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true })) })
   }
 }
 
 /** The settings module keeps its own _providerStatus — expose for consult row building. */
-function currentProviderStatus() { return _providerStatus }
 
 /** Build a subagent-model dropdown (value = "provider:model"; empty = inherit). */
-function buildSubmodelOptions(current) {
-  const models = _getModels?.() || []
-  let opts = `<option value="">${t("settings.inherit")}</option>`
-  opts += models.map((m) => {
-    const v = `${m.provider}:${m.id}`
-    return `<option value="${escHtml(v)}" ${current === v ? "selected" : ""}>${escHtml(v)}</option>`
-  }).join("")
-  // Keep a non-list value (custom model name / bare provider) selectable.
-  if (current && !models.some((m) => `${m.provider}:${m.id}` === current)) {
-    opts += `<option value="${escHtml(current)}" selected>${escHtml(current)}</option>`
-  }
-  return opts
-}
 
 /** @type {{ built?:boolean, files?:number, chunks?:number } | null} */
 let _indexStatus = null
@@ -216,12 +271,6 @@ export function initSettings({ onClose, getModels }) {
     }
   }
   window._paTypeChanged = paTypeChanged
-  // Advisor provider change → rebuild the model dropdown for that provider.
-  window._advProviderChanged = function() {
-    const p = document.getElementById("adv-provider")?.value ?? ""
-    const sel = document.getElementById("adv-model")
-    if (sel) sel.innerHTML = buildAdvModelOptions("", p)
-  }
   // Custom provider: probe baseURL+key via /models — validates the connection
   // AND populates the model dropdown so the model is picked, not hand-typed.
   window._paFetchModels = function() {
@@ -500,9 +549,9 @@ function buildSettings() {
   html += `<div class="key-field"><label title="${t("settings.maxTurnsHelp")}">${t("settings.maxTurns")}</label><input id="ag-maxturns" type="number" min="1" value="${as.maxTurns ?? 100}"></div>`
   html += `<div class="key-field"><label title="${t("settings.subagentTurnsHelp")}">${t("settings.subagentTurns")}</label><input id="ag-subturns" type="number" min="1" value="${as.subagentTurns ?? 100}"></div>`
   html += `<div class="settings-subtitle">${t("settings.submodelSection")}</div>`
-  html += `<div class="key-field"><label title="${t("settings.submodelHelp")}">${t("settings.submodelGlobal")}</label><select id="ag-submodel-global">${buildSubmodelOptions(as.subagentModel || "")}</select></div>`
+  html += `<div class="key-field"><label title="${t("settings.submodelHelp")}">${t("settings.submodelGlobal")}</label><span id="submodel-slot-global" class="submodel-slot" data-value="${escHtml(as.subagentModel || "")}"></span></div>`
   html += `${["explore", "plan", "coder", "eng-coder"].map((role) => `
-    <div class="key-field"><label title="${t("settings.submodelHelp")}">${role}</label><select id="ag-submodel-${role}">${buildSubmodelOptions(as.subagentModels?.[role] || "")}</select></div>`).join("")}`
+    <div class="key-field"><label title="${t("settings.submodelHelp")}">${role}</label><span id="submodel-slot-${role}" class="submodel-slot" data-value="${escHtml(as.subagentModels?.[role] || "")}"></span></div>`).join("")}`
   html += `<div class="key-field"><label title="${t("settings.compactThresholdHelp")}">${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>`
   html += `<label class="switch" title="${t("settings.verifyGuardHelp")}"><input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}> ${t("settings.verifyGuard")}</label>`
   html += `<div class="settings-subtitle" title="${t("settings.consultHelp")}">${t("settings.consultSection")}</div>`
@@ -513,8 +562,12 @@ function buildSettings() {
   const preselect = consultConfigured.length === 1 ? consultConfigured[0] : ""
   const consultRows = consultList.length > 0 ? consultList : [{ provider: preselect, model: "" }]
   for (const cm of consultRows) {
-    const prov = cm?.provider || preselect
-    html += `<div class="key-field consult-row"><select class="consult-provider">${consultProvOptions(ps, prov)}</select><select class="consult-model">${consultModelOptions(prov, cm?.model)}</select><button class="consult-del" title="${t("settings.consultRemove")}">✕</button></div>`
+    const label = cm?.provider && cm?.model ? `${labelFor(cm.provider)} · ${cm.model}` : ""
+    const effortEnum = cm?.model ? effortEnumFor(cm.model) : null
+    html += `<div class="key-field consult-row"${cm ? ` data-provider="${escHtml(cm.provider || "")}" data-model="${escHtml(cm.model || "")}"` : ""}>`
+    html += `<span class="consult-model-slot"></span>`
+    html += effortEnum ? `<select class="consult-effort">${effortEnum.map((e) => `<option value="${escHtml(e)}" ${(cm?.effort || defaultEffortFor(cm?.model)) === e ? "selected" : ""}>${escHtml(e)}</option>`).join("")}</select>` : ""
+    html += `<button class="consult-del" title="${t("settings.consultRemove")}">✕</button></div>`
   }
   html += `</div>`
   html += `<div id="consult-status" class="consult-status">${consultList.length > 0 ? t("settings.consultActive", { n: consultList.length }) : t("settings.consultInactive")}</div>`
@@ -526,10 +579,11 @@ function buildSettings() {
   // Provider = configured providers dropdown; model = that provider's known models.
   const configuredNames = Object.entries(ps).filter(([, v]) => v.configured).map(([n]) => n)
   const advProvider = adv.provider || ""
-  const provOpts = `<option value="">${t("settings.advisorInherit")}</option>` +
-    configuredNames.map((n) => `<option value="${escHtml(n)}" ${advProvider === n ? "selected" : ""}>${escHtml(_providerStatus.labels?.[n] || PROVIDER_LABELS[n] || n)}</option>`).join("")
-  html += `<div class="key-field"><label title="${t("settings.advisorProviderHelp")}">${t("settings.advisorProvider")}</label><select id="adv-provider" onchange="window._advProviderChanged()">${provOpts}</select></div>`
-  html += `<div class="key-field"><label title="${t("settings.advisorModelHelp")}">${t("settings.advisorModel")}</label><select id="adv-model">${buildAdvModelOptions(adv.model, advProvider)}</select></div>`
+  html += `<div class="key-field"><label title="${t("settings.advisorProviderHelp")}">${t("settings.advisorProvider")}</label><span id="adv-model-slot" class="adv-model-slot" data-provider="${escHtml(advProvider)}" data-model="${escHtml(adv.model || "")}"></span></div>`
+  {
+    const advEffortEnum = adv.model ? effortEnumFor(adv.model) : null
+    if (advEffortEnum && advEffortEnum.length > 0) html += `<div class="key-field"><label title="${t("settings.advisorEffortHelp")}">${t("settings.advisorEffort")}</label><select id="adv-effort">${advEffortEnum.map((e) => `<option value="${escHtml(e)}" ${(adv.effort || defaultEffortFor(adv.model)) === e ? "selected" : ""}>${escHtml(e)}</option>`).join("")}</select></div>`
+  }
   html += ``
   html += `</div></section>`
 
@@ -588,7 +642,7 @@ function buildSettings() {
     const compactRaw = get("ag-compact")
     const subModels = {}
     for (const role of ["explore", "plan", "coder", "eng-coder"]) {
-      const v = get(`ag-submodel-${role}`)
+      const v = document.getElementById(`submodel-slot-${role}`)?.dataset.value || ""
       if (v) subModels[role] = v
     }
     document.querySelectorAll("#consult-rows .consult-row").forEach((r) => r.classList.remove("consult-invalid"))
@@ -604,15 +658,16 @@ function buildSettings() {
       settings: {
         maxTurns: get("ag-maxturns") || undefined,
         subagentTurns: get("ag-subturns") || undefined,
-        subagentModel: get("ag-submodel-global") || undefined,
+        subagentModel: document.getElementById("submodel-slot-global")?.dataset.value || undefined,
         subagentModels: subModels,
         compactThreshold: compactRaw === "" ? "" : (compactRaw || undefined),
         verifyGuard: chk("ag-verifyguard"),
         advisor: {
           enabled: chk("adv-enabled"),
           guard: chk("adv-guard"),
-          provider: get("adv-provider") || undefined,
-          model: get("adv-model") || undefined,
+          provider: document.getElementById("adv-model-slot")?.dataset.provider || undefined,
+          model: document.getElementById("adv-model-slot")?.dataset.model || undefined,
+          effort: document.getElementById("adv-effort")?.value || undefined,
         },
         ...(consultBlocked ? {} : { consultModels: models }),
       },
@@ -632,8 +687,8 @@ function buildSettings() {
   }
   agCard.querySelectorAll("input, select").forEach((el) => el.addEventListener("change", autoSaveAgent))
   document.getElementById("consult-rows")?.addEventListener("consult-rows-changed", autoSaveAgent)
-  // Consult row interactions (add/remove/cascade) drive auto-save via the custom event
-  try { bindConsultRows() } catch (e) { console.error("[consult] bindConsultRows failed:", e) }
+  // Mount model-menu triggers into their slots + wire consult interactions
+  try { mountModelMenus(); bindConsultRows() } catch (e) { console.error("[settings] model-menu mount failed:", e) }
 
   // Proxy settings: CHANGE-TO-SAVE (test button stays — it's an action, not a save)
   const pxCard = document.getElementById("px-save-btn")?.closest(".settings-card") || document

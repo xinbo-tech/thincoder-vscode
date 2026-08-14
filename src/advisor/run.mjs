@@ -314,6 +314,7 @@ export function resolveAdvisorProvider(agent) {
       if (cfg.thinking === null || cfg.thinking === false) result.thinking = undefined  // explicitly off
       else if (cfg.thinking !== undefined) result.thinking = cfg.thinking
       if (cfg.reasoningEffort !== undefined) result.reasoningEffort = cfg.reasoningEffort
+      if (typeof cfg.effort === "string" && cfg.effort) result.reasoningEffort = cfg.effort // panel-persisted effort (MODEL-PICKER-UNIFY §3.3)
       return result
     } catch (e) {
       console.warn(`[advisor] resolveAdvisorProvider: ${e.message}`)
@@ -324,6 +325,7 @@ export function resolveAdvisorProvider(agent) {
   if (cfg?.thinking === null || cfg?.thinking === false) provider.thinking = undefined
   else if (cfg?.thinking !== undefined) provider.thinking = cfg.thinking
   if (cfg?.reasoningEffort !== undefined) provider.reasoningEffort = cfg.reasoningEffort
+  if (typeof cfg?.effort === "string" && cfg.effort) provider.reasoningEffort = cfg.effort
   return provider
 }
 

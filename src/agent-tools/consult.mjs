@@ -81,9 +81,12 @@ async function runConsultChild(ctx, session, id, m, problem, consultPrompt, ctrl
     const build = ctx.buildProvider ?? buildProvider // test-injectable (like ctx.runAgent)
     const provider = await build(m.provider)
     if (!provider) throw new Error(`provider "${m.provider}" not configured`)
+    // Effort level from the consult entry (MODEL-PICKER-UNIFY §3.3): explicit, model-official
+    // default filled by the panel at pick time. Non-thinking models carry effort:null.
+    const withEffort = m.effort ? { ...provider, reasoningEffort: m.effort } : provider
     const runner = ctx.runAgent ?? (await import("../agent.mjs")).runAgent
     const task = (consultPrompt ? consultPrompt + "\n\n" : "") + "# Problem\n" + problem
-    const result = await runner({ ...provider, model: m.model }, ctx.cwd, task, {}, ctrl.signal, true, {
+    const result = await runner({ ...withEffort, model: m.model }, ctx.cwd, task, {}, ctrl.signal, true, {
       depth: 1, role: "explore",
       maxTurns: ctx.agent?.config?.agent?.subagentTurns ?? 100,
       extraTools: [makeMainHistoryTool(ctx.agent)],

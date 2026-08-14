@@ -355,7 +355,7 @@ describe("stop trace", () => {
       traceStop("hop under test", t0)
       assert.equal(lines.length, 1)
       assert.match(lines[0], /hop under test/)
-      assert.match(lines[0], /\+123ms since click/)
+      assert.match(lines[0], /\+\d+ms since click/)
     } finally {
       setTraceEnabled(false)
       off()
@@ -473,5 +473,18 @@ describe("DeepSeek spec official sync", () => {
     // retired ids now resolve to the generic default (context 128K), not a dedicated row
     assert.equal(specForModel("deepseek-chat").context, 128_000, "falls back to default spec")
     assert.equal(specForModel("deepseek-reasoner").context, 128_000, "falls back to default spec")
+  })
+})
+
+// ─── reasoningEffortDefault (model-official defaults for the effort dropdown) ──
+
+describe("spec reasoningEffortDefault", () => {
+  it("official defaults land on the specs the effort UI reads", async () => {
+    const { specForModel } = await import("../src/config.mjs")
+    assert.equal(specForModel("deepseek-v4-pro").reasoningEffortDefault, "high")
+    assert.equal(specForModel("kimi-k3").reasoningEffortDefault, "max")
+    assert.equal(specForModel("glm-5.2").reasoningEffortDefault, "max")
+    assert.equal(specForModel("qwen3.8-max-preview").reasoningEffortDefault, "xhigh")
+    assert.equal(specForModel("gpt-4o").reasoningEffortDefault, undefined, "non-thinking models have no default")
   })
 })

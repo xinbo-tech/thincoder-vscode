@@ -82,7 +82,6 @@
   "settings.advisorEnabled": "Enabled",
   "settings.advisorGuard": "Guard (review pushback)",
   "settings.advisorProvider": "Provider (empty = main model)",
-  "settings.advisorModel": "Model (empty = main model)",
   "settings.proxySection": "Proxy",
   "settings.proxyUri": "Proxy URI (http://host:port)",
   "settings.proxyWeb": "Web tools (websearch/fetch)",
@@ -144,7 +143,6 @@
   "settings.advisorEnabledHelp": "Run an independent review on your changes after code edits.",
   "settings.advisorGuardHelp": "Block the turn when the advisor review is missing or failed.",
   "settings.advisorProviderHelp": "Provider used for advisor reviews — empty falls back to the main provider.",
-  "settings.advisorModelHelp": "Model used for advisor reviews — empty falls back to the main model.",
   "settings.proxyUriHelp": "HTTP proxy for network access (e.g. http://127.0.0.1:7890).",
   "settings.proxyWebHelp": "Route web fetch/search through the proxy.",
   "settings.proxyModelHelp": "Route LLM API calls through the proxy.",
@@ -158,7 +156,6 @@
   "settings.websearchSection": "Web Search",
   "settings.websearchLabel": "Tavily API Key",
   "settings.websearchHelp": "Optional — Tavily structured search. Empty key falls back to Bing.",
-  "settings.advisorInherit": "Inherit (main model)",
   "settings.inherit": "Inherit",
   "settings.fetchModels": "Fetch Models",
   "settings.connecting": "Connecting…",
@@ -183,10 +180,11 @@
   "settings.consultHelp": "Up to 5 models that analyze hard problems in parallel when the agent consults (consult_start). Empty = consultation disabled.",
   "settings.consultAdd": "+ Add consult model",
   "settings.consultRemove": "Remove",
-  "settings.consultPickProvider": "provider…",
-  "settings.consultPickModel": "model…",
   "settings.consultActive": "Consultation active — ${n} model(s) will analyze in parallel when stuck",
   "settings.consultInactive": "Consultation is OFF — add models below to enable multi-model consults",
   "settings.consultIncomplete": "Incomplete consult row(s): pick BOTH a provider and a model (or remove the row)",
-  "settings.autoSaved": "✓ saved"
+  "settings.autoSaved": "✓ saved",
+  "settings.pickModel": "pick a model…",
+  "settings.advisorEffort": "Review effort",
+  "settings.advisorEffortHelp": "Thinking depth for advisor reviews (model-specific levels)"
 }

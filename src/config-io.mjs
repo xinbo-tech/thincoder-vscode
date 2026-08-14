@@ -279,7 +279,11 @@ export function saveAgentSettingsFromPanel(payload) {
     const clean = arr
       .filter((m) => m && typeof m.provider === "string" && m.provider.trim() && typeof m.model === "string" && m.model.trim())
       .slice(0, 5)
-      .map((m) => ({ provider: m.provider.trim(), model: m.model.trim() }))
+      .map((m) => ({
+        provider: m.provider.trim(),
+        model: m.model.trim(),
+        ...(typeof m.effort === "string" && m.effort.trim() ? { effort: m.effort.trim() } : { effort: null }),
+      }))
     patch.consultModels = clean.length > 0 ? clean : undefined
   }
   if (payload.advisor !== undefined) {
@@ -289,6 +293,7 @@ export function saveAgentSettingsFromPanel(payload) {
     patch.advisor = {
       enabled: !!adv.enabled,
       guard: adv.guard !== undefined ? !!adv.guard : (current.guard ?? true),
+      ...(typeof adv.effort === "string" && adv.effort.trim() ? { effort: adv.effort.trim() } : {}),
       ...("provider" in adv ? (adv.provider ? { provider: adv.provider } : undefined) : {}),
       ...("model" in adv ? (adv.model ? { model: adv.model } : undefined) : {}),
     }

@@ -82,31 +82,35 @@ describe("buildSettings — switch toggles (agent / advisor)", () => {
     assert.equal(body.querySelector("#adv-enabled")?.checked, false)
   })
 
-  it("renders agent numeric fields and submodel selects", () => {
+  it("renders agent numeric fields and submodel menu slots", () => {
     api.updateAgentSettings({ maxTurns: 42, subagentTurns: 7, subagentModel: "deepseek:deepseek-v4-pro" })
     const body = openPanel()
     assert.equal(body.querySelector("#ag-maxturns")?.value, "42")
     assert.equal(body.querySelector("#ag-subturns")?.value, "7")
-    assert.equal(body.querySelector("#ag-submodel-global")?.tagName, "SELECT")
-    assert.equal(body.querySelector("#ag-submodel-global")?.value, "deepseek:deepseek-v4-pro")
+    const slot = body.querySelector("#submodel-slot-global")
+    assert.ok(slot, "submodel slot exists")
+    assert.equal(slot.dataset.value, "deepseek:deepseek-v4-pro", "stored provider:model surfaces on the slot")
+    assert.ok(slot.querySelector(".model-menu-btn"), "menu trigger mounted")
     for (const role of ["explore", "plan", "coder", "eng-coder"]) {
-      assert.equal(body.querySelector(`#ag-submodel-${role}`)?.tagName, "SELECT", `submodel select for ${role}`)
+      assert.ok(body.querySelector(`#submodel-slot-${role}`), `submodel slot for ${role}`)
     }
   })
 
-  it("subagent model selects list provider:model options from the model list", () => {
+  it("submodel slot trigger opens the shared hover menu listing models", () => {
     mockModels = [
-      { id: "deepseek-v4-pro", provider: "deepseek" },
-      { id: "kimi-k3", provider: "kimi" },
+      { id: "deepseek-v4-pro", provider: "deepseek", group: "DeepSeek", label: "deepseek-v4-pro" },
+      { id: "kimi-k3", provider: "kimi", group: "Kimi", label: "kimi-k3" },
     ]
     api.updateAgentSettings({ subagentModels: { coder: "deepseek:deepseek-v4-pro" } })
     const body = openPanel()
-    const sel = body.querySelector("#ag-submodel-coder")
-    const values = [...sel.options].map((o) => o.value)
-    assert.ok(values.includes(""), "inherit option present")
-    assert.ok(values.includes("deepseek:deepseek-v4-pro"))
-    assert.ok(values.includes("kimi:kimi-k3"))
-    assert.equal(sel.value, "deepseek:deepseek-v4-pro")
+    const slot = body.querySelector("#submodel-slot-coder")
+    const btn = slot.querySelector(".model-menu-btn")
+    assert.equal(btn.textContent, "deepseek:deepseek-v4-pro")
+    btn.click() // opens the popup
+    const popup = slot.querySelector(".model-menu-popup")
+    assert.ok(popup, "popup rendered")
+    const items = [...popup.querySelectorAll(".dropdown-item > span:first-child")].map((x) => x.textContent)
+    assert.ok(items.includes("DeepSeek") && items.includes("Kimi"), "providers as hover rows: " + items.join(","))
   })
 
   it("wraps verifyGuard in a .switch label (not a bare checkbox)", () => {
@@ -118,41 +122,34 @@ describe("buildSettings — switch toggles (agent / advisor)", () => {
   })
 })
 
-describe("buildSettings — advisor provider/model dropdowns", () => {
-  it("renders advisor provider/model as selects (not free-text inputs)", () => {
+describe("buildSettings — advisor model menu + effort", () => {
+  it("renders the advisor model slot (shared hover menu) and shows current value", () => {
     api.updateAgentSettings({ advisor: { provider: "deepseek", model: "deepseek-v4-pro" } })
     const body = openPanel()
-    assert.equal(body.querySelector("#adv-provider")?.tagName, "SELECT")
-    assert.equal(body.querySelector("#adv-model")?.tagName, "SELECT")
+    const slot = body.querySelector("#adv-model-slot")
+    assert.ok(slot, "advisor slot exists")
+    assert.equal(slot.dataset.provider, "deepseek")
+    assert.equal(slot.dataset.model, "deepseek-v4-pro")
+    assert.ok(slot.querySelector(".model-menu-btn"), "menu trigger mounted")
   })
 
-  it("lists only CONFIGURED providers in the advisor provider dropdown", () => {
-    api.updateProviderStatus({
-      providers: { deepseek: { configured: true }, kimi: { configured: true }, glm: { configured: false } },
-      labels: { deepseek: "DeepSeek", kimi: "Kimi", glm: "GLM" },
-    })
+  it("effort dropdown appears for a thinking model with its official default preselected", () => {
+    mockModels = [{ id: "glm-5.2", provider: "zhipu-plan", reasoning: ["max", "high", "low"], effortDefault: "max" }]
+    api.updateAgentSettings({ advisor: { provider: "zhipu-plan", model: "glm-5.2" } })
     const body = openPanel()
-    const values = [...body.querySelector("#adv-provider").options].map((o) => o.value)
-    assert.ok(values.includes(""), "inherit option present")
-    assert.ok(values.includes("deepseek"))
-    assert.ok(values.includes("kimi"))
-    assert.ok(!values.includes("glm"), "unconfigured provider excluded")
+    const sel = body.querySelector("#adv-effort")
+    assert.ok(sel, "effort select rendered")
+    assert.equal(sel.value, "max", "official default preselected")
   })
 
-  it("populates the advisor model dropdown from the model list for the selected provider only", () => {
-    mockModels = [
-      { id: "deepseek-v4-pro", provider: "deepseek" },
-      { id: "deepseek-chat", provider: "deepseek" },
-      { id: "kimi-k3", provider: "kimi" },
-    ]
-    api.updateAgentSettings({ advisor: { provider: "deepseek" } })
+  it("no effort dropdown for non-thinking models", () => {
+    mockModels = [{ id: "gpt-4o", provider: "openai", reasoning: [] }]
+    api.updateAgentSettings({ advisor: { provider: "openai", model: "gpt-4o" } })
     const body = openPanel()
-    const values = [...body.querySelector("#adv-model").options].map((o) => o.value)
-    assert.ok(values.includes("deepseek-v4-pro"))
-    assert.ok(values.includes("deepseek-chat"))
-    assert.ok(!values.includes("kimi-k3"), "other provider's model excluded")
+    assert.equal(body.querySelector("#adv-effort"), null)
   })
 })
+
 
 describe("buildSettings — web search card (Tavily)", () => {
   it("renders the Tavily key row with an Add-Key button when unset", () => {
@@ -252,14 +249,18 @@ describe("buildSettings — save flow (posts payload to extension)", () => {
       writeFileSync(cfg, JSON.stringify({ agent: {} }), "utf8")
       saveAgentSettingsFromPanel({
         consultModels: [
-          { provider: "deepseek", model: "m1" },
+          { provider: "deepseek", model: "m1", effort: "high" },
           { provider: "", model: "x" },      // dropped: no provider
           { provider: "glm", model: "  " },  // dropped: blank model
           "junk",                             // dropped: wrong shape
+          { provider: "kimi", model: "kimi-k3" }, // no effort → effort:null kept explicit
         ],
       })
       let agent = loadRaw().agent
-      assert.deepEqual(agent.consultModels, [{ provider: "deepseek", model: "m1" }], "junk dropped, valid kept")
+      assert.deepEqual(agent.consultModels, [
+        { provider: "deepseek", model: "m1", effort: "high" },
+        { provider: "kimi", model: "kimi-k3", effort: null },
+      ], "junk dropped, valid kept, effort explicit (null when unset)")
 
       // >5 capped
       saveAgentSettingsFromPanel({ consultModels: Array.from({ length: 7 }, (_, k) => ({ provider: "p" + k, model: "m" + k })) })
@@ -283,76 +284,59 @@ describe("buildSettings — save flow (posts payload to extension)", () => {
 // rendered empty. Also: binding lived inside the agSave guard — any upstream
 // bind failure silently killed the add button.
 
-describe("settings consult rows", () => {
-  it("Add button appends a row whose provider dropdown lists CONFIGURED providers", async () => {
+describe("settings consult rows (model-menu)", () => {
+  it("add row mounts a model-menu trigger; picking a model sets row data + effort dropdown", async () => {
     const { initSettings } = await import("../webview/settings.js")
     document.body.innerHTML = '<div id="settings-panel"><div id="settings-body"></div></div><button id="settings-btn"></button><button id="settings-close"></button>'
     const api = initSettings({ onClose: () => {}, getModels: () => [
-      { provider: "deepseek", id: "deepseek-v4-pro" },
-      { provider: "zhipu-plan", id: "glm-5.2" },
+      { id: "glm-5.2", provider: "zhipu-plan", group: "GLM", label: "glm-5.2", reasoning: ["max", "high", "low"], effortDefault: "max" },
+      { id: "gpt-4o", provider: "openai", group: "OpenAI", label: "gpt-4o", reasoning: [] },
     ] })
-    api.updateProviderStatus({ providers: {
-      deepseek: { configured: true, masked: "sk-***", model: "deepseek-v4-pro" },
-      "zhipu-plan": { configured: true, masked: "sk-***", model: "glm-5.2" },
-      neverused: { configured: false },
-    }, labels: {} })
-    api.updateAgentSettings({ maxTurns: 100 }) // consultModels absent — fresh state
+    api.updateProviderStatus({ providers: { "zhipu-plan": { configured: true, model: "glm-5.2" }, openai: { configured: true, model: "gpt-4o" } }, labels: {} })
+    api.updateAgentSettings({ maxTurns: 100 })
     api.openSettings()
 
-    const before = document.querySelectorAll("#consult-rows .consult-row").length
     document.getElementById("consult-add").click()
-    const rows = document.querySelectorAll("#consult-rows .consult-row")
-    assert.equal(rows.length, before + 1, "row appended")
+    const row = document.querySelectorAll("#consult-rows .consult-row")[0]
+    assert.ok(row.querySelector(".model-menu-btn"), "trigger mounted on new row")
 
-    const provOpts = rows[rows.length - 1].querySelectorAll(".consult-provider option")
-    const values = [...provOpts].map((o) => o.value).filter(Boolean)
-    assert.ok(values.includes("deepseek") && values.includes("zhipu-plan"), "configured providers listed: " + values)
-    assert.ok(!values.includes("neverused"), "unconfigured provider excluded")
+    // simulate a pick through the mounted trigger's popup
+    const btn = row.querySelector(".model-menu-btn")
+    btn.click()
+    const item = [...row.querySelectorAll(".model-menu-popup .submenu .dropdown-item")].find((x) => x.textContent.trim() === "glm-5.2")
+    item.click()
+    assert.equal(row.dataset.provider, "zhipu-plan")
+    assert.equal(row.dataset.model, "glm-5.2")
+    const eff = row.querySelector(".consult-effort")
+    assert.ok(eff, "effort dropdown rendered for thinking model")
+    assert.equal(eff.value, "max", "official default preselected")
 
-    // cascade: choosing a provider populates the model dropdown
-    const p = rows[rows.length - 1].querySelector(".consult-provider")
-    p.value = "deepseek"
-    p.dispatchEvent(new window.Event("change"))
-    const models = [...rows[rows.length - 1].querySelectorAll(".consult-model option")].map((o) => o.value)
-    assert.ok(models.includes("deepseek-v4-pro"), "model cascade works: " + models)
+    // collect carries effort
+    const { models } = (function () {
+      const collected = []
+      document.querySelectorAll("#consult-rows .consult-row").forEach((r) => {
+        const p = r.dataset.provider || "", m = r.dataset.model || ""
+        if (p && m) collected.push({ provider: p, model: m, effort: r.querySelector(".consult-effort")?.value ?? null })
+      })
+      return { models: collected }
+    })()
+    assert.deepEqual(models, [{ provider: "zhipu-plan", model: "glm-5.2", effort: "max" }])
   })
-})
 
-
-// ─── consult UX: fallback model, preselect, half-filled validation ──
-
-describe("settings consult UX", () => {
-  async function boot(providers, agentSettings) {
+  it("non-thinking model pick hides the effort dropdown", async () => {
     const { initSettings } = await import("../webview/settings.js")
     document.body.innerHTML = '<div id="settings-panel"><div id="settings-body"></div></div><button id="settings-btn"></button><button id="settings-close"></button>'
     const api = initSettings({ onClose: () => {}, getModels: () => [
-      { provider: "deepseek", id: "deepseek-v4-pro" },
-      { provider: "deepseek", id: "deepseek-v4-flash" },
+      { id: "gpt-4o", provider: "openai", group: "OpenAI", label: "gpt-4o", reasoning: [] },
     ] })
-    api.updateProviderStatus({ providers, labels: {} })
-    api.updateAgentSettings(agentSettings ?? { maxTurns: 100 })
+    api.updateProviderStatus({ providers: { openai: { configured: true, model: "gpt-4o" } }, labels: {} })
+    api.updateAgentSettings({ maxTurns: 100 })
     api.openSettings()
-    return api
-  }
-
-  it("model dropdown offers the provider entry's model even when the panel model list has none for it", async () => {
-    await boot({ "zhipu-plan": { configured: true, masked: "****", model: "glm-5.2" } })
-    const p = document.querySelector(".consult-provider")
-    // single configured provider → preselected
-    assert.equal(p.value, "zhipu-plan", "sole provider preselected")
-    const models = [...document.querySelectorAll(".consult-model option")].map((o) => o.value)
-    assert.ok(models.includes("glm-5.2"), "entry model offered as offline fallback: " + models)
-  })
-
-  it("provider select completes a row via cascade; a provider with NO models stays half-filled and withholds consultModels", async () => {
-    await boot({ "zhipu-plan": { configured: true, masked: "****", model: "glm-5.2" }, deepseek: { configured: true, masked: "****", model: "deepseek-v4-pro" } })
-    let posted = null
-    window._vscode = { postMessage: (m) => { if (m.type === "saveAgentSettings") posted = m } }
-    // pre-rendered row: pick provider → cascade fills the first model → row complete → auto-save
-    document.querySelector(".consult-provider").value = "deepseek"
-    document.querySelector(".consult-provider").dispatchEvent(new window.Event("change"))
-    await new Promise((r) => setTimeout(r, 600))
-    assert.ok(posted, "auto-save posted")
-    assert.deepEqual(posted.settings.consultModels, [{ provider: "deepseek", model: "deepseek-v4-pro" }], "cascade completed the row")
+    document.getElementById("consult-add").click()
+    const row = document.querySelectorAll("#consult-rows .consult-row")[0]
+    row.querySelector(".model-menu-btn").click()
+    ;[...row.querySelectorAll(".model-menu-popup .submenu .dropdown-item")].find((x) => x.textContent.trim() === "gpt-4o").click()
+    assert.equal(row.dataset.model, "gpt-4o")
+    assert.equal(row.querySelector(".consult-effort"), null, "no effort dropdown for non-thinking model")
   })
 })

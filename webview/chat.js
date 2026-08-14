@@ -2,6 +2,7 @@
  * chat.js — main orchestration: state, events, token handling
  */
 import { md } from "./md.js"
+import { buildModelMenuDropdown } from "./model-menu.js"
 import { fmtK, patchLineType } from "./lib.js"
 import { renderDiff, lineDiff } from "./diff.js"
 import {
@@ -712,15 +713,15 @@ function buildModelDropdown() {
     ctx.dropdown.appendChild(sectionEl(t("model.loading")))
     return
   }
-  const byProvider = new Map()
-  for (const m of ctx._models) {
-    const key = m.provider || m.group || ""
-    if (!byProvider.has(key)) byProvider.set(key, { group: m.group || key, models: [] })
-    byProvider.get(key).models.push(m)
-  }
-  for (const [provider, { group, models }] of byProvider) {
-    ctx.dropdown.appendChild(providerRow(provider, group, models))
-  }
+  // Delegates to the shared component (MODEL-PICKER-UNIFY.md) — same hover submenu as settings cards
+  ctx.dropdown.appendChild(buildModelMenuDropdown({
+    models: ctx._models,
+    value: { provider: ctx.selectedProvider, model: ctx.selectedModel },
+    onPick: ({ provider, model }) => {
+      const m = ctx._models.find((x) => x.id === model && (x.provider || "") === provider)
+      if (m) selectModel(m)
+    },
+  }))
   // Bottom management entries (CLI: add / remove / key flows at the picker footer)
   const sep = document.createElement("div")
   sep.className = "dropdown-sep"
@@ -746,48 +747,6 @@ function manageEntry(label, type) {
 }
 
 // A Level-1 provider row with a hover flyout of its models on the right.
-function providerRow(provider, group, models) {
-  const current = models.find((m) => m.id === ctx.selectedModel && (m.provider || "") === (ctx.selectedProvider || ""))
-  const shown = current || models[0]
-
-  const item = document.createElement("div")
-  item.className = "dropdown-item has-submenu"
-  item.tabIndex = 0
-  item.setAttribute("role", "option")
-  item.setAttribute("aria-selected", String(!!current))
-  item.innerHTML = `<span>${group}</span><span class="dropdown-sub">${shown ? shown.label : ""}</span><span class="submenu-arrow">›</span>`
-
-  const sub = document.createElement("div")
-  sub.className = "dropdown submenu"
-  for (const m of models) {
-    const si = document.createElement("div")
-    si.className = "dropdown-item"
-    si.tabIndex = 0
-    si.setAttribute("role", "option")
-    si.setAttribute("aria-selected", String(m.id === ctx.selectedModel && (m.provider || "") === (ctx.selectedProvider || "")))
-    si.innerHTML = `<span>${m.label}</span>${m.id === ctx.selectedModel ? '<span class="check">✓</span>' : ""}`
-    si.addEventListener("click", (e) => { e.stopPropagation(); selectModel(m) })
-    sub.appendChild(si)
-  }
-  item.appendChild(sub)
-
-  // Hover opens the flyout; leaving the whole row (item + its flyout) closes it.
-  const open = () => { closeSiblingSubmenus(item); item.classList.add("open") }
-  const close = () => item.classList.remove("open")
-  item.addEventListener("mouseenter", open)
-  item.addEventListener("mouseleave", close)
-  // Keyboard / touch fallback: click toggles the flyout (without selecting the provider).
-  item.addEventListener("click", (e) => { if (e.target.closest(".submenu")) return; e.stopPropagation(); item.classList.contains("open") ? close() : open() })
-  return item
-}
-
-// Only one provider flyout open at a time.
-function closeSiblingSubmenus(except) {
-  for (const el of ctx.dropdown.querySelectorAll(".has-submenu.open")) {
-    if (el !== except) el.classList.remove("open")
-  }
-}
-
 function buildReasoningDropdown() {
   ctx.reasoningDropdown.innerHTML = ""
   const model = ctx._models.find((m) => m.id === ctx.selectedModel)

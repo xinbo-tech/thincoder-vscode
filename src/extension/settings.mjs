@@ -266,13 +266,13 @@ export async function fullStatus(panel, workspaceState, pushSessionsFn) {
         return { name, models: list.map((id) => {
           const spec = specForModel(id)
           const r = spec.reasoningEffortEnum || (spec.thinking ? ["enabled"] : [])
-          return { id, label: id, provider: name, group: providerLabel(name), reasoning: r }
+          return { id, label: id, provider: name, group: providerLabel(name), reasoning: r, effortDefault: spec.reasoningEffortDefault || null }
         })}
       } catch {
         const m = PRESETS[name]?.model || prov.model
         const spec = specForModel(m)
         const r = spec.reasoningEffortEnum || (spec.thinking ? ["enabled"] : [])
-        return { name, models: [{ id: m, label: m, provider: name, group: providerLabel(name), reasoning: r }] }
+        return { name, models: [{ id: m, label: m, provider: name, group: providerLabel(name), reasoning: r, effortDefault: spec.reasoningEffortDefault || null }] }
       }
     })
   )
