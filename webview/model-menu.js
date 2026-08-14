@@ -13,6 +13,19 @@
  */
 import { t } from "./i18n.js"
 
+/** Short display names for menu rows — the preset desc strings are long annotations
+ *  (key-compatibility notes etc.) meant for the add-provider form, not menus. */
+const PROVIDER_SHORT = {
+  deepseek: "DeepSeek", kimi: "Kimi", "kimi-code": "Kimi Code", glm: "GLM", "glm-code": "GLM Coding",
+  qwen: "Qwen", qwenplan: "Qwen Plan", minimax: "MiniMax", openai: "OpenAI",
+  claude: "Claude", gemini: "Gemini", grok: "Grok", mistral: "Mistral",
+  volcengine: "Volcengine", hunyuan: "Hunyuan", siliconflow: "SiliconFlow",
+  openrouter: "OpenRouter", groq: "Groq",
+}
+function shortName(provider, group) {
+  return PROVIDER_SHORT[provider] || (group && group.length > 22 ? provider : group) || provider
+}
+
 let _stylesInjected = false
 function injectStyles() {
   if (_stylesInjected || typeof document === "undefined") return
@@ -135,28 +148,31 @@ export function openModelMenu({ anchorEl, models, value, onPick, footer = [], up
 
 function providerRow(provider, group, models, value, onPick, overlay) {
   const current = models.find((m) => m.id === value?.model && (m.provider || "") === (value?.provider || ""))
-  const shown = current || models[0]
 
   const item = document.createElement("div")
   item.className = "mm-row"
   item.setAttribute("role", "option")
   item.setAttribute("aria-selected", String(!!current))
   const name = document.createElement("span")
-  name.textContent = group
-  const sub = document.createElement("span")
-  sub.className = "mm-sub"
-  sub.textContent = shown ? shown.label : ""
+  name.textContent = shortName(provider, group)
   const arrow = document.createElement("span")
   arrow.className = "mm-arrow"
   arrow.textContent = "›"
-  item.append(name, sub, arrow)
+  item.append(name, arrow)
 
   let flyout = null
-  const closeFlyout = () => { flyout?.remove(); flyout = null; overlay.querySelectorAll(".mm-flyout").forEach((f) => f.remove()) }
+  let closeTimer = null
+  const cancelClose = () => { clearTimeout(closeTimer); closeTimer = null }
+  const closeFlyout = () => { cancelClose(); flyout?.remove(); flyout = null; overlay.querySelectorAll(".mm-flyout").forEach((f) => f.remove()) }
+  const scheduleClose = () => { cancelClose(); closeTimer = setTimeout(closeFlyout, 350) }
   const openFlyout = () => {
+    cancelClose()
+    // already open for this row → nothing to do
+    if (flyout && flyout._row === item) return
     closeFlyout()
     flyout = document.createElement("div")
     flyout.className = "mm-flyout"
+    flyout._row = item
     for (const m of models) {
       const row = document.createElement("div")
       row.className = "mm-row"
@@ -177,18 +193,21 @@ function providerRow(provider, group, models, value, onPick, overlay) {
     overlay.appendChild(flyout)
     const rr = item.getBoundingClientRect()
     const fh = Math.min(flyout.offsetHeight || models.length * 26, 320)
-    let left = rr.right + 2
-    if (left + 190 > window.innerWidth) left = rr.left - 192 // flip left when no room on the right
+    // FLUSH against the row's right edge (and 1px vertical overlap) — any gap is a dead
+    // zone that closes the flyout while the pointer crosses it.
+    let left = rr.right - 1
+    if (left + 190 > window.innerWidth) left = rr.left - 191 // flip left when no room on the right
     flyout.style.left = Math.max(4, left) + "px"
-    flyout.style.top = Math.max(4, Math.min(rr.top, window.innerHeight - fh - 4)) + "px"
+    flyout.style.top = Math.max(0, Math.min(rr.top - 1, window.innerHeight - fh - 4)) + "px"
+    // pointer entering the flyout cancels any pending close
+    flyout.addEventListener("mouseenter", cancelClose)
+    flyout.addEventListener("mouseleave", scheduleClose)
   }
 
   item.addEventListener("mouseenter", openFlyout)
-  item.addEventListener("mouseleave", (e) => {
-    // stay open when the pointer moves into the flyout
-    if (flyout && e.relatedTarget && flyout.contains(e.relatedTarget)) return
-    setTimeout(() => { if (flyout && !flyout.matches(":hover") && !item.matches(":hover")) closeFlyout() }, 120)
-  })
+  // 350ms grace — enough time to cross into the flush-positioned flyout; entering the
+  // flyout cancels the close outright.
+  item.addEventListener("mouseleave", scheduleClose)
   item.addEventListener("click", (e) => { e.stopPropagation(); flyout ? closeFlyout() : openFlyout() })
   return item
 }
