@@ -346,18 +346,19 @@
 .agent-saved-badge { font-size: 11px; color: #4ec9b0; opacity: 0; transition: opacity .3s; height: 14px; }
 .agent-saved-badge.visible { opacity: 1; }
 
-/* model-menu triggers inside settings cards (MODEL-PICKER-UNIFY.md) */
-.model-menu-root { position: relative; display: inline-flex; min-width: 0; flex: 1; }
+/* model-menu triggers inside settings cards (MODEL-PICKER-UNIFY.md)
+   The popup is position:fixed (appended to body) — escapes card overflow:hidden
+   and the scrolling panel body. */
+.model-menu-root { display: inline-flex; min-width: 0; flex: 1; }
 .model-menu-btn { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-menu-popup {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 60;
+  position: fixed;
+  z-index: 9000;
   min-width: 420px;
+  max-width: 520px;
   max-height: 320px;
   overflow-y: auto;
+  box-shadow: 0 6px 24px rgba(0,0,0,.35);
 }
 /* the hover submenu relies on chat.css dropdown styles; scope-import the minimum for settings */
 .model-menu-popup .dropdown-item { display: flex; gap: 8px; align-items: center; }
-.adv-model-slot .model-menu-popup { min-width: 380px; }

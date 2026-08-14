@@ -75,7 +75,10 @@ function closeSiblingSubmenus(except) {
 
 /**
  * A self-contained trigger button + popup for settings cards.
- * Renders `btnLabel` on the trigger; opens the hover menu anchored under it.
+ * The popup is position:FIXED and attached to document.body — settings cards use
+ * overflow:hidden (rounded corners) and the panel body scrolls (overflow-y:auto),
+ * both of which would clip an absolutely-positioned child. Fixed positioning
+ * escapes both; the popup closes on scroll (position would drift) and outside click.
  * Returns the trigger element (caller places it in the DOM).
  */
 export function modelMenuTrigger({ label, models, value, onPick, className = "key-btn model-menu-btn" }) {
@@ -88,20 +91,34 @@ export function modelMenuTrigger({ label, models, value, onPick, className = "ke
   const popup = document.createElement("div")
   popup.className = "dropdown model-menu-popup"
   popup.style.display = "none"
-  popup.appendChild(buildModelMenuDropdown({ models, value, onPick: (v) => { close(); onPick(v) } }))
 
   const close = () => { popup.style.display = "none" }
+  const position = () => {
+    const r = btn.getBoundingClientRect()
+    popup.style.left = r.left + "px"
+    popup.style.top = (r.bottom + 4) + "px"
+  }
   const open = () => {
     closeAllPopups()
     popup.innerHTML = ""
     popup.appendChild(buildModelMenuDropdown({ models, value, onPick: (v) => { close(); onPick(v) } }))
+    document.body.appendChild(popup)
+    position()
     popup.style.display = ""
   }
-  btn.addEventListener("click", (e) => { e.stopPropagation(); bindOutsideClick(); popup.style.display === "none" ? open() : close() })
-  wrap.addEventListener("mouseleave", close)
-
+  const onScroll = () => close()
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation()
+    bindOutsideClick()
+    if (popup.style.display === "none") {
+      open()
+      window.addEventListener("scroll", onScroll, { capture: true, once: true })
+    } else {
+      close()
+      window.removeEventListener("scroll", onScroll, { capture: true })
+    }
+  })
   wrap.appendChild(btn)
-  wrap.appendChild(popup)
   return wrap
 }
 

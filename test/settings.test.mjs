@@ -106,8 +106,8 @@ describe("buildSettings — switch toggles (agent / advisor)", () => {
     const slot = body.querySelector("#submodel-slot-coder")
     const btn = slot.querySelector(".model-menu-btn")
     assert.equal(btn.textContent, "deepseek:deepseek-v4-pro")
-    btn.click() // opens the popup
-    const popup = slot.querySelector(".model-menu-popup")
+    btn.click() // opens the popup (appended to document.body — escapes card clipping)
+    const popup = document.querySelector(".model-menu-popup")
     assert.ok(popup, "popup rendered")
     const items = [...popup.querySelectorAll(".dropdown-item > span:first-child")].map((x) => x.textContent)
     assert.ok(items.includes("DeepSeek") && items.includes("Kimi"), "providers as hover rows: " + items.join(","))
@@ -303,7 +303,7 @@ describe("settings consult rows (model-menu)", () => {
     // simulate a pick through the mounted trigger's popup
     const btn = row.querySelector(".model-menu-btn")
     btn.click()
-    const item = [...row.querySelectorAll(".model-menu-popup .submenu .dropdown-item")].find((x) => x.textContent.trim() === "glm-5.2")
+    const item = [...document.querySelectorAll(".model-menu-popup .submenu .dropdown-item")].find((x) => x.textContent.trim() === "glm-5.2")
     item.click()
     assert.equal(row.dataset.provider, "zhipu-plan")
     assert.equal(row.dataset.model, "glm-5.2")
@@ -335,7 +335,7 @@ describe("settings consult rows (model-menu)", () => {
     document.getElementById("consult-add").click()
     const row = document.querySelectorAll("#consult-rows .consult-row")[0]
     row.querySelector(".model-menu-btn").click()
-    ;[...row.querySelectorAll(".model-menu-popup .submenu .dropdown-item")].find((x) => x.textContent.trim() === "gpt-4o").click()
+    ;[...document.querySelectorAll(".model-menu-popup .submenu .dropdown-item")].find((x) => x.textContent.trim() === "gpt-4o").click()
     assert.equal(row.dataset.model, "gpt-4o")
     assert.equal(row.querySelector(".consult-effort"), null, "no effort dropdown for non-thinking model")
   })
