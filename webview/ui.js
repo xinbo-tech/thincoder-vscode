@@ -183,7 +183,7 @@ function resultSummary(text) {
   return last.length > 80 ? last.slice(0, 79) + "…" : last
 }
 
-/** Update a tool card to its done state: elapsed ms, result summary, auto-expand, error tint. */
+/** Update a tool card to its done state: elapsed ms, result summary, collapse/expand, error tint. */
 function finishToolCard(ref, text) {
   ref.b.textContent = text || ""
   const ms = Date.now() - (ref.startTime || Date.now())
@@ -212,10 +212,18 @@ function finishToolCard(ref, text) {
   } else if (summaryEl) {
     summaryEl.style.display = "none"
   }
-  // Auto-expand on completion (CLI parity: tool output is visible, not hidden)
-  ref.b.classList.add("open")
-  ref.h.querySelector(".tool-call-icon")?.classList.add("open")
-  ref.h.setAttribute("aria-expanded", "true")
+  // Auto-collapse on success: the header already shows the → summary, so a finished
+  // card folds up to one line (CLI outputPanel parity). Errors stay EXPANDED — the
+  // user must see what failed without an extra click.
+  if (isError) {
+    ref.b.classList.add("open")
+    ref.h.querySelector(".tool-call-icon")?.classList.add("open")
+    ref.h.setAttribute("aria-expanded", "true")
+  } else {
+    ref.b.classList.remove("open")
+    ref.h.querySelector(".tool-call-icon")?.classList.remove("open")
+    ref.h.setAttribute("aria-expanded", "false")
+  }
 }
 
 export function finishTool(ctx, name, id, text) {

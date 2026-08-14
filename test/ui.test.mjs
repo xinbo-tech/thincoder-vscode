@@ -114,19 +114,40 @@ describe("advisor review block (in-conversation streaming)", () => {
   })
 })
 
-describe("finishTool — scroll follow", () => {
-  it("scrolls the conversation to the bottom when a tool completes (auto-expanded output becomes visible)", () => {
+describe("finishTool — scroll follow + auto-collapse", () => {
+  function setup() {
     const messagesEl = document.createElement("div")
     let scrollCalls = 0
     // Intercept the scrollTop setter — happy-dom has no layout, so scrollHeight is 0.
     Object.defineProperty(messagesEl, "scrollTop", { set: () => { scrollCalls++ }, get: () => 0 })
     const ctx = { messagesEl, _toolRefs: {}, hadToolResult: false }
+    return { ctx, getScrollCalls: () => scrollCalls }
+  }
+
+  it("success collapses the card to its summary line (header keeps → last line)", () => {
+    const { ctx, getScrollCalls } = setup()
     const h = document.createElement("div")
+    h.innerHTML = `<span class="tool-call-icon"></span><span class="tool-call-status"></span>`
     const b = document.createElement("div")
+    b.classList.add("open") // simulate streaming-open state
     ctx._toolRefs["t1"] = { h, b, name: "bash", id: "t1", startTime: Date.now() }
-    finishTool(ctx, "bash", "t1", "output")
-    assert.ok(scrollCalls > 0, "finishTool scrolled the conversation to the bottom")
+    finishTool(ctx, "bash", "t1", "Wrote 42 chars to app.js")
+    assert.ok(getScrollCalls() > 0, "finishTool scrolled the conversation to the bottom")
     assert.equal(ctx.hadToolResult, true)
+    assert.equal(b.classList.contains("open"), false, "successful tool output auto-collapses")
+    assert.equal(h.getAttribute("aria-expanded"), "false")
+    assert.match(h.querySelector(".tool-call-summary").textContent, /→ Wrote 42 chars/)
+  })
+
+  it("error stays expanded — the user must see what failed", () => {
+    const { ctx } = setup()
+    const h = document.createElement("div")
+    h.innerHTML = `<span class="tool-call-icon"></span><span class="tool-call-status"></span>`
+    const b = document.createElement("div")
+    ctx._toolRefs["t2"] = { h, b, name: "bash", id: "t2", startTime: Date.now() }
+    finishTool(ctx, "bash", "t2", "Error: command failed")
+    assert.equal(b.classList.contains("open"), true, "error output stays expanded")
+    assert.equal(h.getAttribute("aria-expanded"), "true")
   })
 })
 
