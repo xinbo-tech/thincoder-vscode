@@ -318,7 +318,7 @@ describe("settings consult rows", () => {
     // cascade: choosing a provider populates the model dropdown
     const p = rows[rows.length - 1].querySelector(".consult-provider")
     p.value = "deepseek"
-    p.dispatchEvent(new Event("change"))
+    p.dispatchEvent(new window.Event("change"))
     const models = [...rows[rows.length - 1].querySelectorAll(".consult-model option")].map((o) => o.value)
     assert.ok(models.includes("deepseek-v4-pro"), "model cascade works: " + models)
   })

@@ -4,6 +4,12 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.17] — 2026-08-14
+
+### Fixed
+
+- **Consult "Add consult model" produced an empty row** — dynamically added rows passed the full provider-status object where the providers map was expected, so the provider dropdown listed nothing (looked like a dead button). Binding also moved outside the save-button guard so upstream failures can no longer silently disable it, with console diagnostics.
+
 ## [0.1.16] — 2026-08-14
 
 ### Fixed
