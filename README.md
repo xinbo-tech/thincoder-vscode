@@ -194,7 +194,7 @@ thincoder-vscode/
 | Memory system | 3-layer FTS5 + vector | FTS5 + vector (embedding required) |
 | Checkpoint | Git snapshot restore | Git diff/status/log only |
 | MCP support | ✅ | ✅ |
-| Session persistence | 5 archive slots | Shared with the CLI — same files and slots (`~/.thincoder/sessions/`) |
+| Session persistence | Unlimited archive slots | Shared with the CLI — same files and slots (`~/.thincoder/sessions/`) |
 | Skill system | ✅ | ✅ |
 | Plan mode | ✅ | ✅ |
 | Subagents | ✅ | ✅ |
