@@ -320,14 +320,24 @@
 .reasoning-content {
   padding: 6px 10px;
   border-top: 1px solid var(--border);
-  white-space: pre-wrap;
   word-break: break-word;
   opacity: 0.65;
-  font-style: italic;
   line-height: 1.45;
   max-height: 200px;
   overflow-y: auto;
 }
+
+/* Markdown inside reasoning blocks — mirror .content styles, scaled down */
+.reasoning-content h1, .reasoning-content h2, .reasoning-content h3 { font-weight: 700; margin: 8px 0 4px; }
+.reasoning-content p { margin: 0 0 5px; }
+.reasoning-content p:last-child { margin-bottom: 0; }
+.reasoning-content code { font-family: var(--mono, monospace); background: var(--bg2, rgba(127,127,127,.15)); border-radius: 3px; padding: 1px 4px; font-size: 0.92em; }
+.reasoning-content pre { background: var(--bg2, rgba(127,127,127,.12)); border-radius: 6px; padding: 8px 10px; overflow-x: auto; margin: 6px 0; }
+.reasoning-content pre code { background: none; padding: 0; }
+.reasoning-content ul, .reasoning-content ol { margin: 4px 0 6px; padding-left: 18px; }
+.reasoning-content li { margin: 2px 0; }
+.reasoning-content strong { font-weight: 700; }
+.reasoning-content em { font-style: italic; }
 
 /* ─── Error ──────────────────────────────────── */
 

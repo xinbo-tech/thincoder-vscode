@@ -1410,7 +1410,9 @@ function onReasoning(text) {
     ctx.currentReasoningRaw = ""
   }
   ctx.currentReasoningRaw += text
-  ctx.currentReasoning.textContent = ctx.currentReasoningRaw
+  // Render markdown (reasoning models emit headers/code/bold in their thinking)
+  // with a plain-text fallback on pathological input — same contract as onToken.
+  try { ctx.currentReasoning.innerHTML = md(ctx.currentReasoningRaw) } catch { ctx.currentReasoning.textContent = ctx.currentReasoningRaw }
   // Scroll reasoning content itself (it has max-height + overflow)
   ctx.currentReasoning.scrollTop = ctx.currentReasoning.scrollHeight
   scrollDown(ctx)

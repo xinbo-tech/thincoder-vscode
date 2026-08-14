@@ -135,3 +135,17 @@ describe("needsSetup error re-opens the welcome panel", () => {
     assert.equal(visible(), false)
   })
 })
+
+describe("reasoning renders markdown (not plain text)", () => {
+  it("reasoning chunks with headers/code render as HTML elements in the block", () => {
+    postToWebview({ type: "reasoning", text: "## Plan\nLook at code: " })
+    postToWebview({ type: "reasoning", text: "**bold idea** and `inline`" })
+    const block = document.querySelector(".reasoning-block")
+    assert.ok(block, "reasoning block exists")
+    const content = block.querySelector(".reasoning-content")
+    assert.ok(content, "content div exists")
+    assert.ok(content.querySelector("h2"), "header rendered as markdown")
+    assert.ok(content.textContent.includes("bold idea"), "bold text present")
+    assert.ok(content.querySelector("code"), "inline code rendered")
+  })
+})
