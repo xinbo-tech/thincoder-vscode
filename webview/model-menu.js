@@ -70,7 +70,6 @@ function onEsc(e) { if (e.key === "Escape") closeModelMenu() }
  * @param value     { provider, model } | null — marks the current row with a check
  * @param onPick    ({ provider, model }) => void — menu closes before the callback
  * @param footer    [{ label, onClick }] — management entries (add/remove provider, set key)
- * @param up        force upward opening (main panel bottom bar); default auto-flip by space
  */
 export function openModelMenu({ anchorEl, models, value, onPick, footer = [], up = false }) {
   injectStyles()

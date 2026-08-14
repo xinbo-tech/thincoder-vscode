@@ -64,21 +64,26 @@ function labelFor(provider) {
  *     so a provider whose model probe failed still offers its configured model instead of
  *     a dead-end empty dropdown. */
 
-/** Collect consult rows → [{provider, model}] (≤5). Returns {models, invalid} —
- *  incomplete rows are REPORTED (for save-time validation), never silently dropped. */
-function collectConsultRows() {
-  const models = []
-  const invalid = []
+/** Read every consult row's live state from the DOM (including half-filled — a rebuild
+ *  must re-render them intact instead of dropping the user's in-progress row). */
+function readConsultRowsFromDom() {
+  const rows = []
   document.querySelectorAll("#consult-rows .consult-row").forEach((row) => {
-    const slot = row.querySelector(".consult-model-slot")
-    const provider = row.dataset.provider || ""
-    const model = row.dataset.model || slot?.dataset.model || ""
-    if (provider && model) {
-      const effSel = row.querySelector(".consult-effort")
-      models.push({ provider, model, effort: effSel ? effSel.value : null })
-    } else if (provider || model) invalid.push(row) // half-filled — needs the user's attention
+    rows.push({
+      provider: row.dataset.provider || "",
+      model: row.dataset.model || "",
+      effort: row.querySelector(".consult-effort")?.value ?? null,
+    })
   })
-  return { models: models.slice(0, 5), invalid }
+  return rows
+}
+
+/** Complete rows for saving (≤5). Half-filled rows are simply not saved yet —
+ *  they stay in the DOM and become part of the payload once completed. */
+function collectConsultRows() {
+  return readConsultRowsFromDom()
+    .filter((r) => r.provider && r.model)
+    .slice(0, 5)
 }
 
 /** Wire add/remove/cascade for consult rows (idempotent — called after each buildSettings). */
@@ -100,15 +105,32 @@ function mountModelMenus() {
       e.stopPropagation()
       openModelMenu({
         anchorEl: btn, models, value,
-        onPick: ({ provider, model }) => {
-          const v = provider + ":" + model
+        onPick: (picked) => {
+          const v = picked.provider + ":" + picked.model
           slot.dataset.value = v
           btn.textContent = v
+          refreshClearBtn(slot)
           fireAgentSave()
         },
       })
     })
     slot.replaceChildren(btn)
+    // ✕ next to the trigger — clears back to inherit
+    if (raw) {
+      const clr = document.createElement("button")
+      clr.type = "button"
+      clr.className = "model-menu-clear"
+      clr.title = t("settings.inherit")
+      clr.textContent = "✕"
+      clr.addEventListener("click", (e) => {
+        e.stopPropagation()
+        slot.dataset.value = ""
+        btn.textContent = t("settings.inherit")
+        refreshClearBtn(slot)
+        fireAgentSave()
+      })
+      slot.appendChild(clr)
+    }
   }
   document.querySelectorAll("#consult-rows .consult-row").forEach((row) => {
     mountSlot(row.querySelector(".consult-model-slot"), {
@@ -122,12 +144,26 @@ function mountModelMenus() {
     mountSlot(advSlot, {
       provider: advSlot.dataset.provider || "",
       model: advSlot.dataset.model || "",
-      onPick: ({ provider, model }) => { advSlot.dataset.provider = provider; advSlot.dataset.model = model; refreshAdvisorEffort(model); fireAgentSave() },
+      onPick: (picked) => {
+        advSlot.dataset.provider = picked.provider
+        advSlot.dataset.model = picked.model
+        refreshAdvisorEffort(picked.model)
+        refreshClearBtn(advSlot, picked.provider, picked.model)
+        fireAgentSave()
+      },
+      onClear: () => {
+        advSlot.dataset.provider = ""
+        advSlot.dataset.model = ""
+        advSlot.querySelector(".model-menu-btn").textContent = t("settings.inherit")
+        refreshAdvisorEffort(null)
+        refreshClearBtn(advSlot)
+        fireAgentSave()
+      },
     })
   }
 }
 
-function mountSlot(slot, { provider, model, onPick }) {
+function mountSlot(slot, { provider, model, onPick, onClear }) {
   if (!slot || slot.dataset.mounted === "1") return
   slot.dataset.mounted = "1"
   const models = _getModels?.() || []
@@ -140,6 +176,16 @@ function mountSlot(slot, { provider, model, onPick }) {
     openModelMenu({ anchorEl: btn, models, value: provider && model ? { provider, model } : null, onPick })
   })
   slot.replaceChildren(btn)
+  // ✕ clears the value back to inherit — plain, visible, always available when set
+  if (onClear && provider && model) {
+    const clr = document.createElement("button")
+    clr.type = "button"
+    clr.className = "model-menu-clear"
+    clr.title = t("settings.inherit")
+    clr.textContent = "✕"
+    clr.addEventListener("click", (e) => { e.stopPropagation(); onClear() })
+    slot.appendChild(clr)
+  }
 }
 
 function setRowModel(row, provider, model) {
@@ -174,6 +220,30 @@ function refreshAdvisorEffort(model) {
     const current = sel?.value || defaultEffortFor(model)
     sel.innerHTML = enum_.map((e) => '<option value="' + escHtml(e) + '" ' + (current === e ? "selected" : "") + ">" + escHtml(e) + "</option>").join("")
   }
+}
+
+/** Show/hide the ✕ clear button next to a submodel trigger based on current value. */
+function refreshClearBtn(slot, provider, model) {
+  const has = !!(provider !== undefined ? (provider && model) : slot.dataset.value)
+  let clr = slot.querySelector(".model-menu-clear")
+  if (has && !clr) {
+    clr = document.createElement("button")
+    clr.type = "button"
+    clr.className = "model-menu-clear"
+    clr.title = t("settings.inherit")
+    clr.textContent = "✕"
+    clr.addEventListener("click", (e) => {
+      e.stopPropagation()
+      slot.dataset.value = ""
+      slot.dataset.provider = ""
+      slot.dataset.model = ""
+      slot.querySelector(".model-menu-btn").textContent = t("settings.inherit")
+      refreshAdvisorEffort(null)
+      refreshClearBtn(slot)
+      fireAgentSave()
+    })
+    slot.appendChild(clr)
+  } else if (!has) clr?.remove()
 }
 
 function fireAgentSave() {
@@ -213,6 +283,7 @@ function bindConsultRows() {
 let _indexStatus = null
 /** @type {{ maxTurns?:number, subagentTurns?:number, compactThreshold?:number|null, verifyGuard?:boolean, advisor?:object } | null} */
 let _agentSettings = null
+let _agentDirtyUntil = 0 // suppress push-rebuilds right after our own saves
 /** @type {{ name:string, value:string|null }[] | null} — detected shells (extension sends once) */
 let _shellCandidates = null
 /** @type {string|null} — current config.shell value */
@@ -424,8 +495,12 @@ export function showSettingsError(text) {
 function panelHasActiveForm() {
   const panel = document.getElementById("settings-panel")
   if (!panel || panel.style.display === "none") return false
-  if (document.getElementById("mcp-form")?.style.display !== "none") return true
-  if (document.getElementById("prov-add-form")?.style.display !== "none") return true
+  // An ABSENT form element is not an active form — `el?.style.display !== "none"`
+  // evaluates true when el is undefined, permanently suppressing rebuilds.
+  const mcpForm = document.getElementById("mcp-form")
+  if (mcpForm && mcpForm.style.display !== "none") return true
+  const addForm = document.getElementById("prov-add-form")
+  if (addForm && addForm.style.display !== "none") return true
   return !!panel.querySelector("input:focus, select:focus, textarea:focus")
 }
 
@@ -567,21 +642,20 @@ function buildSettings() {
   html += `<label class="switch" title="${t("settings.verifyGuardHelp")}"><input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}> ${t("settings.verifyGuard")}</label>`
   html += `<div class="settings-subtitle" title="${t("settings.consultHelp")}">${t("settings.consultSection")}</div>`
   html += `<div id="consult-rows">`
-  const consultList = Array.isArray(as.consultModels) ? as.consultModels : []
-  // Single configured provider → preselect it in new/empty rows (one less dropdown to fight)
-  const consultConfigured = Object.entries(ps).filter(([, v]) => v && v.configured).map(([n]) => n)
-  const preselect = consultConfigured.length === 1 ? consultConfigured[0] : ""
-  const consultRows = consultList.length > 0 ? consultList : [{ provider: preselect, model: "" }]
+  // Source of truth on REBUILD: the live DOM rows first (a rebuild must never drop rows the
+  // user is mid-editing), then the saved config, else one empty row.
+  const liveRows = readConsultRowsFromDom()
+  const consultRows = liveRows.length > 0 ? liveRows
+    : (Array.isArray(as.consultModels) && as.consultModels.length > 0 ? as.consultModels : [{}])
   for (const cm of consultRows) {
-    const label = cm?.provider && cm?.model ? `${labelFor(cm.provider)} · ${cm.model}` : ""
     const effortEnum = cm?.model ? effortEnumFor(cm.model) : null
-    html += `<div class="key-field consult-row"${cm ? ` data-provider="${escHtml(cm.provider || "")}" data-model="${escHtml(cm.model || "")}"` : ""}>`
+    html += `<div class="key-field consult-row" data-provider="${escHtml(cm?.provider || "")}" data-model="${escHtml(cm?.model || "")}">`
     html += `<span class="consult-model-slot"></span>`
-    html += effortEnum ? `<select class="consult-effort">${effortEnum.map((e) => `<option value="${escHtml(e)}" ${(cm?.effort || defaultEffortFor(cm?.model)) === e ? "selected" : ""}>${escHtml(e)}</option>`).join("")}</select>` : ""
+    html += effortEnum && effortEnum.length > 0 ? `<select class="consult-effort">${effortEnum.map((e) => `<option value="${escHtml(e)}" ${(cm?.effort || defaultEffortFor(cm?.model)) === e ? "selected" : ""}>${escHtml(e)}</option>`).join("")}</select>` : ""
     html += `<button class="consult-del" title="${t("settings.consultRemove")}">✕</button></div>`
   }
   html += `</div>`
-  html += `<div id="consult-status" class="consult-status">${consultList.length > 0 ? t("settings.consultActive", { n: consultList.length }) : t("settings.consultInactive")}</div>`
+  html += `<div id="consult-status" class="consult-status">${Array.isArray(as.consultModels) && as.consultModels.length > 0 ? t("settings.consultActive", { n: as.consultModels.length }) : t("settings.consultInactive")}</div>`
   html += `<div id="agent-saved-badge" class="agent-saved-badge"></div>`
   html += `<button id="consult-add" class="key-btn" style="margin-top:4px">${t("settings.consultAdd")}</button>`
   html += `<div class="settings-subtitle">${t("settings.advisorSection")}</div>`
@@ -644,8 +718,7 @@ function buildSettings() {
   paTypeChanged()
 
   // Agent/Advisor/Consult settings: CHANGE-TO-SAVE (no submit button).
-  // Every control mutates → debounce 400ms → saveAgentSettings. Half-filled consult
-  // rows only withhold the consultModels portion (flagged red); the rest still saves.
+  // Every control mutates → saveAgentSettings immediately (local config write, no debounce).
   const agCard = document.querySelector("#ag-maxturns")?.closest(".settings-card") || document
   const buildAgentPayload = () => {
     const get = (id) => document.getElementById(id)?.value?.trim()
@@ -656,16 +729,8 @@ function buildSettings() {
       const v = document.getElementById(`submodel-slot-${role}`)?.dataset.value || ""
       if (v) subModels[role] = v
     }
-    document.querySelectorAll("#consult-rows .consult-row").forEach((r) => r.classList.remove("consult-invalid"))
-    const { models, invalid } = collectConsultRows()
-    const consultBlocked = invalid.length > 0
-    if (consultBlocked) {
-      invalid.forEach((r) => r.classList.add("consult-invalid"))
-      const status = document.getElementById("consult-status")
-      if (status) { status.textContent = t("settings.consultIncomplete"); status.classList.add("consult-status-error") }
-    }
+    const models = collectConsultRows()
     return {
-      consultBlocked,
       settings: {
         maxTurns: get("ag-maxturns") || undefined,
         subagentTurns: get("ag-subturns") || undefined,
@@ -680,21 +745,24 @@ function buildSettings() {
           model: document.getElementById("adv-model-slot")?.dataset.model || undefined,
           effort: document.getElementById("adv-effort")?.value || undefined,
         },
-        ...(consultBlocked ? {} : { consultModels: models }),
+        consultModels: models,
       },
     }
   }
-  let _agentSaveTimer = null
+  // Direct save on change — the payload writes a few KB to config.json (local IO);
+  // change events fire once per completed interaction, so no debounce is needed.
+  // The consult-echo race is handled by the shadow merge below, not by timing.
   const autoSaveAgent = () => {
-    clearTimeout(_agentSaveTimer)
-    _agentSaveTimer = setTimeout(() => {
-      try {
-        const { settings } = buildAgentPayload()
-        window._vscode.postMessage({ type: "saveAgentSettings", settings })
-        const badge = document.getElementById("agent-saved-badge")
-        if (badge) { badge.textContent = t("settings.autoSaved"); badge.classList.add("visible"); setTimeout(() => badge.classList.remove("visible"), 1200) }
-      } catch (e) { console.error("[settings] agent auto-save failed:", e) }
-    }, 400)
+    try {
+      const { settings } = buildAgentPayload()
+      // Optimistic merge: keep consultModels in the shadow copy so the push echo
+      // doesn't rebuild with stale data (the "rows vanish after picking" race).
+      if (settings.consultModels) _agentSettings = { ...(_agentSettings || {}), consultModels: settings.consultModels }
+      _agentDirtyUntil = Date.now() + 1500
+      window._vscode.postMessage({ type: "saveAgentSettings", settings })
+      const badge = document.getElementById("agent-saved-badge")
+      if (badge) { badge.textContent = t("settings.autoSaved"); badge.classList.add("visible"); setTimeout(() => badge.classList.remove("visible"), 1200) }
+    } catch (e) { console.error("[settings] agent auto-save failed:", e) }
   }
   agCard.querySelectorAll("input, select").forEach((el) => el.addEventListener("change", autoSaveAgent))
   document.getElementById("consult-rows")?.addEventListener("consult-rows-changed", autoSaveAgent)
@@ -703,16 +771,12 @@ function buildSettings() {
 
   // Proxy settings: CHANGE-TO-SAVE (test button stays — it's an action, not a save)
   const pxCard = document.getElementById("px-save-btn")?.closest(".settings-card") || document
-  let _pxTimer = null
   const autoSaveProxy = () => {
-    clearTimeout(_pxTimer)
-    _pxTimer = setTimeout(() => {
-      const uri = document.getElementById("px-uri")?.value?.trim() ?? ""
-      const web = document.getElementById("px-web")?.checked ?? false
-      const model = document.getElementById("px-model")?.checked ?? false
-      window._vscode.postMessage({ type: "saveProxySettings", settings: { uri, web, model } })
-      flashSaved(document.getElementById("px-test-btn"))
-    }, 400)
+    const uri = document.getElementById("px-uri")?.value?.trim() ?? ""
+    const web = document.getElementById("px-web")?.checked ?? false
+    const model = document.getElementById("px-model")?.checked ?? false
+    window._vscode.postMessage({ type: "saveProxySettings", settings: { uri, web, model } })
+    flashSaved(document.getElementById("px-test-btn"))
   }
   pxCard.querySelectorAll("input").forEach((el) => el.addEventListener("change", autoSaveProxy))
   document.getElementById("px-save-btn")?.remove()
@@ -847,7 +911,13 @@ function updateProviderStatus(status) {
 }
 
 function updateAgentSettings(settings) {
-  _agentSettings = settings
+  // Suppress the rebuild ONLY for the exact echo of our own save (same consultModels) —
+  // but ALWAYS merge the incoming settings into the shadow copy so later renders see them.
+  _agentSettings = { ...(_agentSettings || {}), ...settings }
+  if (Date.now() < _agentDirtyUntil
+    && JSON.stringify(settings?.consultModels ?? null) === JSON.stringify(_agentSettings?.consultModels ?? null)) {
+    return // echo — rows already merged in autoSaveAgent; skip the flicker rebuild
+  }
   rebuildIfIdle()
 }
 

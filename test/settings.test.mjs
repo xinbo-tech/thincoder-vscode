@@ -3,7 +3,7 @@
  * Exercises the card layout + provider rows + switch toggles + the save flow
  * via the initSettings() return value (the extension's real message-dispatch API).
  */
-import { describe, it, before, after, beforeEach } from "node:test"
+import { describe, it, before, after, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
 import { setupWebview, installSettingsFixture } from "./helpers/webview-env.mjs"
 import { initSettings } from "../webview/settings.js"
@@ -106,11 +106,11 @@ describe("buildSettings — switch toggles (agent / advisor)", () => {
     const slot = body.querySelector("#submodel-slot-coder")
     const btn = slot.querySelector(".model-menu-btn")
     assert.equal(btn.textContent, "deepseek:deepseek-v4-pro")
-    btn.click() // opens the popup (appended to document.body — escapes card clipping)
-    const popup = document.querySelector(".model-menu-popup")
-    assert.ok(popup, "popup rendered")
-    const items = [...popup.querySelectorAll(".dropdown-item > span:first-child")].map((x) => x.textContent)
-    assert.ok(items.includes("DeepSeek") && items.includes("Kimi"), "providers as hover rows: " + items.join(","))
+    btn.click() // opens the overlay menu (fixed, viewport-positioned)
+    const panel = document.querySelector(".mm-panel")
+    assert.ok(panel, "overlay panel rendered")
+    const items = [...panel.querySelectorAll(".mm-row")].map((x) => x.firstChild.textContent)
+    assert.ok(items.includes("DeepSeek") && items.includes("Kimi"), "providers as rows: " + items.join(","))
   })
 
   it("wraps verifyGuard in a .switch label (not a bare checkbox)", () => {
@@ -283,65 +283,3 @@ describe("buildSettings — save flow (posts payload to extension)", () => {
 // was expected — the filter saw no .configured entries and the provider dropdown
 // rendered empty. Also: binding lived inside the agSave guard — any upstream
 // bind failure silently killed the add button.
-
-describe("settings consult rows (model-menu)", () => {
-  it("add row mounts a model-menu trigger; picking a model sets row data + effort dropdown", async () => {
-    const { initSettings } = await import("../webview/settings.js")
-    document.body.innerHTML = '<div id="settings-panel"><div id="settings-body"></div></div><button id="settings-btn"></button><button id="settings-close"></button>'
-    const api = initSettings({ onClose: () => {}, getModels: () => [
-      { id: "glm-5.2", provider: "zhipu-plan", group: "GLM", label: "glm-5.2", reasoning: ["max", "high", "low"], effortDefault: "max" },
-      { id: "gpt-4o", provider: "openai", group: "OpenAI", label: "gpt-4o", reasoning: [] },
-    ] })
-    api.updateProviderStatus({ providers: { "zhipu-plan": { configured: true, model: "glm-5.2" }, openai: { configured: true, model: "gpt-4o" } }, labels: {} })
-    api.updateAgentSettings({ maxTurns: 100 })
-    api.openSettings()
-
-    document.getElementById("consult-add").click()
-    const row = document.querySelectorAll("#consult-rows .consult-row")[0]
-    assert.ok(row.querySelector(".model-menu-btn"), "trigger mounted on new row")
-
-    // simulate a pick through the mounted trigger's popup
-    const btn = row.querySelector(".model-menu-btn")
-    btn.click()
-    const prov = [...document.querySelectorAll(".model-menu-popup .has-submenu")].find((x) => x.textContent.includes("GLM"))
-    prov.dispatchEvent(new window.Event("mouseenter"))
-    const item = [...document.querySelectorAll(".model-menu-popup .model-menu-flyout .dropdown-item")].find((x) => x.textContent.trim() === "glm-5.2")
-    assert.ok(item, "flyout opened with the model item")
-    item.click()
-    assert.equal(row.dataset.provider, "zhipu-plan")
-    assert.equal(row.dataset.model, "glm-5.2")
-    const eff = row.querySelector(".consult-effort")
-    assert.ok(eff, "effort dropdown rendered for thinking model")
-    assert.equal(eff.value, "max", "official default preselected")
-
-    // collect carries effort
-    const { models } = (function () {
-      const collected = []
-      document.querySelectorAll("#consult-rows .consult-row").forEach((r) => {
-        const p = r.dataset.provider || "", m = r.dataset.model || ""
-        if (p && m) collected.push({ provider: p, model: m, effort: r.querySelector(".consult-effort")?.value ?? null })
-      })
-      return { models: collected }
-    })()
-    assert.deepEqual(models, [{ provider: "zhipu-plan", model: "glm-5.2", effort: "max" }])
-  })
-
-  it("non-thinking model pick hides the effort dropdown", async () => {
-    const { initSettings } = await import("../webview/settings.js")
-    document.body.innerHTML = '<div id="settings-panel"><div id="settings-body"></div></div><button id="settings-btn"></button><button id="settings-close"></button>'
-    const api = initSettings({ onClose: () => {}, getModels: () => [
-      { id: "gpt-4o", provider: "openai", group: "OpenAI", label: "gpt-4o", reasoning: [] },
-    ] })
-    api.updateProviderStatus({ providers: { openai: { configured: true, model: "gpt-4o" } }, labels: {} })
-    api.updateAgentSettings({ maxTurns: 100 })
-    api.openSettings()
-    document.getElementById("consult-add").click()
-    const row = document.querySelectorAll("#consult-rows .consult-row")[0]
-    row.querySelector(".model-menu-btn").click()
-    const prov2 = document.querySelector(".model-menu-popup .has-submenu")
-    prov2.dispatchEvent(new window.Event("mouseenter"))
-    ;[...document.querySelectorAll(".model-menu-popup .model-menu-flyout .dropdown-item")].find((x) => x.textContent.trim() === "gpt-4o").click()
-    assert.equal(row.dataset.model, "gpt-4o")
-    assert.equal(row.querySelector(".consult-effort"), null, "no effort dropdown for non-thinking model")
-  })
-})

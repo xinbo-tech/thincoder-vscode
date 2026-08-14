@@ -38,6 +38,7 @@ export function installSettingsFixture() {
     <button id="settings-btn"></button>
     <button id="settings-close"></button>
     <div id="settings-panel" style="display:none">
+      <div class="panel-header"><button id="settings-close"></button></div>
       <div class="panel-body" id="settings-body"></div>
     </div>
   `
