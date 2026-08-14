@@ -396,3 +396,21 @@ describe("buildRequest thinking default", () => {
     assert.equal("thinking" in body, false)
   })
 })
+
+// ─── reasoning selector wiring ("off"/"none" must truly disable) ──
+
+describe("resolveReasoningMode", () => {
+  it('"none" (the UI effort enum bottom, labeled off) is a TRUE off, same as "off"', async () => {
+    const { resolveReasoningMode } = await import("../src/extension/reasoning-mode.mjs")
+    const specFn = () => ({ thinkApi: "type" })
+    assert.deepEqual(resolveReasoningMode("none", "glm-5.2", specFn), { thinking: null, reasoningEffort: null })
+    assert.deepEqual(resolveReasoningMode("off", "glm-5.2", specFn), { thinking: null, reasoningEffort: null })
+  })
+
+  it('"enabled" uses thinkEnabledValue; effort levels pass through as reasoningEffort', async () => {
+    const { resolveReasoningMode } = await import("../src/extension/reasoning-mode.mjs")
+    assert.deepEqual(resolveReasoningMode("enabled", "glm-5.2", () => ({ thinkApi: "type", thinkEnabledValue: "enabled" })).thinking, { type: "enabled" })
+    assert.deepEqual(resolveReasoningMode("high", "x", () => ({})), { reasoningEffort: "high" })
+    assert.deepEqual(resolveReasoningMode(undefined, "x", () => ({})), {})
+  })
+})

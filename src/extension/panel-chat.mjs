@@ -18,6 +18,7 @@ import { permissionGate } from "./permission-gate.mjs"
 import { notifyCompletionIfUnfocused } from "./notify.mjs"
 import { extractFileLinks } from "./file-links.mjs"
 import { traceStop } from "./stop-trace.mjs"
+import { resolveReasoningMode } from "./reasoning-mode.mjs"
 import { t } from "../i18n.mjs"
 
 /**
@@ -53,15 +54,12 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   }
   if (!p) { panel._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }), needsSetup: true }); return }
   if (modelOverride) p = { ...p, model: modelOverride }
-  if (reasoning === "enabled") {
-    const spec = specForModel(p.model)
-    const thinkVal = spec.thinkEnabledValue || "enabled"
-    p = { ...p, thinking: { type: thinkVal }, ...(spec.thinkApi === "effort" ? { reasoningEffort: null } : {}) }
-  } else if (reasoning && reasoning !== "off") {
-    p = { ...p, reasoningEffort: reasoning }
-  } else if (reasoning === "off") {
-    p = { ...p, thinking: null, reasoningEffort: null }
-  }
+  // Reasoning selector → provider fields. "off" AND "none" (the effort enum's lowest
+  // level, labeled "off" in the UI) are a true thinking toggle — previously "none"
+  // fell into the effort branch and left thinking:enabled untouched, so the button
+  // never actually disabled thinking. (Endpoints that force thinking server-side —
+  // e.g. the Zhipu coding plan — will still emit reasoning regardless.)
+  if (reasoning) p = { ...p, ...resolveReasoningMode(reasoning, p.model, specForModel) }
 
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
 
