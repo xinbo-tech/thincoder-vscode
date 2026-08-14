@@ -414,3 +414,30 @@ describe("resolveReasoningMode", () => {
     assert.deepEqual(resolveReasoningMode(undefined, "x", () => ({})), {})
   })
 })
+
+// ─── model spec official-parameter sync (verified vs vendor docs 2026-08) ──
+
+describe("MODEL_SPECS official sync", () => {
+  it("kimi-k3 / k3: maxOutput 131072 (Kimi OpenAPI default), cacheMode auto (auto cache, no cache ID)", async () => {
+    const { specForModel } = await import("../src/config.mjs")
+    for (const id of ["kimi-k3", "k3"]) {
+      const s = specForModel(id)
+      assert.equal(s.maxOutput, 131072, id)
+      assert.equal(s.cacheMode, "auto", id)
+    }
+  })
+
+  it("qwen3.x: maxOutput 131072 (Qwen official 131K), thinking-capable 3.7/3.8 flagged", async () => {
+    const { specForModel } = await import("../src/config.mjs")
+    for (const id of ["qwen3.8-max-preview", "qwen3.7-max", "qwen3.8-max", "qwen-max", "qwen-plus", "qwen"]) {
+      assert.equal(specForModel(id).maxOutput, 131072, id)
+    }
+    assert.equal(specForModel("qwen3.8-max").thinking, true, "qwen3.8-max has a thinking mode (DashScope)")
+    assert.equal(specForModel("qwen3.7-max").thinking, true, "qwen3.7-max has a thinking mode")
+  })
+
+  it("glm-5.2 effort enum matches Zhipu OpenAPI exactly", async () => {
+    const { specForModel } = await import("../src/config.mjs")
+    assert.deepEqual(specForModel("glm-5.2").reasoningEffortEnum, ["max", "xhigh", "high", "medium", "low", "minimal", "none"])
+  })
+})
