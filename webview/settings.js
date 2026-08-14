@@ -646,7 +646,7 @@ function buildSettings() {
   // user is mid-editing), then the saved config, else one empty row.
   const liveRows = readConsultRowsFromDom()
   const consultRows = liveRows.length > 0 ? liveRows
-    : (Array.isArray(as.consultModels) && as.consultModels.length > 0 ? as.consultModels : [{}])
+    : (Array.isArray(as.consultModels) ? as.consultModels : [])
   for (const cm of consultRows) {
     const effortEnum = cm?.model ? effortEnumFor(cm.model) : null
     html += `<div class="key-field consult-row" data-provider="${escHtml(cm?.provider || "")}" data-model="${escHtml(cm?.model || "")}">`
