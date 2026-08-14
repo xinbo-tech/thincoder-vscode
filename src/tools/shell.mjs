@@ -9,7 +9,86 @@
  */
 
 import { exec, execSync, execFileSync } from "node:child_process"
+import * as vscode from "vscode"
 import { BASH_TIMEOUT_MS } from "./shared.mjs"
+
+// ─── Terminal modes (A: visible / B: inject) ─────────────────
+
+/** Strip ANSI escape sequences from terminal stream data (colors, cursor moves, OSC). */
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+}
+
+/** Mode B — inject: fill the command into the user's terminal WITHOUT running it.
+ *  The user reviews and presses Enter. Output is not captured. */
+function injectToTerminal(command) {
+  const term = vscode.window.activeTerminal ?? vscode.window.createTerminal({ name: "ThinCoder" })
+  term.show(true) // preserveFocus — don't yank the user's cursor
+  term.sendText(command, false)
+  return "(injected into the user's terminal — NOT executed. The user reviews and presses Enter. " +
+    "No output was captured — do NOT report a result. If the command should run autonomously, omit the terminal parameter.)"
+}
+
+/** Pick a terminal with shell integration: prefer the ACTIVE terminal (carries the
+ *  user's shell state), else create/reuse a "ThinCoder" terminal and wait briefly
+ *  for shell integration to activate. Returns null when unavailable (caller falls
+ *  back to the isolated child process). */
+async function ensureIntegratedTerminal() {
+  const active = vscode.window.activeTerminal
+  if (active?.shellIntegration) return active
+  let term = vscode.window.terminals.find((t) => t.name === "ThinCoder" && !t.exitStatus)
+  if (!term) term = vscode.window.createTerminal({ name: "ThinCoder" })
+  if (term.shellIntegration) return term
+  const ok = await new Promise((resolve) => {
+    let disp = null
+    const timer = setTimeout(() => { disp?.dispose(); resolve(false) }, 5000)
+    disp = vscode.window.onDidChangeTerminalShellIntegration((e) => {
+      if (e.terminal === term) { clearTimeout(timer); disp.dispose(); resolve(true) }
+    })
+  })
+  return ok ? term : null
+}
+
+/** Mode A — visible: execute in the user's terminal via shellIntegration.executeCommand.
+ *  The command runs visibly (the user watches it live) and inherits the user's shell
+ *  state. Stop/timeout send Ctrl+C to the terminal (no kill API exists for shell-
+ *  integration executions). Returns null when shell integration is unavailable. */
+async function runInVisibleTerminal(command, timeout, ctx) {
+  const term = await ensureIntegratedTerminal()
+  if (!term) return null
+  term.show(true)
+  const execution = term.shellIntegration.executeCommand(command)
+  const stream = execution.read()
+  let out = ""
+  return await new Promise((resolve) => {
+    let settled = false
+    const finish = (text) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(text)
+    }
+    const interrupt = () => term.sendText("\x03") // Ctrl+C the foreground process
+    const timer = setTimeout(() => {
+      interrupt()
+      finish(`(killed — timeout ${timeout || BASH_TIMEOUT_MS}ms; interrupted in the terminal)\n[stdout]:\n${out.trim() || "(empty)"}`)
+    }, timeout || BASH_TIMEOUT_MS)
+    if (ctx.signal) {
+      const onAbort = () => { interrupt(); finish(`(stopped)\n[stdout]:\n${out.trim() || "(empty)"}`) }
+      if (ctx.signal.aborted) onAbort()
+      else ctx.signal.addEventListener("abort", onAbort, { once: true })
+    }
+    ;(async () => {
+      try {
+        for await (const chunk of stream) out += stripAnsi(chunk)
+        finish(`[stdout]:\n${out.trim() || "(empty)"}\n(exit code unavailable in terminal mode — watch the terminal if it matters)`)
+      } catch (e) {
+        finish(`Error: terminal execution failed: ${e.message}`)
+      }
+    })()
+  })
+}
+
 
 // Pass all env vars EXCEPT known secret patterns.
 // Blacklist approach — whitelisting is too fragile and breaks npm, git SSH, etc.
@@ -94,16 +173,23 @@ export const bashTool = {
     "Execute a shell command and return stdout+stderr.\n" +
     "Parameters:\n" +
     "- command (required): Shell command to execute\n" +
-    "- timeout: Timeout in milliseconds (default 120000)",
+    "- timeout: Timeout in milliseconds (default 120000)\n" +
+    "- terminal: \"visible\" runs the command in the user's OWN visible terminal via shell integration — it inherits the user's shell state (current dir, activated venv/conda, env vars) that an isolated child process lacks. \"inject\" fills the command into the terminal WITHOUT running it — the user reviews and presses Enter (use for commands the user should inspect first). Omit for the default isolated child process.",
   parameters: {
     type: "object",
     properties: {
       command: { type: "string", description: "Shell command" },
       timeout: { type: "number", description: "Timeout in ms" },
+      terminal: { type: "string", enum: ["visible", "inject"], description: "Run in / inject into the user's terminal" },
     },
     required: ["command"],
   },
-  async execute({ command, timeout }, ctx) {
+  async execute({ command, timeout, terminal }, ctx) {
+    // inject: hand the command to the user's terminal WITHOUT running it — the
+    // user reviews and presses Enter. No guard snapshot (nothing executes yet;
+    // the user's review IS the guard).
+    if (terminal === "inject") return injectToTerminal(command)
+
     // Git destructive commands are NEVER rejected (the model would just find a
     // way around the rejection). Snapshot-then-proceed (CLI parity): every
     // uncommitted file is stashed before the command runs — rollback becomes
@@ -111,6 +197,15 @@ export const bashTool = {
     const guard = GIT_DESTRUCTIVE_RE.test(command)
       ? gitGuardSnapshot(command, ctx.cwd)
       : null
+
+    // visible: run in the user's own terminal via shell integration (inherits
+    // the user's shell state). Falls back to the isolated child process when
+    // shell integration is unavailable.
+    if (terminal === "visible") {
+      const out = await runInVisibleTerminal(command, timeout, ctx)
+      if (out != null) return guard ? `${guard.notice}\n\n${out}` : out
+      // null = shell integration unavailable → fall through to child process
+    }
 
     return new Promise((resolve) => {
       let settled = false

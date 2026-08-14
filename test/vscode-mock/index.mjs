@@ -57,6 +57,11 @@ export const window = {
     reveal: () => {},
     dispose: () => {},
   }),
+  // Terminal API (bash tool terminal modes) — tests stub these per case
+  terminals: [],
+  activeTerminal: undefined,
+  createTerminal: () => { throw new Error("stub window.createTerminal in your test") },
+  onDidChangeTerminalShellIntegration: () => ({ dispose: () => {} }),
 }
 
 export const commands = {
