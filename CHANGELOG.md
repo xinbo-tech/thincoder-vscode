@@ -4,6 +4,20 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.14] — 2026-08-14
+
+### Added
+
+- **Multi-model consultation (会诊)**: configure up to 5 models (new Settings UI: ⚙ → Agent card → Consultation models). When stuck, the agent — or you, via "发起会诊" — runs `consult_start` to analyze the problem across all models in parallel. Replies are read one at a time as they arrive (`consult_check`); you/the agent verify with your own tools; `consult_stop` aborts the rest early. Consultants are read-only and can pull the main session's failure trail via `main_history`. The mechanism does zero judging — that stays with the main agent.
+- **Stop trace observability**: opt-in setting `thincoder.stopTrace` logs every abort hop (click → rate gate → request → stream → tool batches → unwind → UI released) with timestamps to the "ThinCoder Stop Trace" output channel, to diagnose "Stop during reasoning output does nothing".
+
+### Fixed
+
+- **Stop hung on question/permission cards**: aborting while the agent waited for an answer never resolved the promise — the UI stayed "running" until the (now irrelevant) card was answered. Both now release immediately (question → cancelled, permission → denied).
+- **Retry backoff / rate-limit sleeps ignored Stop**: backoff (up to 60s) and rate-gate waits were bare sleeps; aborts now break them immediately.
+- **edit failed on every CRLF file**: the model writes LF in old_string but files were read raw — EOL is now normalized on read and the file's original line-ending style preserved on write.
+- **Reasoning output rendered as plain text**: thinking blocks now go through the markdown renderer (headers/code/bold), with scaled-down styles.
+
 ## [0.1.13] — 2026-08-14
 
 ### Added
