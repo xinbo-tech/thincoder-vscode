@@ -419,3 +419,28 @@ describe("read_image — svg as text source (Kimi 400 session-poisoning regressi
     await assert.rejects(() => readImageTool.execute({ path: "a.bmp" }, ctx()), /Convert it to PNG/)
   })
 })
+
+  describe("edit — EOL normalization (CRLF files, LF old_string)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+it("edit on a CRLF file with LF old_string succeeds (EOL normalization regression)", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    const f = join(cwd, "crlf.txt")
+    writeFileSync(f, "alpha\r\nbeta\r\ngamma\r\n")
+    // Model writes LF — before the fix this failed with "old_string not found"
+    const r = await editTool.execute({ path: "crlf.txt", old_string: "beta\ngamma", new_string: "BETA\nGAMMA" }, ctx())
+    assert.match(r, /Replaced 1 occurrence/)
+    const out = readFileSync(f, "utf8")
+    assert.ok(out.includes("BETA\r\nGAMMA"), "replacement applied with the file's CRLF style preserved: " + JSON.stringify(out))
+    assert.ok(!out.includes("alpha\n"), "no whole-file EOL rewrite")
+  })
+
+  it("a genuinely absent old_string still reports not found", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    const f = join(cwd, "lf.txt")
+    writeFileSync(f, "one\ntwo\n")
+    const r = await editTool.execute({ path: "lf.txt", old_string: "not-there-at-all", new_string: "x" }, ctx())
+    assert.match(r, /old_string not found/)
+  })
+})

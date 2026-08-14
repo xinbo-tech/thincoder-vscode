@@ -105,9 +105,21 @@ export const editTool = {
     if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
     const abs = resolvePath(path, ctx.cwd)
     const doc = getOpenDoc(abs)
-    const text = doc ? doc.getText() : await readFile(abs, "utf8")
+    // EOL normalization on BOTH read paths: disk files are often CRLF (Windows) while
+    // the model writes LF in old_string — without normalization every edit on a CRLF
+    // file fails with "old_string not found". The editor doc path normalizes too
+    // (getText returns the buffer as-is). Write-back restores the file's original
+    // EOL style so the diff stays clean (no whole-file EOL rewrite).
+    const rawText = doc ? doc.getText() : await readFile(abs, "utf8")
+    const fileEol = rawText.includes("\r\n") ? "\r\n" : "\n"
+    const text = normalizeEOL(rawText)
     const count = text.split(old_string).length - 1
-    if (count === 0) return `Error: old_string not found in ${path}`
+    if (count === 0) {
+      // Helpful diagnosis instead of a bare miss: line ending mismatch vs genuinely absent
+      const crlfCount = rawText.split(old_string.replace(/\n/g, "\r\n")).length - 1
+      if (crlfCount > 0) return `Error: old_string not found with LF line endings, but matches ${crlfCount} time(s) with CRLF — internal normalization failed (report this)`
+      return `Error: old_string not found in ${path}`
+    }
     if (!replace_all && count > 1) {
       return `Error: old_string matches ${count} times in ${path} — set replace_all=true or add more context to make it unique`
     }
@@ -128,12 +140,9 @@ export const editTool = {
       return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path} (via editor)`
     }
 
-    // Not open — write to disk
-    // Function replacer — a string replacement would interpolate dollar-ampersand
-    // and dollar-digit patterns, silently corrupting files (CLI parity).
-    const result = replace_all ? text.replaceAll(old_string, () => new_string) : text.replace(old_string, () => new_string)
-    await writeFile(abs, result, "utf8")
-    refreshMarkdownPreview(abs)
+    // Not open — write to disk. Restore the file's original EOL style.
+    const replaced = replace_all ? text.replaceAll(old_string, () => new_string) : text.replace(old_string, () => new_string)
+    await writeFile(abs, fileEol === "\r\n" ? replaced.replace(/\n/g, "\r\n") : replaced, "utf8")
     refreshMarkdownPreview(abs)
     return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path}`
   },
