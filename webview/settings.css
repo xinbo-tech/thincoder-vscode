@@ -348,17 +348,25 @@
 
 /* model-menu triggers inside settings cards (MODEL-PICKER-UNIFY.md)
    The popup is position:fixed (appended to body) — escapes card overflow:hidden
-   and the scrolling panel body. */
+   and the scrolling panel body. It must override the .dropdown base class
+   (bottom:100% is for the main panel's upward popup) and stay overflow:visible
+   so the flyout submenu extends past its edge; scrolling happens in .model-menu-list. */
 .model-menu-root { display: inline-flex; min-width: 0; flex: 1; }
 .model-menu-btn { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-menu-popup {
-  position: fixed;
+  position: fixed !important;
+  top: auto !important;
+  bottom: auto !important;
+  margin: 0 !important;
   z-index: 9000;
   min-width: 420px;
   max-width: 520px;
-  max-height: 320px;
-  overflow-y: auto;
+  overflow: visible !important;
   box-shadow: 0 6px 24px rgba(0,0,0,.35);
 }
-/* the hover submenu relies on chat.css dropdown styles; scope-import the minimum for settings */
+.model-menu-popup .model-menu-list {
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: visible;
+}
 .model-menu-popup .dropdown-item { display: flex; gap: 8px; align-items: center; }

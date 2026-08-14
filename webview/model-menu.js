@@ -23,9 +23,14 @@ export function buildModelMenuDropdown({ models, value, onPick, footerEntries = 
     if (!byProvider.has(key)) byProvider.set(key, { group: m.group || key, models: [] })
     byProvider.get(key).models.push(m)
   }
+  // Scroll layer for the provider rows — the popup itself must stay overflow:visible
+  // so the flyout submenu can extend past its right edge.
+  const list = document.createElement("div")
+  list.className = "model-menu-list"
   for (const [provider, { group, models: provModels }] of byProvider) {
-    frag.appendChild(providerRow(provider, group, provModels, value, onPick))
+    list.appendChild(providerRow(provider, group, provModels, value, onPick))
   }
+  frag.appendChild(list)
   for (const entry of footerEntries) frag.appendChild(entry)
   return frag
 }
@@ -105,6 +110,13 @@ export function modelMenuTrigger({ label, models, value, onPick, className = "ke
     document.body.appendChild(popup)
     position()
     popup.style.display = ""
+    // First-level list scrolls INSIDE a wrapper; the popup itself must NOT clip
+    // (the flyout submenu overflows its right edge by design).
+    const list = popup.querySelector(".model-menu-list")
+    if (list) {
+      const rows = popup.querySelectorAll(":scope > .has-submenu")
+      list.style.maxHeight = Math.min(320, Math.max(160, rows.length * 30 + 12)) + "px"
+    }
   }
   const onScroll = () => close()
   btn.addEventListener("click", (e) => {
