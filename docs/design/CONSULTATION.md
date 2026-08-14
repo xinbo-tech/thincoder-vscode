@@ -77,9 +77,11 @@ consult 会话（模块级 Map<id, Session>，随 turn 结束清理）
 ```jsonc
 "agent": {
   "consultModels": [
-    { "provider": "deepseek", "model": "deepseek-v4-pro" },
-    { "provider": "openai", "model": "gpt-4o" }
+    { "provider": "deepseek", "model": "deepseek-v4-pro", "effort": "high" },
+    { "provider": "zhipu-plan", "model": "glm-5.2", "effort": "max" }
     // 上限 5；缺省空数组 = 会诊未启用
+    // effort: 思考强度，显式落盘（选模型时自动填该模型官方默认档，用户可改）；
+    //         非思考模型为 null。见 MODEL-PICKER-UNIFY.md §3.3（2026-08-14 增补）
   ]
 }
 ```
@@ -90,6 +92,7 @@ consult_start
   - problem (required): 问题简报——现象 + 失败轨迹概述 + 文件入口
       （原始报错无需粘贴——会诊子 agent 用 main_history 自行拉取）
   → { id, models: ["deepseek-v4-pro", ...] }   // 非阻塞，立即返回
+      // 子 provider 按条目 effort 注入 reasoning_effort（MODEL-PICKER-UNIFY.md §3.3）
 
 consult_check
   - id (required)
