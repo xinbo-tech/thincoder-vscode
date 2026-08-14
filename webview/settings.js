@@ -147,6 +147,7 @@ function mountModelMenus() {
       onPick: (picked) => {
         advSlot.dataset.provider = picked.provider
         advSlot.dataset.model = picked.model
+        advSlot.querySelector(".model-menu-btn").textContent = labelFor(picked.provider) + " · " + picked.model
         refreshAdvisorEffort(picked.model)
         refreshClearBtn(advSlot, picked.provider, picked.model)
         fireAgentSave()
