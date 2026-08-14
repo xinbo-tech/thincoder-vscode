@@ -15,6 +15,7 @@ import { BASH_TIMEOUT_MS } from "./shared.mjs"
 // ─── Terminal modes (A: visible / B: inject) ─────────────────
 
 /** Strip ANSI escape sequences from terminal stream data (colors, cursor moves, OSC). */
+// eslint-disable-next-line no-control-regex -- ANSI escape stripping legitimately matches control chars
 function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
 }

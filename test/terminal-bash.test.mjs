@@ -16,7 +16,7 @@ function fakeTerminal({ chunks = [], withSI = true } = {}) {
     show() { term.shown++ },
     sendText: (text, execute) => sent.push([text, execute]),
     shellIntegration: withSI
-      ? { executeCommand: (cmd) => ({ read: async function* () { for (const c of chunks) yield c } }) }
+      ? { executeCommand: (_cmd) => ({ read: async function* () { for (const c of chunks) yield c } }) }
       : undefined,
   }
   return term
@@ -43,7 +43,7 @@ describe("bash terminal modes", () => {
     vscode.window.activeTerminal = term
     const r = await bashTool.execute({ command: "echo hi", terminal: "visible" }, { cwd: process.cwd() })
     assert.match(r, /Wrote 1 file/)
-    assert.ok(!/\x1b\[/.test(r), "ANSI escape codes stripped")
+    assert.ok(!/\x1b\[/.test(r), "ANSI escape codes stripped") // eslint-disable-line no-control-regex
     assert.match(r, /exit code unavailable in terminal mode/)
   })
 
