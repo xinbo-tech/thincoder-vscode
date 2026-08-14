@@ -714,7 +714,9 @@ function buildSettings() {
       settings: {
         maxTurns: get("ag-maxturns") || undefined,
         subagentTurns: get("ag-subturns") || undefined,
-        subagentModel: document.getElementById("submodel-slot-global")?.dataset.value || undefined,
+        // null (not undefined): postMessage JSON-serializes and DROPS undefined keys — a
+        // cleared global default must reach the extension as an explicit null to delete it
+        subagentModel: document.getElementById("submodel-slot-global")?.dataset.value || null,
         subagentModels: subModels,
         compactThreshold: compactRaw === "" ? "" : (compactRaw || undefined),
         verifyGuard: chk("ag-verifyguard"),
