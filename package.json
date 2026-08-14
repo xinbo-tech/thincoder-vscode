@@ -8,11 +8,11 @@
   "icon": "assets/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://gitee.com/shanghai-xinbo/thincoder-vscode.git"
+    "url": "https://github.com/xinbo-tech/thincoder-vscode.git"
   },
-  "homepage": "https://gitee.com/shanghai-xinbo/thincoder-vscode",
+  "homepage": "https://github.com/xinbo-tech/thincoder-vscode",
   "bugs": {
-    "url": "https://gitee.com/shanghai-xinbo/thincoder-vscode/issues"
+    "url": "https://github.com/xinbo-tech/thincoder-vscode/issues"
   },
   "categories": [
     "Machine Learning",
