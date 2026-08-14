@@ -4,6 +4,22 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.13] — 2026-08-14
+
+### Added
+
+- **Clickable file paths in tool cards**: workspace-real paths (fs-verified) in tool output become links that open in the editor at the referenced line.
+- **Native diff viewer for large permission prompts**: diffs over 12 changed lines get a "View in editor" button opening vscode.diff (virtual documents; the real file is never touched).
+- **Completion notification when unfocused**: a turn that finishes while the window is unfocused raises a system notification with a View action. Silent while focused.
+- **Live bash output streaming**: long commands stream their output into the running tool card (opens while streaming, auto-collapses on success).
+
+### Fixed
+
+- **bash silent-output defect**: the exit-grace timer raced the exec callback and reported a hardcoded "(empty)", discarding real output. Incremental capture (CLI parity) with stream decoders (multi-byte UTF-8 chunk-safe, GBK fallback), ANSI sanitize, 2MB per-stream caps; abort and grace paths now return the collected partial output.
+- **Collapsed bash card summary** no longer shows "→ (exit code 0)" — wrapper lines are skipped so the meaningful last line shows.
+- **eng-coder design-token gate rejected valid approvals**: the token regex matched only the uuid segment while the advisor echoes the full signed token — the VS Code port carried a stale regex the CLI had already fixed.
+- **edit tool corrupted files containing ## [0.1.12] — 2026-08-14/$1**: string-form replace interpolated JS replacement patterns into new_string; function replacers now (CLI parity).
+
 ## [0.1.12] — 2026-08-14
 
 ### Added
