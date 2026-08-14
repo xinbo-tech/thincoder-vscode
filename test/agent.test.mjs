@@ -50,7 +50,7 @@ describe("model specs", () => {
 
   it("200K-256K context models", () => {
     assert.equal(specForModel("claude-sonnet-4").context, 200_000)
-    assert.equal(specForModel("deepseek-chat").context, 256_000)
+    assert.equal(specForModel("kimi-k2-retired-fallback").context, 128_000) // unknown ids → 128K default
   })
 
   it("maxOutput values are reasonable", () => {
@@ -73,7 +73,7 @@ describe("model specs", () => {
 
   it("longest prefix wins (deepseek-v4-pro before deepseek-v4-flash)", () => {
     assert.equal(specForModel("deepseek-v4-pro").maxOutput, 384_000)
-    assert.equal(specForModel("deepseek-v4-flash").context, 256_000)
+    assert.equal(specForModel("deepseek-v4-flash").context, 1_000_000) // official: dual v4 models both 1M
   })
 
   it("kimi-code preset + short ID k3 get the kimi-k3 spec (IK5VGJ)", async () => {

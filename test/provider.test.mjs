@@ -390,9 +390,9 @@ describe("buildRequest thinking default", () => {
     assert.equal("thinking" in off, false, "explicit null (panel off) sends no thinking field")
   })
 
-  it("non-thinking models get no default thinking", async () => {
+  it("non-thinking models get no default thinking (qwen-plus has no thinking flag)", async () => {
     const { buildRequest } = await import("../src/provider/transports/openai.mjs")
-    const body = JSON.parse(buildRequest({ baseURL: "https://x/v1", apiKey: "k", model: "deepseek-v4-flash" }, [], []).body)
+    const body = JSON.parse(buildRequest({ baseURL: "https://x/v1", apiKey: "k", model: "qwen-plus" }, [], []).body)
     assert.equal("thinking" in body, false)
   })
 })
@@ -450,5 +450,28 @@ describe("PROVIDER_PRESETS", () => {
     assert.equal(PROVIDER_PRESETS.glm.baseURL, "https://open.bigmodel.cn/api/paas/v4")
     assert.equal(PROVIDER_PRESETS["glm-code"].baseURL, "https://open.bigmodel.cn/api/coding/paas/v4")
     assert.equal(PROVIDER_PRESETS["glm-code"].model, "glm-5.2")
+  })
+})
+
+// ─── DeepSeek official sync (verified 2026-08 via api-docs.deepseek.com) ──
+
+describe("DeepSeek spec official sync", () => {
+  it("v4 dual models: 1M context / 384K output / thinking default-on / effort low-high-max / auto disk cache", async () => {
+    const { specForModel } = await import("../src/config.mjs")
+    for (const id of ["deepseek-v4-pro", "deepseek-v4-flash"]) {
+      const s = specForModel(id)
+      assert.equal(s.context, 1_000_000, id + " context (flash was wrongly 256K)")
+      assert.equal(s.maxOutput, 384_000, id)
+      assert.equal(s.thinking, true, id + " thinking default-on (flash was wrongly false)")
+      assert.deepEqual(s.reasoningEffortEnum, ["low", "high", "max"], id + " effort enum (official mapping table)")
+    }
+  })
+
+  it("retired IDs deepseek-chat / deepseek-reasoner are gone (official model list has only v4 duals)", async () => {
+    const { specForModel } = await import("../src/config.mjs")
+    // specForModel falls back to a default spec for unknown ids — assert via the resolution instead:
+    // retired ids now resolve to the generic default (context 128K), not a dedicated row
+    assert.equal(specForModel("deepseek-chat").context, 128_000, "falls back to default spec")
+    assert.equal(specForModel("deepseek-reasoner").context, 128_000, "falls back to default spec")
   })
 })
