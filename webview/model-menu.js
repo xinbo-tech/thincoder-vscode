@@ -164,7 +164,17 @@ function providerRow(provider, group, models, value, onPick, overlay) {
   let closeTimer = null
   const cancelClose = () => { clearTimeout(closeTimer); closeTimer = null }
   const closeFlyout = () => { cancelClose(); flyout?.remove(); flyout = null; overlay.querySelectorAll(".mm-flyout").forEach((f) => f.remove()) }
-  const scheduleClose = () => { cancelClose(); closeTimer = setTimeout(closeFlyout, 350) }
+  // Event pairing is unreliable here: the flyout materializes UNDER the pointer (flush
+  // positioning), Chromium fires the row's mouseleave immediately but the flyout's
+  // mouseenter only on the next ACTUAL pointer move. If the user hovers still, the timer
+  // fires with no cancel — the flyout dies under a stationary pointer.
+  // Fix: on timer expiry, check the LIVE :hover state instead of trusting events.
+  const scheduleClose = () => {
+    cancelClose()
+    closeTimer = setTimeout(() => {
+      if (!item.matches(":hover") && !(flyout && flyout.matches(":hover"))) closeFlyout()
+    }, 350)
+  }
   const openFlyout = () => {
     cancelClose()
     // already open for this row → nothing to do
