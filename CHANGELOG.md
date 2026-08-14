@@ -4,6 +4,25 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.12] — 2026-08-14
+
+### Added
+
+- **bash terminal modes**: `terminal: "visible"` runs a command in the user's own terminal via shell integration (inherits their shell state — cwd, activated venv/conda, env vars); `terminal: "inject"` fills the command for the user to review without executing. Stop/timeout send Ctrl+C; falls back to the isolated child process when shell integration is unavailable.
+
+### Fixed
+
+- **@ file references never worked**: the trigger read the character BEFORE the just-typed @ (off-by-one), so the autocomplete dropdown never activated. Works mid-line and at line start; whitespace closes it.
+- **Restored tool cards showed "tool"** instead of the tool name: tool result messages were persisted without a name, so restored history had nothing to display. The name now rides on the tool message at write time.
+- **Status bar / tool-error labels showed raw i18n keys** (status.currentTool / status.turns / status.elapsed / tool.error): the keys were referenced but missing from both locales. Added en+zh; also removed 20 dead locale entries and locked the contract with a completeness test.
+- **First-run welcome silently failed to render**: showWelcomePanel touched four ctx fields that were never mapped, so it threw before displaying. Mapped them; the panel now actually shows.
+
+### Changed
+
+- **A send with no configured provider re-opens the welcome panel** (even after Skip) so the user lands on configuration instead of a dead-end error banner.
+- **Agent edits refresh the Markdown preview**: writing a .md file now fires markdown.preview.refresh (the preview was caching stale content).
+- **Session switching already preserved the input draft** (baseline claim was wrong); locked with a regression test.
+
 ## [0.1.11] — 2026-08-14
 
 ### Changed
