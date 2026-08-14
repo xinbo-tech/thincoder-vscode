@@ -372,3 +372,27 @@ describe("stop trace", () => {
     off()
   })
 })
+
+// ─── spec-driven thinking default (GLM silent-no-reasoning regression) ──
+
+describe("buildRequest thinking default", () => {
+  it("a thinking-capable model gets thinking:{type:enabled} even when the provider entry omits it", async () => {
+    const { buildRequest } = await import("../src/provider/transports/openai.mjs")
+    const body = JSON.parse(buildRequest({ baseURL: "https://x/v1", apiKey: "k", model: "glm-5.2" }, [], []).body)
+    assert.deepEqual(body.thinking, { type: "enabled" }, "GLM-5.2 must think by default")
+  })
+
+  it("explicit provider.thinking (including off) always wins over the spec default", async () => {
+    const { buildRequest } = await import("../src/provider/transports/openai.mjs")
+    const on = JSON.parse(buildRequest({ baseURL: "https://x/v1", apiKey: "k", model: "glm-5.2", thinking: { type: "adaptive" } }, [], []).body)
+    assert.equal(on.thinking.type, "adaptive")
+    const off = JSON.parse(buildRequest({ baseURL: "https://x/v1", apiKey: "k", model: "glm-5.2", thinking: null }, [], []).body)
+    assert.equal("thinking" in off, false, "explicit null (panel off) sends no thinking field")
+  })
+
+  it("non-thinking models get no default thinking", async () => {
+    const { buildRequest } = await import("../src/provider/transports/openai.mjs")
+    const body = JSON.parse(buildRequest({ baseURL: "https://x/v1", apiKey: "k", model: "deepseek-v4-flash" }, [], []).body)
+    assert.equal("thinking" in body, false)
+  })
+})

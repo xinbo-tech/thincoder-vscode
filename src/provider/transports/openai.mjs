@@ -28,7 +28,13 @@ export function buildRequest(provider, messages, tools) {
     }
     body.temperature = t
   }
+  // Spec-driven thinking default: models with thinking:true (GLM/Kimi/…) must get
+  // an explicit thinking:{type:"enabled"} even when the provider entry doesn't
+  // carry one — without it GLM silently skips deep thinking entirely (reasoning
+  // never streams; everything lands in content). Explicit provider.thinking
+  // (including null from the panel's "off") always wins.
   if (provider.thinking) body.thinking = provider.thinking
+  else if (spec.thinking && provider.thinking === undefined) body.thinking = { type: spec.thinkEnabledValue || "enabled" }
   if (provider.reasoningEffort) body.reasoning_effort = provider.reasoningEffort
   if (tools?.length) body.tools = tools
   if (provider.responseFormat) body.response_format = provider.responseFormat
