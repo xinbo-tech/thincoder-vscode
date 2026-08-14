@@ -441,3 +441,14 @@ describe("MODEL_SPECS official sync", () => {
     assert.deepEqual(specForModel("glm-5.2").reasoningEffortEnum, ["max", "xhigh", "high", "medium", "low", "minimal", "none"])
   })
 })
+
+// ─── provider presets ───────────────────────────────────────────
+
+describe("PROVIDER_PRESETS", () => {
+  it("includes the Zhipu GLM coding-plan endpoint alongside the standard one", async () => {
+    const { PROVIDER_PRESETS } = await import("../src/config-io.mjs")
+    assert.equal(PROVIDER_PRESETS.glm.baseURL, "https://open.bigmodel.cn/api/paas/v4")
+    assert.equal(PROVIDER_PRESETS["glm-code"].baseURL, "https://open.bigmodel.cn/api/coding/paas/v4")
+    assert.equal(PROVIDER_PRESETS["glm-code"].model, "glm-5.2")
+  })
+})
