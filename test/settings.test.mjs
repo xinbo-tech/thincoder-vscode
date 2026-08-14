@@ -303,7 +303,10 @@ describe("settings consult rows (model-menu)", () => {
     // simulate a pick through the mounted trigger's popup
     const btn = row.querySelector(".model-menu-btn")
     btn.click()
-    const item = [...document.querySelectorAll(".model-menu-popup .submenu .dropdown-item")].find((x) => x.textContent.trim() === "glm-5.2")
+    const prov = [...document.querySelectorAll(".model-menu-popup .has-submenu")].find((x) => x.textContent.includes("GLM"))
+    prov.dispatchEvent(new window.Event("mouseenter"))
+    const item = [...document.querySelectorAll(".model-menu-popup .model-menu-flyout .dropdown-item")].find((x) => x.textContent.trim() === "glm-5.2")
+    assert.ok(item, "flyout opened with the model item")
     item.click()
     assert.equal(row.dataset.provider, "zhipu-plan")
     assert.equal(row.dataset.model, "glm-5.2")
@@ -335,7 +338,9 @@ describe("settings consult rows (model-menu)", () => {
     document.getElementById("consult-add").click()
     const row = document.querySelectorAll("#consult-rows .consult-row")[0]
     row.querySelector(".model-menu-btn").click()
-    ;[...document.querySelectorAll(".model-menu-popup .submenu .dropdown-item")].find((x) => x.textContent.trim() === "gpt-4o").click()
+    const prov2 = document.querySelector(".model-menu-popup .has-submenu")
+    prov2.dispatchEvent(new window.Event("mouseenter"))
+    ;[...document.querySelectorAll(".model-menu-popup .model-menu-flyout .dropdown-item")].find((x) => x.textContent.trim() === "gpt-4o").click()
     assert.equal(row.dataset.model, "gpt-4o")
     assert.equal(row.querySelector(".consult-effort"), null, "no effort dropdown for non-thinking model")
   })

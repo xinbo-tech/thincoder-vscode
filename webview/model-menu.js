@@ -47,7 +47,7 @@ function providerRow(provider, group, models, value, onPick) {
   item.innerHTML = `<span>${group}</span><span class="dropdown-sub">${shown ? shown.label : ""}</span><span class="submenu-arrow">›</span>`
 
   const sub = document.createElement("div")
-  sub.className = "dropdown submenu"
+  sub.className = "dropdown submenu model-menu-flyout"
   for (const m of models) {
     const si = document.createElement("div")
     si.className = "dropdown-item"
@@ -58,24 +58,36 @@ function providerRow(provider, group, models, value, onPick) {
     si.addEventListener("click", (e) => { e.stopPropagation(); onPick({ provider: m.provider || provider, model: m.id }) })
     sub.appendChild(si)
   }
-  item.appendChild(sub)
 
-  // Hover opens the flyout; leaving the whole row (item + flyout) closes it.
-  const open = () => { closeSiblingSubmenus(item); item.classList.add("open") }
-  const close = () => item.classList.remove("open")
+  // Flyout must NOT live inside the scrolling list (overflow-y:auto forces
+  // overflow-x:hidden in CSS and hard-clips it). Render it as a popup-level child,
+  // positioned at the row's right edge, anchored to the row's top.
+  const open = () => {
+    const popupEl = item.closest(".model-menu-popup")
+    if (!popupEl) return
+    closeSiblingSubmenus(item)
+    for (const f of popupEl.querySelectorAll(":scope > .model-menu-flyout")) f.remove()
+    popupEl.appendChild(sub)
+    const pr = popupEl.getBoundingClientRect()
+    const rr = item.getBoundingClientRect()
+    sub.style.left = (popupEl.offsetWidth - 2) + "px"
+    sub.style.top = Math.max(0, rr.top - pr.top) + "px"
+    sub.style.display = "block"
+  }
+  const close = () => { sub.style.display = "none" }
   item.addEventListener("mouseenter", open)
   item.addEventListener("mouseleave", close)
+  sub.addEventListener("mouseleave", close)
   // Keyboard / touch fallback: click toggles the flyout.
-  item.addEventListener("click", (e) => { if (e.target.closest(".submenu")) return; e.stopPropagation(); item.classList.contains("open") ? close() : open() })
+  item.addEventListener("click", (e) => { if (e.target.closest(".model-menu-flyout")) return; e.stopPropagation(); sub.style.display === "block" ? close() : open() })
   return item
 }
 
-/** Only one provider flyout open at a time (scoped to a container). */
+/** Only one flyout open at a time (flyouts are popup-level children). */
 function closeSiblingSubmenus(except) {
-  const scope = except.closest(".model-menu-root") || except.parentElement || document
-  for (const el of scope.querySelectorAll(".has-submenu.open")) {
-    if (el !== except) el.classList.remove("open")
-  }
+  const popup = except.closest(".model-menu-popup")
+  if (!popup) return
+  for (const el of popup.querySelectorAll(":scope > .model-menu-flyout")) el.style.display = "none"
 }
 
 /**

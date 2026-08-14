@@ -371,3 +371,19 @@
   overflow-x: visible;
 }
 .model-menu-popup .dropdown-item { display: flex; gap: 8px; align-items: center; }
+
+/* Detached flyout (popup-level child) — escapes the .model-menu-list scroll clip */
+.model-menu-flyout {
+  position: absolute;
+  display: none;
+  min-width: 180px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--vscode-dropdown-background, #252526);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  z-index: 110;
+}
+/* the popup contains the list + flyouts; make it the positioning parent */
+.model-menu-popup { position: absolute !important; }
