@@ -20,6 +20,19 @@ export const _rateHooks = {
   windowMs: 60_000,
 }
 
+/** Abort-aware sleep: resolves early (rejecting with AbortError) when the user
+ *  presses Stop — retry backoff and rate-limit waits must not hold the turn
+ *  hostage for up to 60s after an abort. */
+export async function abortableSleep(ms, signal) {
+  if (!signal) return _rateHooks.sleep(ms)
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError")
+  await new Promise((resolve, reject) => {
+    const t = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve() }, ms)
+    function onAbort() { clearTimeout(t); reject(new DOMException("Aborted", "AbortError")) }
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
 const rateWindows = new Map()
 
 /** Normalize baseURL for consistent rate-key: /beta→/v1, strip trailing slashes, include apiKey */
@@ -110,7 +123,7 @@ export async function rateGate(provider, estimated, onWait, signal) {
     }
     const waitMs = Math.min(Math.max(remainMs + 100, 100), 10_000)
     onWait?.({ phase: "rate", seconds: Math.ceil(waitMs / 1000) })
-    await _rateHooks.sleep(waitMs)
+    await abortableSleep(waitMs, signal)
     pruneWindow(w, _rateHooks.now())
     tokens = tokenSum(w)
   }
