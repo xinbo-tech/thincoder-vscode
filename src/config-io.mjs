@@ -236,6 +236,7 @@ export function loadAgentSettings() {
     verifyGuard: a?.verifyGuard ?? false,
       engineering: a?.engineering ?? false, // engineering mode flag (VS Code: config-level; the eng tool persists here)
     advisor: a?.advisor ?? { enabled: false },
+    consultModels: Array.isArray(a?.consultModels) ? a.consultModels : [],
   }
 }
 
