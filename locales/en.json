@@ -175,5 +175,8 @@
   "status.currentTool": "Tool",
   "status.turns": "Turns",
   "status.elapsed": "Elapsed",
-  "tool.error": "error"
+  "tool.error": "error",
+  "notify.done": "ThinCoder: turn complete",
+  "notify.view": "View",
+  "perm.viewInEditor": "View in editor"
 }

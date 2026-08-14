@@ -28,6 +28,12 @@ export const workspace = {
     }
     return true
   },
+  // openTextDocument / diff preview support
+  openTextDocument: async (arg) => ({ uri: arg?.uri ?? arg, content: arg?.content ?? "", language: arg?.language ?? "" }),
+  registerTextDocumentContentProvider: (scheme, provider) => {
+    (workspace._contentProviders ??= new Map()).set(scheme, provider)
+    return { dispose: () => workspace._contentProviders.delete(scheme) }
+  },
 }
 
 export class Range {
@@ -35,6 +41,14 @@ export class Range {
     this.start = { line: startLine, character: startCol }
     this.end = { line: endLine, character: endCol }
   }
+}
+
+export class Position {
+  constructor(line, character) { this.line = line; this.character = character }
+}
+
+export class Selection {
+  constructor(anchor, active) { this.anchor = anchor; this.active = active }
 }
 
 export class WorkspaceEdit {
@@ -62,6 +76,9 @@ export const window = {
   activeTerminal: undefined,
   createTerminal: () => { throw new Error("stub window.createTerminal in your test") },
   onDidChangeTerminalShellIntegration: () => ({ dispose: () => {} }),
+  // Window focus state (notify.mjs) + text editor (openFile)
+  state: { focused: true },
+  showTextDocument: async (doc) => ({ document: doc, selection: null, revealRange: () => {} }),
 }
 
 export const commands = {

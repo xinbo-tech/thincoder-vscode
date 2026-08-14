@@ -231,6 +231,17 @@ document.addEventListener("keydown", (e) => {
   }
 })
 
+// Clickable file paths in tool cards — click / Enter opens the file in the editor.
+ctx.messagesEl.addEventListener("click", (e) => {
+  const link = e.target.closest(".file-link")
+  if (link) vscode.postMessage({ type: "openFile", path: link.dataset.path, line: link.dataset.line ? Number(link.dataset.line) : undefined })
+})
+ctx.messagesEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return
+  const link = e.target.closest(".file-link")
+  if (link) { e.preventDefault(); link.click() }
+})
+
 
 ctx.inputEl.addEventListener("keydown", (e) => {
   // Interrupt mode swallows keys: Enter injects the message, Esc cancels.
@@ -1066,7 +1077,7 @@ window.addEventListener("message", (e) => {
     case "token":            onToken(m.text); break
     case "reasoning":        onReasoning(m.text); break
     case "toolCall":         _currentTool = m.name; addTool(ctx, m.name, m.args, m.id); renderStatusBar(); break
-    case "toolResult":       finishTool(ctx, m.name, m.id, m.text); _currentTool = null; renderStatusBar(); break
+    case "toolResult":       finishTool(ctx, m.name, m.id, m.text, m.links); _currentTool = null; renderStatusBar(); break
     case "toolOutput": {
       // Live output streaming (bash etc.): chunks append to the running card's
       // body. Open while streaming so long commands are watchable; finishTool
@@ -1201,21 +1212,29 @@ window.addEventListener("message", (e) => {
       el.setAttribute("aria-label", t("perm.wantsTo") + " " + m.tool)
       const argsPreview = m.args ? m.args.slice(0, 150) + (m.args.length > 150 ? "…" : "") : ""
       let diffHtml = ""
+      let diffBig = false
       if (m.diff && m.diff.patch) {
         diffHtml = '<div class="diff-preview"><div class="diff-header">apply_patch</div>' + renderPatch(m.diff.patch) + '</div>'
+        diffBig = m.diff.patch.split("\n").length > 20
       } else if (m.diff && m.diff.old !== m.diff.new) {
         const lines = lineDiff(m.diff.old, m.diff.new)
         diffHtml = '<div class="diff-preview"><div class="diff-header">' + escHtml(m.diff.path) + '</div>' + renderDiff(lines) + '</div>'
+        diffBig = lines.filter((l) => l.type !== "same").length > 12
       }
       let html = '<div class="permission-prompt-text">' + t("perm.wantsTo") + ' <code>' + escHtml(m.tool) + '</code>'
       if (argsPreview) html += '<br><span style="font-size:11px;opacity:0.7">' + escHtml(argsPreview) + '</span>'
       html += '</div>' + diffHtml
+      // Large diffs are unreviewable in the cramped card — offer the native diff viewer.
+      if (diffBig) html += '<button class="view-diff" style="margin-top:4px;font-size:11px">' + t("perm.viewInEditor") + '</button>'
       html += '<div class="permission-prompt-actions">'
       html += '<button class="approve" aria-label="' + t("perm.approve") + ' ' + m.tool + '">' + t("perm.approve") + '</button>'
       html += '<button class="approve-all" aria-label="' + t("perm.approveAll") + '">' + t("perm.approveAll") + '</button>'
       html += '<button class="deny" aria-label="' + t("perm.deny") + ' ' + m.tool + '">' + t("perm.deny") + '</button>'
       html += '</div>'
       el.innerHTML = html
+      el.querySelector(".view-diff")?.addEventListener("click", () => {
+        vscode.postMessage({ type: "openDiff", diff: m.diff })
+      })
       el.querySelector(".approve").addEventListener("click", () => {
         el.remove()
         vscode.postMessage({ type: "permissionResponse", approved: true })

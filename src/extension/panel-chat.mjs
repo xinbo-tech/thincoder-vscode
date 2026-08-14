@@ -15,6 +15,8 @@ import { loadSkills } from "./skills.mjs"
 import { collectEditorInjection } from "./editor-context.mjs"
 import { injectAtRefs } from "./file-refs.mjs"
 import { permissionGate } from "./permission-gate.mjs"
+import { notifyCompletionIfUnfocused } from "./notify.mjs"
+import { extractFileLinks } from "./file-links.mjs"
 import { t } from "../i18n.mjs"
 
 /**
@@ -124,7 +126,12 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       panel._panel?.webview.postMessage({ type: "usage", usage: { ...totalUsage }, ctxPct })
     },
     onToolCall: (n, a, id) => panel._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
-    onToolResult: (n, r, id) => panel._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 20000), id }),
+    onToolResult: (n, r, id) => {
+      const text = (r || "").slice(0, 20000)
+      // Verified workspace-real paths ride along so the webview can linkify them.
+      const links = extractFileLinks(cwd, text)
+      panel._panel?.webview.postMessage({ type: "toolResult", name: n, text, id, links })
+    },
     // Live output streaming (bash etc.) — chunks append to the running tool card.
     onToolOutput: (n, chunk, id) => panel._panel?.webview.postMessage({ type: "toolOutput", name: n, text: chunk, id }),
     onToolPanel: (name, chunk) => {
@@ -136,6 +143,8 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       panel._saveLines(fullHistory, history, { activeProvider: providerName, ...agentState })
       panel._panel?.webview.postMessage({ type: "complete" })
       panel._pushSessions()
+      // Native notification when the user is in another window (no-op when focused).
+      notifyCompletionIfUnfocused()
     },
     onPermissionRequired: permissionGate(panel),
     onQuestion: (question, options) => new Promise((resolve) => {

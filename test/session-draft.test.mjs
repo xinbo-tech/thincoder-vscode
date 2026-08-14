@@ -52,6 +52,52 @@ describe("live tool-output streaming into the running card", () => {
   })
 })
 
+describe("clickable file links in tool cards", () => {
+  it("toolResult links render as .file-link spans and click posts openFile", () => {
+    postToWebview({ type: "toolCall", name: "write", args: "{}", id: "w1" })
+    postToWebview({
+      type: "toolResult", name: "write", id: "w1", text: "Wrote 42 chars to src/app.mjs",
+      links: [{ raw: "src/app.mjs", path: "d:\\proj\\src\\app.mjs", line: 12 }],
+    })
+    const link = document.querySelector('[data-tool-id="w1"] .file-link')
+    assert.ok(link, "path wrapped as a link")
+    assert.equal(link.textContent, "src/app.mjs")
+    assert.equal(link.dataset.line, "12")
+    const before = env.capturedPosts.filter((m) => m.type === "openFile").length
+    link.click()
+    const open = env.capturedPosts.filter((m) => m.type === "openFile")
+    assert.equal(open.length, before + 1, "click posts openFile")
+    assert.equal(open[open.length - 1].path, "d:\\proj\\src\\app.mjs")
+    assert.equal(open[open.length - 1].line, 12)
+  })
+
+  it("no links → plain text body (no spans)", () => {
+    postToWebview({ type: "toolCall", name: "bash", args: "{}", id: "w2" })
+    postToWebview({ type: "toolResult", name: "bash", id: "w2", text: "plain output", links: [] })
+    assert.equal(document.querySelectorAll('[data-tool-id="w2"] .file-link').length, 0)
+  })
+})
+
+describe("native diff viewer button on large permission diffs", () => {
+  it("big diff shows the view-in-editor button; small diff does not", () => {
+    const old = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n")
+    const newText = Array.from({ length: 30 }, (_, i) => (i % 2 ? `CHANGED ${i}` : `line ${i}`)).join("\n")
+    postToWebview({ type: "permissionRequest", tool: "write", args: "{}", diff: { old, new: newText, path: "src/big.mjs" } })
+    const prompts = document.querySelectorAll(".permission-prompt")
+    const last = prompts[prompts.length - 1]
+    assert.ok(last.querySelector(".view-diff"), "big diff has the view-in-editor button")
+    const before = env.capturedPosts.filter((m) => m.type === "openDiff").length
+    last.querySelector(".view-diff").click()
+    assert.equal(env.capturedPosts.filter((m) => m.type === "openDiff").length, before + 1)
+    last.querySelector(".deny").click() // clean up the prompt
+
+    postToWebview({ type: "permissionRequest", tool: "write", args: "{}", diff: { old: "a\n", new: "b\n", path: "src/tiny.mjs" } })
+    const prompts2 = document.querySelectorAll(".permission-prompt")
+    assert.equal(prompts2[prompts2.length - 1].querySelector(".view-diff"), null, "small diff has no button")
+    prompts2[prompts2.length - 1].querySelector(".deny").click()
+  })
+})
+
 describe("needsSetup error re-opens the welcome panel", () => {
   const welcomePanel = () => document.getElementById("welcome-panel")
   const visible = () => welcomePanel().style.display !== "none"

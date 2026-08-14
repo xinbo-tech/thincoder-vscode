@@ -9,6 +9,7 @@ import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentS
 import { PRESETS } from "./presets.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
 import { selectProviderModel, loadRaw } from "../config-io.mjs"
+import { openDiffPreview } from "./diff-preview.mjs"
 
 /** Current workspace folder (or process cwd) — shared with chat-panel. */
 export const _cwd = () => vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
@@ -61,6 +62,21 @@ export async function handlePanelMessage(panel, msg) {
     // Ctrl+I inject (CLI parity): abort with an interrupt reason — the agent loop
     // commits partial output, injects the message, and resumes from the same context.
     case "interrupt": panel._abortController?.abort({ interrupt: true, message: msg.message }); break
+    // Clickable file paths in tool cards — open in the editor, at the line if given.
+    case "openFile": {
+      try {
+        const doc = await vscode.workspace.openTextDocument(msg.path)
+        const ed = await vscode.window.showTextDocument(doc, { preview: true })
+        if (msg.line) {
+          const pos = new vscode.Position(msg.line - 1, 0)
+          ed.selection = new vscode.Selection(pos, pos)
+          ed.revealRange(new vscode.Range(pos, pos), 2 /* InCenter */)
+        }
+      } catch (e) { console.error("[openFile] failed:", e.message) }
+      break
+    }
+    // Permission prompt: open a large diff in the editor's native diff viewer.
+    case "openDiff": await openDiffPreview(msg.diff); break
     case "loadOlder": panel._loadOlder(msg.before); break
     case "questionResponse": {
       const entry = panel._questionQueue.shift()

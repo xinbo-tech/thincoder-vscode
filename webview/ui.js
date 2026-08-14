@@ -175,6 +175,39 @@ export function addTool(ctx, name, args, id) {
   scrollDown(ctx)
 }
 
+/** Wrap verified file paths in clickable spans (text-node level — never inside
+ *  attributes). One link per text node is enough; paths repeat across output. */
+function linkifyPaths(bodyEl, links) {
+  if (!links?.length) return
+  const NF = window.NodeFilter
+  const walker = document.createTreeWalker(bodyEl, NF.SHOW_TEXT)
+  const nodes = []
+  let n
+  while ((n = walker.nextNode())) nodes.push(n)
+  for (const node of nodes) {
+    const text = node.nodeValue
+    let idx = -1, hit = null
+    for (const l of links) {
+      const i = text.indexOf(l.raw)
+      if (i >= 0 && (idx < 0 || i < idx)) { idx = i; hit = l }
+    }
+    if (!hit) continue
+    const frag = document.createDocumentFragment()
+    if (idx > 0) frag.appendChild(document.createTextNode(text.slice(0, idx)))
+    const span = document.createElement("span")
+    span.className = "file-link"
+    span.textContent = hit.raw
+    span.dataset.path = hit.path
+    if (hit.line) span.dataset.line = String(hit.line)
+    span.setAttribute("role", "link")
+    span.tabIndex = 0
+    frag.appendChild(span)
+    const rest = text.slice(idx + hit.raw.length)
+    if (rest) frag.appendChild(document.createTextNode(rest))
+    node.parentNode.replaceChild(frag, node)
+  }
+}
+
 /** Last line of a tool result (CLI-style completion summary, ≤80 chars).
  *  Wrapper lines ([stdout]:/[stderr]:/(exit code N)/(stopped)/[background]…)
  *  are skipped — for bash the literal last line is "(exit code 0)", which as a
@@ -189,8 +222,9 @@ function resultSummary(text) {
 }
 
 /** Update a tool card to its done state: elapsed ms, result summary, collapse/expand, error tint. */
-function finishToolCard(ref, text) {
+function finishToolCard(ref, text, links) {
   ref.b.textContent = text || ""
+  linkifyPaths(ref.b, links)
   const ms = Date.now() - (ref.startTime || Date.now())
   const isError = /^Error[:：]/.test((text || "").trim())
   const statusEl = ref.h.querySelector(".tool-call-status")
@@ -231,12 +265,12 @@ function finishToolCard(ref, text) {
   }
 }
 
-export function finishTool(ctx, name, id, text) {
+export function finishTool(ctx, name, id, text, links) {
   // Primary: O(1) flat lookup by tool_call_id
   const key = id || name
   const ref = ctx._toolRefs[key]
   if (ref) {
-    finishToolCard(ref, text)
+    finishToolCard(ref, text, links)
     ctx.hadToolResult = true
     scrollDown(ctx) // the auto-expanded output must scroll into view, not sit below the fold
     return

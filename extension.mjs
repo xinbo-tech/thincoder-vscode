@@ -6,6 +6,7 @@ import * as vscode from "vscode"
 import { ChatPanel } from "./src/extension/chat-panel.mjs"
 import { closeAllMcp } from "./src/mcp.mjs"
 import { initLocale } from "./src/i18n.mjs"
+import { registerDiffPreviewProvider } from "./src/extension/diff-preview.mjs"
 
 /** @type {ChatPanel} */
 let _panel
@@ -30,6 +31,9 @@ export async function activate(context) {
       webviewOptions: { retainContextWhenHidden: true },
     }),
   )
+
+  // Virtual documents for the native diff preview (permission prompts)
+  registerDiffPreviewProvider(context)
 
   // Auto-show sidebar on first activation
   vscode.commands.executeCommand("workbench.view.extension.thincoder")

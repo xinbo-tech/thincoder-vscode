@@ -175,5 +175,8 @@
   "status.currentTool": "工具",
   "status.turns": "轮次",
   "status.elapsed": "耗时",
-  "tool.error": "错误"
+  "tool.error": "错误",
+  "notify.done": "ThinCoder：本轮完成",
+  "notify.view": "查看",
+  "perm.viewInEditor": "在编辑器中查看"
 }

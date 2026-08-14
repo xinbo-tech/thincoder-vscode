@@ -215,6 +215,17 @@
   flex-shrink: 1;
 }
 
+/* Verified workspace file paths in tool output — clickable, open in the editor */
+.file-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.file-link:hover { text-decoration-style: solid; }
+.file-link:focus-visible { outline: 1px solid var(--accent); border-radius: 2px; }
+
 .tool-call-body {
   display: none;
   padding: 6px 10px;
