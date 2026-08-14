@@ -336,3 +336,8 @@
   cursor: pointer;
 }
 .consult-row .consult-del:hover { border-color: #f14c4c; color: #f14c4c; }
+
+/* Consult UX: incomplete rows block save (red), status line shows active/off */
+.consult-row.consult-invalid select { border-color: #f14c4c; }
+.consult-status { font-size: 11px; opacity: 0.6; margin-top: 2px; }
+.consult-status-error { opacity: 1; color: #f14c4c; }

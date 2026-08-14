@@ -184,5 +184,8 @@
   "settings.consultAdd": "+ 添加会诊模型",
   "settings.consultRemove": "移除",
   "settings.consultPickProvider": "供应商…",
-  "settings.consultPickModel": "模型…"
+  "settings.consultPickModel": "模型…",
+  "settings.consultActive": "会诊已启用 — 卡住时 ${n} 个模型并行分析",
+  "settings.consultInactive": "会诊未启用 — 添加模型后即可在遇到疑难时多模型会诊",
+  "settings.consultIncomplete": "有未填完整的会诊行：供应商和模型都要选（或删除该行）"
 }

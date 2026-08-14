@@ -323,3 +323,46 @@ describe("settings consult rows", () => {
     assert.ok(models.includes("deepseek-v4-pro"), "model cascade works: " + models)
   })
 })
+
+
+// ─── consult UX: fallback model, preselect, half-filled validation ──
+
+describe("settings consult UX", () => {
+  async function boot(providers, agentSettings) {
+    const { initSettings } = await import("../webview/settings.js")
+    document.body.innerHTML = '<div id="settings-panel"><div id="settings-body"></div></div><button id="settings-btn"></button><button id="settings-close"></button>'
+    const api = initSettings({ onClose: () => {}, getModels: () => [
+      { provider: "deepseek", id: "deepseek-v4-pro" },
+      { provider: "deepseek", id: "deepseek-v4-flash" },
+    ] })
+    api.updateProviderStatus({ providers, labels: {} })
+    api.updateAgentSettings(agentSettings ?? { maxTurns: 100 })
+    api.openSettings()
+    return api
+  }
+
+  it("model dropdown offers the provider entry's model even when the panel model list has none for it", async () => {
+    await boot({ "zhipu-plan": { configured: true, masked: "****", model: "glm-5.2" } })
+    const p = document.querySelector(".consult-provider")
+    // single configured provider → preselected
+    assert.equal(p.value, "zhipu-plan", "sole provider preselected")
+    const models = [...document.querySelectorAll(".consult-model option")].map((o) => o.value)
+    assert.ok(models.includes("glm-5.2"), "entry model offered as offline fallback: " + models)
+  })
+
+  it("save is BLOCKED when a row has provider but no model — row flagged, nothing posted", async () => {
+    await boot({ "zhipu-plan": { configured: true, masked: "****", model: "glm-5.2" }, deepseek: { configured: true, masked: "****", model: "deepseek-v4-pro" } })
+    document.getElementById("consult-add").click()
+    const rows = document.querySelectorAll(".consult-rows .consult-row, #consult-rows .consult-row")
+    const last = rows[rows.length - 1]
+    last.querySelector(".consult-provider").value = "deepseek" // provider set, model empty
+    let posted = null
+    window._vscode = { postMessage: (m) => { posted = m } }
+    document.getElementById("ag-save-btn").click()
+    assert.equal(postted_check(posted), null, "no save posted")
+    assert.ok(last.classList.contains("consult-invalid"), "incomplete row flagged red")
+    function postted_check(p) { return p && p.type === "saveAgentSettings" ? p : null }
+    // status line switched to the incomplete hint
+    assert.match(document.getElementById("consult-status").textContent, /Incomplete|未填完整/)
+  })
+})

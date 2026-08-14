@@ -46,33 +46,46 @@ function buildAdvModelOptions(model, provider) {
   return opts
 }
 
-/** Consult row: provider dropdown over CONFIGURED providers (consultation calls them directly). */
+/** Consult row: provider dropdown over CONFIGURED providers (consultation calls them directly).
+ *  Null-safe: status entries may be null (e.g. custom: null) — guard before .configured. */
 function consultProvOptions(ps, selected) {
-  const names = Object.entries(ps).filter(([, v]) => v.configured).map(([n]) => n)
+  const names = Object.entries(ps || {}).filter(([, v]) => v && v.configured).map(([n]) => n)
   let opts = `<option value="">${escHtml(t("settings.consultPickProvider"))}</option>`
   opts += names.map((n) => `<option value="${escHtml(n)}" ${selected === n ? "selected" : ""}>${escHtml(_providerStatus.labels?.[n] || PROVIDER_LABELS[n] || n)}</option>`).join("")
   return opts
 }
 
-/** Consult row: model dropdown for the chosen provider (preset default + known models). */
+/** Consult row: model dropdown for the chosen provider. Sources (union, deduped):
+ *  1. the panel's model list (_getModels — populated by the extension's listModels probe),
+ *  2. the provider entry's CURRENT model from providerStatus — always available offline,
+ *     so a provider whose model probe failed still offers its configured model instead of
+ *     a dead-end empty dropdown. */
 function consultModelOptions(provider, selected) {
   if (!provider) return `<option value="">${escHtml(t("settings.consultPickModel"))}</option>`
-  const models = (_getModels?.() || []).filter((m) => m.provider === provider)
-  let opts = ``
-  opts += models.map((m) => `<option value="${escHtml(m.id)}" ${selected === m.id ? "selected" : ""}>${escHtml(m.id)}</option>`).join("")
-  if (selected && !models.some((m) => m.id === selected)) {
+  const fromList = (_getModels?.() || []).filter((m) => m.provider === provider).map((m) => m.id)
+  const entryModel = _providerStatus.providers?.[provider]?.model
+  const ids = [...new Set([...fromList, ...(entryModel ? [entryModel] : [])])]
+  let opts = ids.map((id) => `<option value="${escHtml(id)}" ${selected === id ? "selected" : ""}>${escHtml(id)}</option>`).join("")
+  // Keep a saved value selectable even if it's gone from every source (retired model).
+  if (selected && !ids.includes(selected)) {
     opts += `<option value="${escHtml(selected)}" selected>${escHtml(selected)}</option>`
   }
   if (!opts) opts = `<option value="">${escHtml(t("settings.consultPickModel"))}</option>`
   return opts
 }
 
-/** Collect consult rows → [{provider, model}] (incomplete rows dropped, ≤5). */
+/** Collect consult rows → [{provider, model}] (≤5). Returns {models, invalid} —
+ *  incomplete rows are REPORTED (for save-time validation), never silently dropped. */
 function collectConsultRows() {
-  return [...document.querySelectorAll("#consult-rows .consult-row")]
-    .map((row) => ({ provider: row.querySelector(".consult-provider")?.value || "", model: row.querySelector(".consult-model")?.value || "" }))
-    .filter((m) => m.provider && m.model)
-    .slice(0, 5)
+  const models = []
+  const invalid = []
+  document.querySelectorAll("#consult-rows .consult-row").forEach((row) => {
+    const provider = row.querySelector(".consult-provider")?.value || ""
+    const model = row.querySelector(".consult-model")?.value || ""
+    if (provider && model) models.push({ provider, model })
+    else if (provider || model) invalid.push(row) // half-filled — needs the user's attention
+  })
+  return { models: models.slice(0, 5), invalid }
 }
 
 /** Wire add/remove/cascade for consult rows (idempotent — called after each buildSettings). */
@@ -490,11 +503,16 @@ function buildSettings() {
   html += `<div class="settings-subtitle" title="${t("settings.consultHelp")}">${t("settings.consultSection")}</div>`
   html += `<div id="consult-rows">`
   const consultList = Array.isArray(as.consultModels) ? as.consultModels : []
-  const consultRows = consultList.length > 0 ? consultList : [null]
+  // Single configured provider → preselect it in new/empty rows (one less dropdown to fight)
+  const consultConfigured = Object.entries(ps).filter(([, v]) => v && v.configured).map(([n]) => n)
+  const preselect = consultConfigured.length === 1 ? consultConfigured[0] : ""
+  const consultRows = consultList.length > 0 ? consultList : [{ provider: preselect, model: "" }]
   for (const cm of consultRows) {
-    html += `<div class="key-field consult-row"><select class="consult-provider">${consultProvOptions(ps, cm?.provider)}</select><select class="consult-model">${consultModelOptions(cm?.provider, cm?.model)}</select><button class="consult-del" title="${t("settings.consultRemove")}">✕</button></div>`
+    const prov = cm?.provider || preselect
+    html += `<div class="key-field consult-row"><select class="consult-provider">${consultProvOptions(ps, prov)}</select><select class="consult-model">${consultModelOptions(prov, cm?.model)}</select><button class="consult-del" title="${t("settings.consultRemove")}">✕</button></div>`
   }
   html += `</div>`
+  html += `<div id="consult-status" class="consult-status">${consultList.length > 0 ? t("settings.consultActive", { n: consultList.length }) : t("settings.consultInactive")}</div>`
   html += `<button id="consult-add" class="key-btn" style="margin-top:4px">${t("settings.consultAdd")}</button>`
   html += `<div class="settings-subtitle">${t("settings.advisorSection")}</div>`
   html += `<label class="switch" title="${t("settings.advisorEnabledHelp")}"><input type="checkbox" id="adv-enabled" ${adv.enabled ? "checked" : ""}> ${t("settings.advisorEnabled")}</label>`
@@ -580,6 +598,7 @@ function buildSettings() {
   const agSave = document.getElementById("ag-save-btn")
   if (agSave) {
     agSave.addEventListener("click", () => {
+      try {
       const get = (id) => document.getElementById(id)?.value?.trim()
       const chk = (id) => document.getElementById(id)?.checked ?? false
       const compactRaw = get("ag-compact")
@@ -603,10 +622,26 @@ function buildSettings() {
             provider: get("adv-provider") || undefined,
             model: get("adv-model") || undefined,
           },
-          consultModels: collectConsultRows(),
+          // Consult rows: half-filled rows BLOCK the save (marked red) — never silently dropped
+          consultModels: (() => {
+            const { models, invalid } = collectConsultRows()
+            document.querySelectorAll("#consult-rows .consult-row").forEach((r) => r.classList.remove("consult-invalid"))
+            if (invalid.length > 0) {
+              invalid.forEach((r) => r.classList.add("consult-invalid"))
+              const status = document.getElementById("consult-status")
+              if (status) { status.textContent = t("settings.consultIncomplete"); status.classList.add("consult-status-error") }
+              throw new Error("consult-incomplete")
+            }
+            return models
+          })(),
         },
       })
       flashSaved(agSave)
+      } catch (e) {
+        if (e?.message === "consult-incomplete") return // already surfaced in the UI
+        console.error("[settings] agent save failed:", e)
+        throw e
+      }
     })
   }
   // Consult rows: bind OUTSIDE the agSave guard — a missing save button must not
