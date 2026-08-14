@@ -147,6 +147,24 @@ describe("design token", () => {
     const sig = createHmac("sha256", process.env.THINCODER_TOKEN_SECRET || "thincoder-default-secret").update(payload).digest("hex").slice(0, 16)
     assert.equal(validateDesignToken(`${payload}:${sig}`), false)
   })
+
+  it("the advisor-echo regex matches the FULL signed token (uuid:expiry:sig), not just the uuid", async () => {
+    // Regression 2026-08-14: the regex was built from the uuid segment only, but the
+    // advisor echoes the full signed token — approval never registered and the
+    // eng-coder gate rejected valid tokens.
+    const { randomUUID, createHmac } = await import("node:crypto")
+    const uuid = randomUUID()
+    const expiresAt = Date.now() + 3600000
+    const token = `${uuid}:${expiresAt}:${createHmac("sha256", process.env.THINCODER_TOKEN_SECRET || "thincoder-default-secret").update(`${uuid}:${expiresAt}`).digest("hex").slice(0, 16)}`
+    const echoed = `Review complete. No critical issues.\n\n[DESIGN-TOKEN:${token}]`
+    const escaped = String(token).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const re = new RegExp(`(?:^|\\s|\`|\\*)\\[DESIGN-TOKEN:\\s*${escaped}\\s*\\](?:\\s|$|\`|\\*)`, "ms")
+    assert.equal(re.test(echoed), true, "full signed token echo matches")
+    // and the uuid-only variant must NOT match (that's the bug shape)
+    const escUuid = uuid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const reUuid = new RegExp(`(?:^|\\s|\`|\\*)\\[DESIGN-TOKEN:\\s*${escUuid}\\s*\\](?:\\s|$|\`|\\*)`, "ms")
+    assert.equal(reUuid.test(echoed), false, "uuid-only echo must not match (the old bug)")
+  })
 })
 
 // ─── resolveAdvisorProvider ─────────────────────────────────────

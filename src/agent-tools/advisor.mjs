@@ -45,10 +45,12 @@ export function extractTokenUUID(token) {
   return parts.length >= 1 ? parts[0] : token
 }
 
-/** Build a [DESIGN-TOKEN:...] regex (CLI parity — flexible surrounding context). */
+/** Build a [DESIGN-TOKEN:...] regex (CLI parity — flexible surrounding context).
+ *  Escape the ENTIRE token (uuid:expiresAt:signature) — the advisor echoes the
+ *  full signed token, so matching only the UUID segment can never match and the
+ *  approval never registers (eng-coder gate then rejects a valid token). */
 const makeDesignTokenRegex = (token, flags = "") => {
-  const uuid = extractTokenUUID(token)
-  const escaped = uuid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const escaped = String(token).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   return new RegExp(
     `(?:^|\\s|\`|\\*)\\[DESIGN-TOKEN:\\s*${escaped}\\s*\\](?:\\s|$|\`|\\*)`,
     flags + "ms"
