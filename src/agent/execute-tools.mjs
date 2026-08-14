@@ -132,7 +132,12 @@ export async function executeToolBatches(agent, { response, history, fullHistory
         result = `Error: unknown tool "${toolName}"`
       } else {
         try {
-          const raw = await tool.execute(args, { cwd, agent, callbacks, signal })
+          const raw = await tool.execute(args, {
+            cwd, agent, callbacks, signal,
+            // Live output streaming (bash etc.) — mirrors CLI dispatch's onOutput;
+            // the id lets the webview route chunks to the right tool card.
+            onOutput: (chunk) => callbacks.onToolOutput?.(toolName, chunk, tc.id),
+          })
           result = String(raw)
 
           // Multimodal tools

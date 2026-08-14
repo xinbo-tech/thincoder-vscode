@@ -7,6 +7,47 @@ import * as vscode from "vscode"
 
 export const BASH_TIMEOUT_MS = 120000
 
+/** Maximum buffer size per stream (stdout / stderr) before truncation (CLI parity). */
+export const MAX_STREAM_BUF = 2_000_000
+
+/** Max chars in a finished tool result (CLI parity). */
+export const MAX_OUTPUT_CHARS = 200_000
+
+const ENCODING_DETECT_MAX_TRIM = 3
+
+/** Incremental byte→text decoder with encoding detection (CLI shared.mjs parity).
+ *  Plain ASCII fast path; UTF-8 with chunk-boundary safety (stream:true); GBK
+ *  fallback for legacy Windows tools. Each call creates an independent instance —
+ *  never share across parallel streams (internal state accumulates). */
+export function makeDecoder() {
+  let decoder = null
+  let pending = Buffer.alloc(0)
+  return (d, flush = false) => {
+    pending = Buffer.concat([pending, d])
+    if (!decoder) {
+      const hasHighByte = pending.some((b) => b >= 0x80)
+      if (!hasHighByte) { const s = pending.toString("ascii"); pending = Buffer.alloc(0); return s }
+      for (let trim = 0; trim <= ENCODING_DETECT_MAX_TRIM && !decoder; trim++) {
+        try { new TextDecoder("utf-8", { fatal: true }).decode(pending.subarray(0, pending.length - trim)); decoder = new TextDecoder("utf-8") }
+        catch { /* continue */ }
+      }
+      if (!decoder) decoder = new TextDecoder("gbk")
+    }
+    const s = decoder.decode(pending, { stream: !flush })
+    pending = Buffer.alloc(0)
+    return s
+  }
+}
+
+/** Strip ANSI escape sequences and normalize newlines (CLI shared.mjs parity). */
+export function sanitizeOutput(s) {
+  return s
+    // eslint-disable-next-line no-control-regex -- ANSI stripping legitimately matches control chars
+    .replace(/\x1b\[[0-9;?]*[\x40-\x7E]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>#][0-9]?/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+}
+
 /** Get the open TextDocument for a path, or null if not open */
 export function getOpenDoc(absPath) {
   try {

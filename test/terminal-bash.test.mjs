@@ -38,6 +38,33 @@ describe("bash child-process incremental capture", () => {
     assert.match(r, /\(stopped\)/)
     assert.match(r, /partial-out/, "partial stdout survives the abort")
   })
+
+  it("streams output live via ctx.onOutput", async () => {
+    const chunks = []
+    await bashTool.execute(
+      { command: "node -e \"console.log('chunk-a'); console.log('chunk-b')\"" },
+      { cwd: process.cwd(), onOutput: (c) => chunks.push(c) },
+    )
+    assert.ok(chunks.length > 0, "onOutput fired during the run")
+    assert.match(chunks.join(""), /chunk-a/)
+    assert.match(chunks.join(""), /chunk-b/)
+  })
+
+  it("multi-byte UTF-8 split across chunks does not mojibake (decoder, not per-chunk toString)", async () => {
+    const { makeDecoder } = await import("../src/tools/shared.mjs")
+    const dec = makeDecoder()
+    const bytes = Buffer.from("中文测试", "utf8")
+    // Split in the MIDDLE of a multi-byte character
+    const mid = 4 // '中' is bytes 0-2, '文' starts at 3 — byte 4 is mid-文
+    const a = dec(bytes.subarray(0, mid))
+    const b = dec(bytes.subarray(mid), true)
+    assert.equal(a + b, "中文测试")
+  })
+
+  it("sanitizeOutput strips ANSI colors and normalizes CRLF", async () => {
+    const { sanitizeOutput } = await import("../src/tools/shared.mjs")
+    assert.equal(sanitizeOutput("\x1b[32mok\x1b[0m\r\nnext\rline"), "ok\nnext\nline")
+  })
 })
 
 describe("bash terminal modes", () => {

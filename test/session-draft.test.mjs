@@ -37,6 +37,21 @@ describe("session switch keeps the input draft", () => {
   })
 })
 
+describe("live tool-output streaming into the running card", () => {
+  it("toolOutput chunks append to the card body and open it; toolResult collapses again", () => {
+    postToWebview({ type: "toolCall", name: "bash", args: "{}", id: "stream-1" })
+    const card = document.querySelector('[data-tool-id="stream-1"]')
+    assert.ok(card, "tool card created")
+    postToWebview({ type: "toolOutput", name: "bash", text: "line one\n", id: "stream-1" })
+    postToWebview({ type: "toolOutput", name: "bash", text: "line two\n", id: "stream-1" })
+    const body = card.querySelector(".tool-call-body")
+    assert.match(body.textContent, /line one\nline two/)
+    assert.equal(body.classList.contains("open"), true, "body opens while streaming")
+    postToWebview({ type: "toolResult", name: "bash", id: "stream-1", text: "line one\nline two\n(exit code 0)" })
+    assert.equal(body.classList.contains("open"), false, "success finish collapses again")
+  })
+})
+
 describe("needsSetup error re-opens the welcome panel", () => {
   const welcomePanel = () => document.getElementById("welcome-panel")
   const visible = () => welcomePanel().style.display !== "none"

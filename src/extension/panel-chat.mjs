@@ -125,6 +125,8 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     },
     onToolCall: (n, a, id) => panel._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
     onToolResult: (n, r, id) => panel._panel?.webview.postMessage({ type: "toolResult", name: n, text: (r || "").slice(0, 20000), id }),
+    // Live output streaming (bash etc.) — chunks append to the running tool card.
+    onToolOutput: (n, chunk, id) => panel._panel?.webview.postMessage({ type: "toolOutput", name: n, text: chunk, id }),
     onToolPanel: (name, chunk) => {
       const kind = typeof chunk === "string" ? "text" : (chunk?.kind ?? "text")
       const text = typeof chunk === "string" ? chunk : String(chunk?.text ?? "")

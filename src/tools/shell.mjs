@@ -10,7 +10,7 @@
 
 import { exec, execSync, execFileSync } from "node:child_process"
 import * as vscode from "vscode"
-import { BASH_TIMEOUT_MS } from "./shared.mjs"
+import { BASH_TIMEOUT_MS, MAX_STREAM_BUF, makeDecoder, sanitizeOutput, truncate } from "./shared.mjs"
 
 // ─── Terminal modes (A: visible / B: inject) ─────────────────
 
@@ -247,13 +247,36 @@ export const bashTool = {
         ].filter(Boolean).join("\n")
         finish(out)
       })
-      // Incremental capture (CLI parity): buffer stdout/stderr as they arrive so the
-      // grace/abort paths can report REAL output instead of a hardcoded "(empty)" —
-      // the old exit-grace raced the exec callback and discarded everything it had
-      // written (the "command ran but no output came back" bug).
-      let outBuf = "", errBuf = ""
-      child.stdout?.on("data", (d) => { outBuf += d.toString() })
-      child.stderr?.on("data", (d) => { errBuf += d.toString() })
+      // Incremental capture (CLI parity): decode bytes with chunk-boundary safety
+      // (multi-byte UTF-8 split across chunks would mojibake with per-chunk
+      // toString), sanitize, stream live via onOutput, and cap each stream's buffer
+      // — the exit-grace and abort paths report REAL collected output.
+      const outDecoder = makeDecoder()
+      const errDecoder = makeDecoder()
+      let outBuf = "", errBuf = "", truncatedNote = ""
+      child.stdout?.on("data", (d) => {
+        const s = sanitizeOutput(outDecoder(Buffer.isBuffer(d) ? d : Buffer.from(d)))
+        if (s) ctx.onOutput?.(s)
+        if (outBuf.length < MAX_STREAM_BUF) outBuf += s
+        else if (!truncatedNote) truncatedNote =
+          "\n[... output exceeded 2MB, remainder discarded — redirect to a file if you need the full output]"
+      })
+      child.stderr?.on("data", (d) => {
+        const s = sanitizeOutput(errDecoder(Buffer.isBuffer(d) ? d : Buffer.from(d)))
+        if (s) ctx.onOutput?.(s)
+        if (errBuf.length < MAX_STREAM_BUF) errBuf += s
+      })
+      const flushDecoders = () => {
+        outBuf += sanitizeOutput(outDecoder(Buffer.alloc(0), true))
+        errBuf += sanitizeOutput(errDecoder(Buffer.alloc(0), true))
+      }
+      const collectedResult = (status) => {
+        flushDecoders()
+        const parts = [`[stdout]:\n${outBuf.trim() || "(empty)"}`]
+        if (errBuf.trim()) parts.push(`[stderr]:\n${errBuf.trim()}`)
+        parts.push(`(${status})`)
+        return truncate(parts.join("\n")) + truncatedNote
+      }
       // Stop: resolve IMMEDIATELY on abort (don't wait for stdio pipes to close —
       // exec's callback hangs when a grandchild survives the kill). Kill the WHOLE
       // process tree (CLI killProcessTree parity: Windows taskkill /T /F, POSIX
@@ -261,8 +284,8 @@ export const bashTool = {
       if (ctx.signal) {
         const onAbort = () => {
           killProcessTree(child)
-          const partial = outBuf.trim() || errBuf.trim()
-          finish(partial ? `(stopped)\n[stdout]:\n${outBuf.trim()}${errBuf.trim() ? `\n[stderr]:\n${errBuf.trim()}` : ""}` : "(stopped)")
+          const collected = collectedResult("stopped")
+          finish(outBuf.trim() || errBuf.trim() ? collected : "(stopped)")
         }
         if (ctx.signal.aborted) onAbort()
         else ctx.signal.addEventListener("abort", onAbort, { once: true })
@@ -274,11 +297,7 @@ export const bashTool = {
       child.once("exit", (code, exitSignal) => {
         setTimeout(() => {
           const status = exitSignal ? `killed: ${exitSignal}` : `exit code ${code ?? 0}`
-          const parts = [`[stdout]:\n${outBuf.trim() || "(empty)"}`]
-          if (errBuf.trim()) parts.push(`[stderr]:\n${errBuf.trim()}`)
-          parts.push(`(${status})`)
-          parts.push("[background] the shell exited but a child process still holds the output pipe — output may be incomplete; the process may still be running")
-          finish(parts.join("\n"))
+          finish(collectedResult(status) + "\n[background] the shell exited but a child process still holds the output pipe — output may be incomplete; the process may still be running")
         }, 1500)
       })
     })

@@ -1067,6 +1067,20 @@ window.addEventListener("message", (e) => {
     case "reasoning":        onReasoning(m.text); break
     case "toolCall":         _currentTool = m.name; addTool(ctx, m.name, m.args, m.id); renderStatusBar(); break
     case "toolResult":       finishTool(ctx, m.name, m.id, m.text); _currentTool = null; renderStatusBar(); break
+    case "toolOutput": {
+      // Live output streaming (bash etc.): chunks append to the running card's
+      // body. Open while streaming so long commands are watchable; finishTool
+      // collapses the card again on success.
+      const ref = ctx._toolRefs[m.id || m.name]
+      if (!ref) break
+      if (ref.b.textContent === t("tool.initial")) ref.b.textContent = ""
+      ref.b.textContent += m.text
+      ref.b.classList.add("open")
+      ref.h.querySelector(".tool-call-icon")?.classList.add("open")
+      ref.h.setAttribute("aria-expanded", "true")
+      scrollDown(ctx)
+      break
+    }
     case "toolHistory":      addToolHistory(ctx, m.name, m.text, m.idx); break
     case "loading": {
       if (m.loading) {
