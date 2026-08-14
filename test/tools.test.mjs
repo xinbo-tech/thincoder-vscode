@@ -176,6 +176,31 @@ describe("timer — thinking-budget timer (ported from CLI)", () => {
   })
 })
 
+describe("edit — literal replacement contract (no $-interpolation)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("new_string with $& is inserted LITERALLY (regression: string replace corrupted files)", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    const f = join(cwd, "a.mjs")
+    writeFileSync(f, "const x = 1\n")
+    const marker = "const re = s.replace(/a/g, " + String.fromCharCode(34, 36, 38, 34) + ")"
+    const r = await editTool.execute({ path: "a.mjs", old_string: "const x = 1", new_string: marker }, ctx())
+    assert.match(r, /Replaced 1 occurrence/)
+    assert.equal(readFileSync(f, "utf8"), marker + "\n")
+  })
+
+  it("replace_all with $-patterns replaces every occurrence literally", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    const f = join(cwd, "b.mjs")
+    writeFileSync(f, "a\na\n")
+    const marker = ["$", "&", "$", "1"].join("")
+    const r = await editTool.execute({ path: "b.mjs", old_string: "a", new_string: marker, replace_all: true }, ctx())
+    assert.match(r, /Replaced 2 occurrence/)
+    assert.equal(readFileSync(f, "utf8"), marker + "\n" + marker + "\n")
+  })
+})
+
 describe("hashline_edit — content-hash addressing (ported from CLI)", () => {
   beforeEach(setup)
   afterEach(cleanup)
@@ -394,6 +419,3 @@ describe("read_image — svg as text source (Kimi 400 session-poisoning regressi
     await assert.rejects(() => readImageTool.execute({ path: "a.bmp" }, ctx()), /Convert it to PNG/)
   })
 })
-
-
-

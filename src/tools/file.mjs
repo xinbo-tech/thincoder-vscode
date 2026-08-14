@@ -117,7 +117,7 @@ export const editTool = {
       if (doc.isDirty) return `Error: File has unsaved changes in the editor: ${abs}. Save or discard before allowing automated edits.`
       if (replace_all) {
         // For replace_all, apply the full text replacement
-        await applyEditorEdit(doc, text.replaceAll(old_string, new_string))
+        await applyEditorEdit(doc, text.replaceAll(old_string, () => new_string))
       } else {
         // Find the match position and apply range edit
         const idx = text.indexOf(old_string)
@@ -129,8 +129,11 @@ export const editTool = {
     }
 
     // Not open — write to disk
-    const result = replace_all ? text.replaceAll(old_string, new_string) : text.replace(old_string, new_string)
+    // Function replacer — a string replacement would interpolate dollar-ampersand
+    // and dollar-digit patterns, silently corrupting files (CLI parity).
+    const result = replace_all ? text.replaceAll(old_string, () => new_string) : text.replace(old_string, () => new_string)
     await writeFile(abs, result, "utf8")
+    refreshMarkdownPreview(abs)
     refreshMarkdownPreview(abs)
     return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path}`
   },
