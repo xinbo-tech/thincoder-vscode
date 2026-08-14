@@ -272,6 +272,15 @@ export function saveAgentSettingsFromPanel(payload) {
   if (payload.compactThreshold !== undefined) patch.compactThreshold = payload.compactThreshold === "" ? undefined : (Number(payload.compactThreshold) || undefined)
   if (payload.verifyGuard !== undefined) patch.verifyGuard = !!payload.verifyGuard
     if (payload.engineering !== undefined) patch.engineering = !!payload.engineering
+  // Consultation models (CONSULTATION.md): array of {provider, model}, ≤5, validated.
+  if (payload.consultModels !== undefined) {
+    const arr = Array.isArray(payload.consultModels) ? payload.consultModels : []
+    const clean = arr
+      .filter((m) => m && typeof m.provider === "string" && m.provider.trim() && typeof m.model === "string" && m.model.trim())
+      .slice(0, 5)
+      .map((m) => ({ provider: m.provider.trim(), model: m.model.trim() }))
+    patch.consultModels = clean.length > 0 ? clean : undefined
+  }
   if (payload.advisor !== undefined) {
     // Merge with existing advisor values; "in" guards allow clearing provider/model
     const adv = payload.advisor ?? {}

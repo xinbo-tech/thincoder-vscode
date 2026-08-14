@@ -241,3 +241,43 @@ describe("buildSettings — save flow (posts payload to extension)", () => {
     assert.equal(last.settings.advisor.enabled, false)
   })
 })
+
+
+// ─── consultModels settings round-trip (CONSULTATION.md) ────────
+
+describe("consultModels panel persistence", () => {
+  it("save → load round-trip: valid entries kept, junk dropped, empty clears the key", async () => {
+    const { saveAgentSettingsFromPanel, loadRaw, _setConfigPathForTest } = await import("../src/config-io.mjs")
+    const { mkdtempSync, writeFileSync, readFileSync } = await import("node:fs")
+    const { join } = await import("node:path")
+    const { tmpdir } = await import("node:os")
+    const dir = mkdtempSync(join(tmpdir(), "thincoder-consult-cfg-"))
+    const cfg = join(dir, "config.json")
+    _setConfigPathForTest(cfg)
+    try {
+      writeFileSync(cfg, JSON.stringify({ agent: {} }), "utf8")
+      saveAgentSettingsFromPanel({
+        consultModels: [
+          { provider: "deepseek", model: "m1" },
+          { provider: "", model: "x" },      // dropped: no provider
+          { provider: "glm", model: "  " },  // dropped: blank model
+          "junk",                             // dropped: wrong shape
+        ],
+      })
+      let agent = loadRaw().agent
+      assert.deepEqual(agent.consultModels, [{ provider: "deepseek", model: "m1" }], "junk dropped, valid kept")
+
+      // >5 capped
+      saveAgentSettingsFromPanel({ consultModels: Array.from({ length: 7 }, (_, k) => ({ provider: "p" + k, model: "m" + k })) })
+      agent = loadRaw().agent
+      assert.ok(Array.isArray(agent.consultModels) && agent.consultModels.length === 5, "capped at 5, got " + agent.consultModels?.length)
+
+      // empty array clears the key entirely
+      saveAgentSettingsFromPanel({ consultModels: [] })
+      agent = loadRaw().agent
+      assert.equal(agent.consultModels, undefined, "empty list removes the key (consult disabled)")
+    } finally {
+      _setConfigPathForTest(null)
+    }
+  })
+})

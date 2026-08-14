@@ -178,5 +178,11 @@
   "tool.error": "error",
   "notify.done": "ThinCoder: turn complete",
   "notify.view": "View",
-  "perm.viewInEditor": "View in editor"
+  "perm.viewInEditor": "View in editor",
+  "settings.consultSection": "Consultation models (multi-model consult)",
+  "settings.consultHelp": "Up to 5 models that analyze hard problems in parallel when the agent consults (consult_start). Empty = consultation disabled.",
+  "settings.consultAdd": "+ Add consult model",
+  "settings.consultRemove": "Remove",
+  "settings.consultPickProvider": "provider…",
+  "settings.consultPickModel": "model…"
 }

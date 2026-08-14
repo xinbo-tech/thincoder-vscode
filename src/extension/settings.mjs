@@ -80,6 +80,7 @@ export function agentSettings() {
     verifyGuard: s.verifyGuard,
       engineering: s.engineering,
     advisor: s.advisor ?? { enabled: false },
+    consultModels: s.consultModels ?? [],
   }
 }
 

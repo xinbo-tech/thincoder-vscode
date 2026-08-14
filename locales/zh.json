@@ -178,5 +178,11 @@
   "tool.error": "错误",
   "notify.done": "ThinCoder：本轮完成",
   "notify.view": "查看",
-  "perm.viewInEditor": "在编辑器中查看"
+  "perm.viewInEditor": "在编辑器中查看",
+  "settings.consultSection": "会诊模型（多模型会诊）",
+  "settings.consultHelp": "最多 5 个模型，agent 遇到疑难问题时并行会诊（consult_start）。留空 = 会诊未启用。",
+  "settings.consultAdd": "+ 添加会诊模型",
+  "settings.consultRemove": "移除",
+  "settings.consultPickProvider": "供应商…",
+  "settings.consultPickModel": "模型…"
 }

@@ -318,3 +318,21 @@
 }
 
 .welcome-actions .save-btn { flex: 1; margin-top: 0; }
+
+/* Consult rows: provider+model pair on one line */
+.consult-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.consult-row select { flex: 1; min-width: 0; }
+.consult-row .consult-del {
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.consult-row .consult-del:hover { border-color: #f14c4c; color: #f14c4c; }

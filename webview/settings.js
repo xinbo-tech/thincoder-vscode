@@ -46,6 +46,61 @@ function buildAdvModelOptions(model, provider) {
   return opts
 }
 
+/** Consult row: provider dropdown over CONFIGURED providers (consultation calls them directly). */
+function consultProvOptions(ps, selected) {
+  const names = Object.entries(ps).filter(([, v]) => v.configured).map(([n]) => n)
+  let opts = `<option value="">${escHtml(t("settings.consultPickProvider"))}</option>`
+  opts += names.map((n) => `<option value="${escHtml(n)}" ${selected === n ? "selected" : ""}>${escHtml(_providerStatus.labels?.[n] || PROVIDER_LABELS[n] || n)}</option>`).join("")
+  return opts
+}
+
+/** Consult row: model dropdown for the chosen provider (preset default + known models). */
+function consultModelOptions(provider, selected) {
+  if (!provider) return `<option value="">${escHtml(t("settings.consultPickModel"))}</option>`
+  const models = (_getModels?.() || []).filter((m) => m.provider === provider)
+  let opts = ``
+  opts += models.map((m) => `<option value="${escHtml(m.id)}" ${selected === m.id ? "selected" : ""}>${escHtml(m.id)}</option>`).join("")
+  if (selected && !models.some((m) => m.id === selected)) {
+    opts += `<option value="${escHtml(selected)}" selected>${escHtml(selected)}</option>`
+  }
+  if (!opts) opts = `<option value="">${escHtml(t("settings.consultPickModel"))}</option>`
+  return opts
+}
+
+/** Collect consult rows → [{provider, model}] (incomplete rows dropped, ≤5). */
+function collectConsultRows() {
+  return [...document.querySelectorAll("#consult-rows .consult-row")]
+    .map((row) => ({ provider: row.querySelector(".consult-provider")?.value || "", model: row.querySelector(".consult-model")?.value || "" }))
+    .filter((m) => m.provider && m.model)
+    .slice(0, 5)
+}
+
+/** Wire add/remove/cascade for consult rows (idempotent — called after each buildSettings). */
+function bindConsultRows() {
+  const rows = document.getElementById("consult-rows")
+  const addBtn = document.getElementById("consult-add")
+  if (!rows || !addBtn) return
+  addBtn.onclick = () => {
+    if (rows.querySelectorAll(".consult-row").length >= 5) return
+    const div = document.createElement("div")
+    div.className = "key-field consult-row"
+    div.innerHTML = `<select class="consult-provider">${consultProvOptions(currentProviderStatus(), "")}</select><select class="consult-model">${consultModelOptions("", "")}</select><button class="consult-del" title="${t("settings.consultRemove")}">✕</button>`
+    rows.appendChild(div)
+    wireRow(div)
+  }
+  for (const row of rows.querySelectorAll(".consult-row")) wireRow(row)
+  function wireRow(row) {
+    row.querySelector(".consult-provider")?.addEventListener("change", (e) => {
+      const modelSel = row.querySelector(".consult-model")
+      modelSel.innerHTML = consultModelOptions(e.target.value, "")
+    })
+    row.querySelector(".consult-del")?.addEventListener("click", () => row.remove())
+  }
+}
+
+/** The settings module keeps its own _providerStatus — expose for consult row building. */
+function currentProviderStatus() { return _providerStatus }
+
 /** Build a subagent-model dropdown (value = "provider:model"; empty = inherit). */
 function buildSubmodelOptions(current) {
   const models = _getModels?.() || []
@@ -423,6 +478,15 @@ function buildSettings() {
     <div class="key-field"><label title="${t("settings.submodelHelp")}">${role}</label><select id="ag-submodel-${role}">${buildSubmodelOptions(as.subagentModels?.[role] || "")}</select></div>`).join("")}`
   html += `<div class="key-field"><label title="${t("settings.compactThresholdHelp")}">${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>`
   html += `<label class="switch" title="${t("settings.verifyGuardHelp")}"><input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}> ${t("settings.verifyGuard")}</label>`
+  html += `<div class="settings-subtitle" title="${t("settings.consultHelp")}">${t("settings.consultSection")}</div>`
+  html += `<div id="consult-rows">`
+  const consultList = Array.isArray(as.consultModels) ? as.consultModels : []
+  const consultRows = consultList.length > 0 ? consultList : [null]
+  for (const cm of consultRows) {
+    html += `<div class="key-field consult-row"><select class="consult-provider">${consultProvOptions(ps, cm?.provider)}</select><select class="consult-model">${consultModelOptions(cm?.provider, cm?.model)}</select><button class="consult-del" title="${t("settings.consultRemove")}">✕</button></div>`
+  }
+  html += `</div>`
+  html += `<button id="consult-add" class="key-btn" style="margin-top:4px">${t("settings.consultAdd")}</button>`
   html += `<div class="settings-subtitle">${t("settings.advisorSection")}</div>`
   html += `<label class="switch" title="${t("settings.advisorEnabledHelp")}"><input type="checkbox" id="adv-enabled" ${adv.enabled ? "checked" : ""}> ${t("settings.advisorEnabled")}</label>`
   html += `<label class="switch" title="${t("settings.advisorGuardHelp")}"><input type="checkbox" id="adv-guard" ${adv.guard !== false ? "checked" : ""}> ${t("settings.advisorGuard")}</label>`
@@ -530,10 +594,13 @@ function buildSettings() {
             provider: get("adv-provider") || undefined,
             model: get("adv-model") || undefined,
           },
+          consultModels: collectConsultRows(),
         },
       })
       flashSaved(agSave)
     })
+    // Consult rows: add / remove / provider→model cascade
+    bindConsultRows()
   }
 
   // Bind Shell save: select (default/candidate/custom) + custom path input
