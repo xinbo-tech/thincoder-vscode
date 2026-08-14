@@ -98,36 +98,35 @@ export function modelMenuTrigger({ label, models, value, onPick, className = "ke
   popup.style.display = "none"
 
   const close = () => { popup.style.display = "none" }
+  // Position relative to the settings panel (a containing block with no clipping);
+  // panel-body scrolls but the popup re-follows the trigger on scroll instead of closing.
   const position = () => {
+    const panel = document.getElementById("settings-panel") || document.body
+    const pr = panel.getBoundingClientRect()
     const r = btn.getBoundingClientRect()
-    popup.style.left = r.left + "px"
-    popup.style.top = (r.bottom + 4) + "px"
+    popup.style.left = Math.max(8, r.left - pr.left) + "px"
+    popup.style.top = (r.bottom - pr.top + 4) + "px"
   }
   const open = () => {
     closeAllPopups()
     popup.innerHTML = ""
     popup.appendChild(buildModelMenuDropdown({ models, value, onPick: (v) => { close(); onPick(v) } }))
-    document.body.appendChild(popup)
+    const panel = document.getElementById("settings-panel") || document.body
+    if (popup.parentElement !== panel) panel.appendChild(popup)
     position()
     popup.style.display = ""
-    // First-level list scrolls INSIDE a wrapper; the popup itself must NOT clip
-    // (the flyout submenu overflows its right edge by design).
-    const list = popup.querySelector(".model-menu-list")
-    if (list) {
-      const rows = popup.querySelectorAll(":scope > .has-submenu")
-      list.style.maxHeight = Math.min(320, Math.max(160, rows.length * 30 + 12)) + "px"
-    }
   }
-  const onScroll = () => close()
+  const onScroll = () => { if (popup.style.display !== "none") position() }
   btn.addEventListener("click", (e) => {
     e.stopPropagation()
     bindOutsideClick()
     if (popup.style.display === "none") {
       open()
-      window.addEventListener("scroll", onScroll, { capture: true, once: true })
+      const scroller = document.querySelector("#settings-panel .panel-body")
+      scroller?.addEventListener("scroll", onScroll)
     } else {
       close()
-      window.removeEventListener("scroll", onScroll, { capture: true })
+      document.querySelector("#settings-panel .panel-body")?.removeEventListener("scroll", onScroll)
     }
   })
   wrap.appendChild(btn)

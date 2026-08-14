@@ -347,20 +347,21 @@
 .agent-saved-badge.visible { opacity: 1; }
 
 /* model-menu triggers inside settings cards (MODEL-PICKER-UNIFY.md)
-   The popup is position:fixed (appended to body) — escapes card overflow:hidden
-   and the scrolling panel body. It must override the .dropdown base class
-   (bottom:100% is for the main panel's upward popup) and stay overflow:visible
-   so the flyout submenu extends past its edge; scrolling happens in .model-menu-list. */
+   The popup is position:ABSOLUTE inside #settings-panel (a containing block with
+   no clipping) and re-follows its trigger while the panel-body scrolls.
+   It overrides the .dropdown base class (bottom:100% is the main panel's upward
+   popup) and stays overflow:visible so the flyout submenu extends past its edge;
+   provider rows scroll inside .model-menu-list. */
 .model-menu-root { display: inline-flex; min-width: 0; flex: 1; }
 .model-menu-btn { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-menu-popup {
-  position: fixed !important;
+  position: absolute !important;
   top: auto !important;
   bottom: auto !important;
   margin: 0 !important;
-  z-index: 9000;
+  z-index: 100;
   min-width: 420px;
-  max-width: 520px;
+  max-width: 480px;
   overflow: visible !important;
   box-shadow: 0 6px 24px rgba(0,0,0,.35);
 }
