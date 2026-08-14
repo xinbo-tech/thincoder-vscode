@@ -742,6 +742,13 @@ function buildSettings() {
       // push echoes and later rebuilds never resurrect a value the user just cleared.
       _agentSettings = { ...(_agentSettings || {}), ...settings }
       window._vscode.postMessage({ type: "saveAgentSettings", settings })
+      // The status line renders once at panel build; the panel no longer rebuilds on push
+      // (by design) — sync it here so adding the first consult model flips OFF → active.
+      const status = document.getElementById("consult-status")
+      if (status) {
+        const n = settings.consultModels?.length ?? 0
+        status.textContent = n > 0 ? t("settings.consultActive", { n }) : t("settings.consultInactive")
+      }
       const badge = document.getElementById("agent-saved-badge")
       if (badge) { badge.textContent = t("settings.autoSaved"); badge.classList.add("visible"); setTimeout(() => badge.classList.remove("visible"), 1200) }
     } catch (e) { console.error("[settings] agent auto-save failed:", e) }
