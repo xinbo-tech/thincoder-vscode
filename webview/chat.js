@@ -47,7 +47,11 @@ const ctx = {
   assistantLabeled: false,
   // First-run onboarding panel
   welcomePanel: document.getElementById("welcome-panel"),
+  welcomeHeading: document.getElementById("welcome-heading"),
+  welcomeText: document.getElementById("welcome-text"),
+  welcomeProviderLabel: document.getElementById("welcome-provider-label"),
   welcomeProvider: document.getElementById("welcome-provider"),
+  welcomeKeyLabel: document.getElementById("welcome-key-label"),
   welcomeKey: document.getElementById("welcome-key"),
   welcomeSaveBtn: document.getElementById("welcome-save-btn"),
   welcomeSkipBtn: document.getElementById("welcome-skip-btn"),
@@ -74,6 +78,7 @@ let _loadingOlder = false
 // First-run onboarding: shown when no provider is configured; dismissed on skip
 // (stays dismissed for the webview's lifetime, reappears after a reload).
 let _welcomeDismissed = false
+let _lastProviderStatus = {} // cached for re-opening the welcome panel on needsSetup errors
 // Panel preview caps (PANEL_PREVIEW_CHARS / PANEL_BLOCK_MAX retired with the
 // side tool panel — output now renders inline in the tool card / advisor block)
 let _currentTool = null  // name of the tool currently executing (CLI status parity)
@@ -1074,7 +1079,16 @@ window.addEventListener("message", (e) => {
     }
     case "complete":         finish(); break
     case "aborted":          finish(true); break
-    case "error":            showError(ctx, m.text, m.techInfo); finish(); break
+    case "error":
+      showError(ctx, m.text, m.techInfo)
+      // Send failed because no provider is configured/usable — re-open the
+      // welcome configuration panel even if the user previously skipped it.
+      if (m.needsSetup) {
+        _welcomeDismissed = false
+        showWelcomePanel(_lastProviderStatus)
+      }
+      finish()
+      break
     case "clearMessages":
       ctx.messagesEl.replaceChildren()
       ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""
@@ -1127,9 +1141,10 @@ window.addEventListener("message", (e) => {
       }
       break
     case "providerStatus":
-      updateProviderStatus(m.status || {})
+      _lastProviderStatus = m.status || {}
+      updateProviderStatus(_lastProviderStatus)
       showBanner(ctx, m.keyOk ? t("banner.configured") : t("banner.notConfigured"), m.keyOk)
-      maybeShowWelcome(m.status || {}, m.keyOk)
+      maybeShowWelcome(_lastProviderStatus, m.keyOk)
       break
     case "providerError":
       showSettingsError(m.text)

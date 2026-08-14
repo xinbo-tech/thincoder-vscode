@@ -36,16 +36,19 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       }
     }
   }
-  if (!providerName) { panel._panel.webview.postMessage({ type: "error", text: t("error.provider") }); return }
+  // needsSetup tells the webview to re-open the welcome panel (even if the user
+  // previously skipped it) — a send with no configured provider should land the
+  // user on the configuration form, not just an error banner.
+  if (!providerName) { panel._panel.webview.postMessage({ type: "error", text: t("error.provider"), needsSetup: true }); return }
   let p
   try {
     p = await buildProvider(providerName)
   } catch (e) {
     console.error("[chat-panel] buildProvider failed:", e.message)
-    panel._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }) })
+    panel._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }), needsSetup: true })
     return
   }
-  if (!p) { panel._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }) }); return }
+  if (!p) { panel._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }), needsSetup: true }); return }
   if (modelOverride) p = { ...p, model: modelOverride }
   if (reasoning === "enabled") {
     const spec = specForModel(p.model)

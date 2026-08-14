@@ -36,3 +36,27 @@ describe("session switch keeps the input draft", () => {
     assert.equal(input.value, "my half-written prompt", "draft survives the session switch")
   })
 })
+
+describe("needsSetup error re-opens the welcome panel", () => {
+  const welcomePanel = () => document.getElementById("welcome-panel")
+  const visible = () => welcomePanel().style.display !== "none"
+
+  it("send with no configured provider re-opens welcome even after Skip dismissed it", () => {
+    // Seed provider status (unconfigured) → welcome shows
+    postToWebview({ type: "providerStatus", status: { presets: [{ name: "deepseek", desc: "DeepSeek", model: "deepseek-v4-pro" }] }, keyOk: false })
+    assert.equal(visible(), true, "welcome shows when unconfigured")
+    // User skips → dismissed for the session
+    document.getElementById("welcome-skip-btn").click()
+    assert.equal(visible(), false, "skip hides the panel")
+    // A send fails with needsSetup → welcome must come back
+    postToWebview({ type: "error", text: "No provider configured", needsSetup: true })
+    assert.equal(visible(), true, "needsSetup error re-opens the welcome panel")
+    assert.ok(document.getElementById("welcome-provider").innerHTML.includes("deepseek"), "presets populated from cached status")
+  })
+
+  it("a plain error (no needsSetup) does NOT re-open welcome", () => {
+    document.getElementById("welcome-skip-btn").click() // dismissed
+    postToWebview({ type: "error", text: "some other failure" })
+    assert.equal(visible(), false)
+  })
+})
