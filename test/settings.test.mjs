@@ -224,28 +224,22 @@ describe("Add-provider custom form — fetch models & pick", () => {
 
 
 describe("buildSettings — save flow (posts payload to extension)", () => {
-  it("saving agent settings posts the full payload", () => {
-    mockModels = [{ id: "deepseek-v4-pro", provider: "deepseek" }]
-    api.updateAgentSettings({ maxTurns: 10, verifyGuard: true, advisor: { enabled: true, guard: false } })
-    openPanel()
-    document.getElementById("ag-maxturns").value = "42"
-    document.getElementById("ag-submodel-global").value = "deepseek:deepseek-v4-pro"
-    document.getElementById("adv-enabled").checked = false
-    document.getElementById("ag-save-btn").click()
-
-    const last = env.capturedPosts.at(-1)
-    assert.equal(last.type, "saveAgentSettings")
-    assert.equal(last.settings.maxTurns, "42")
-    assert.equal(last.settings.subagentModel, "deepseek:deepseek-v4-pro")
-    assert.equal(last.settings.verifyGuard, true)
-    assert.equal(last.settings.advisor.enabled, false)
+  it("agent card auto-saves on change — no button", async () => {
+    const { initSettings } = await import("../webview/settings.js")
+    document.body.innerHTML = '<div id="settings-panel"><div id="settings-body"></div></div><button id="settings-btn"></button><button id="settings-close"></button>'
+    const api = initSettings({ onClose: () => {}, getModels: () => [] })
+    api.updateProviderStatus({ providers: {}, labels: {} })
+    api.updateAgentSettings({ maxTurns: 100 })
+    api.openSettings()
+    let posted = null
+    window._vscode = { postMessage: (m) => { if (m.type === "saveAgentSettings") posted = m } }
+    const el = document.getElementById("ag-maxturns")
+    el.value = "150"
+    el.dispatchEvent(new window.Event("change"))
+    await new Promise((r) => setTimeout(r, 600))
+    assert.ok(posted, "auto-save posted after change")
+    assert.equal(posted.settings.maxTurns, "150")
   })
-})
-
-
-// ─── consultModels settings round-trip (CONSULTATION.md) ────────
-
-describe("consultModels panel persistence", () => {
   it("save → load round-trip: valid entries kept, junk dropped, empty clears the key", async () => {
     const { saveAgentSettingsFromPanel, loadRaw, _setConfigPathForTest } = await import("../src/config-io.mjs")
     const { mkdtempSync, writeFileSync } = await import("node:fs")
@@ -350,19 +344,15 @@ describe("settings consult UX", () => {
     assert.ok(models.includes("glm-5.2"), "entry model offered as offline fallback: " + models)
   })
 
-  it("save is BLOCKED when a row has provider but no model — row flagged, nothing posted", async () => {
+  it("provider select completes a row via cascade; a provider with NO models stays half-filled and withholds consultModels", async () => {
     await boot({ "zhipu-plan": { configured: true, masked: "****", model: "glm-5.2" }, deepseek: { configured: true, masked: "****", model: "deepseek-v4-pro" } })
-    document.getElementById("consult-add").click()
-    const rows = document.querySelectorAll(".consult-rows .consult-row, #consult-rows .consult-row")
-    const last = rows[rows.length - 1]
-    last.querySelector(".consult-provider").value = "deepseek" // provider set, model empty
     let posted = null
-    window._vscode = { postMessage: (m) => { posted = m } }
-    document.getElementById("ag-save-btn").click()
-    assert.equal(postted_check(posted), null, "no save posted")
-    assert.ok(last.classList.contains("consult-invalid"), "incomplete row flagged red")
-    function postted_check(p) { return p && p.type === "saveAgentSettings" ? p : null }
-    // status line switched to the incomplete hint
-    assert.match(document.getElementById("consult-status").textContent, /Incomplete|未填完整/)
+    window._vscode = { postMessage: (m) => { if (m.type === "saveAgentSettings") posted = m } }
+    // pre-rendered row: pick provider → cascade fills the first model → row complete → auto-save
+    document.querySelector(".consult-provider").value = "deepseek"
+    document.querySelector(".consult-provider").dispatchEvent(new window.Event("change"))
+    await new Promise((r) => setTimeout(r, 600))
+    assert.ok(posted, "auto-save posted")
+    assert.deepEqual(posted.settings.consultModels, [{ provider: "deepseek", model: "deepseek-v4-pro" }], "cascade completed the row")
   })
 })

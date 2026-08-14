@@ -106,6 +106,7 @@ function bindConsultRows() {
       div.innerHTML = `<select class="consult-provider">${consultProvOptions(currentProviderStatus().providers || {}, "")}</select><select class="consult-model">${consultModelOptions("", "")}</select><button class="consult-del" title="${t("settings.consultRemove")}">✕</button>`
       rows.appendChild(div)
       wireRow(div)
+      rows.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true }))
     } catch (e) {
       console.error("[consult] add row failed:", e)
     }
@@ -115,8 +116,12 @@ function bindConsultRows() {
     row.querySelector(".consult-provider")?.addEventListener("change", (e) => {
       const modelSel = row.querySelector(".consult-model")
       modelSel.innerHTML = consultModelOptions(e.target.value, "")
+      document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true }))
     })
-    row.querySelector(".consult-del")?.addEventListener("click", () => row.remove())
+    row.querySelector(".consult-model")?.addEventListener("change", () => {
+      document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true }))
+    })
+    row.querySelector(".consult-del")?.addEventListener("click", () => { row.remove(); document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true })) })
   }
 }
 
@@ -513,6 +518,7 @@ function buildSettings() {
   }
   html += `</div>`
   html += `<div id="consult-status" class="consult-status">${consultList.length > 0 ? t("settings.consultActive", { n: consultList.length }) : t("settings.consultInactive")}</div>`
+  html += `<div id="agent-saved-badge" class="agent-saved-badge"></div>`
   html += `<button id="consult-add" class="key-btn" style="margin-top:4px">${t("settings.consultAdd")}</button>`
   html += `<div class="settings-subtitle">${t("settings.advisorSection")}</div>`
   html += `<label class="switch" title="${t("settings.advisorEnabledHelp")}"><input type="checkbox" id="adv-enabled" ${adv.enabled ? "checked" : ""}> ${t("settings.advisorEnabled")}</label>`
@@ -524,7 +530,7 @@ function buildSettings() {
     configuredNames.map((n) => `<option value="${escHtml(n)}" ${advProvider === n ? "selected" : ""}>${escHtml(_providerStatus.labels?.[n] || PROVIDER_LABELS[n] || n)}</option>`).join("")
   html += `<div class="key-field"><label title="${t("settings.advisorProviderHelp")}">${t("settings.advisorProvider")}</label><select id="adv-provider" onchange="window._advProviderChanged()">${provOpts}</select></div>`
   html += `<div class="key-field"><label title="${t("settings.advisorModelHelp")}">${t("settings.advisorModel")}</label><select id="adv-model">${buildAdvModelOptions(adv.model, advProvider)}</select></div>`
-  html += `<button id="ag-save-btn" class="key-btn">${t("settings.save")}</button>`
+  html += ``
   html += `</div></section>`
 
   // ─── Proxy card ───
@@ -533,7 +539,7 @@ function buildSettings() {
   html += `<div class="key-field"><label title="${t("settings.proxyUriHelp")}">${t("settings.proxyUri")}</label><input id="px-uri" placeholder="http://127.0.0.1:7890" value="${escHtml(px.uri || "")}"></div>`
   html += `<label class="switch" title="${t("settings.proxyWebHelp")}"><input type="checkbox" id="px-web" ${px.web !== false ? "checked" : ""}> ${t("settings.proxyWeb")}</label>`
   html += `<label class="switch" title="${t("settings.proxyModelHelp")}"><input type="checkbox" id="px-model" ${px.model ? "checked" : ""}> ${t("settings.proxyModel")}</label>`
-  html += `<div><button id="px-save-btn" class="key-btn">${t("settings.save")}</button> <button id="px-test-btn" class="key-btn">${t("settings.proxyTest")}</button></div>`
+  html += `<div> <button id="px-test-btn" class="key-btn">${t("settings.proxyTest")}</button></div>`
   html += `<div id="px-test-result" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>`
   html += `</div></section>`
 
@@ -547,8 +553,7 @@ function buildSettings() {
       ${cands.map((c) => `<option value="${escHtml(c.value || "")}" ${!shellIsCustom && (c.value ?? null) === _shellValue ? "selected" : ""}>${escHtml(c.name)}</option>`).join("")}
       <option value="__custom__" ${shellIsCustom ? "selected" : ""}>${t("settings.shellCustom")}</option>
     </select></div>
-    <div class="key-field"><label>${t("settings.shellPath")}</label><input id="sh-custom" placeholder="C:\\Program Files\\Git\\bin\\bash.exe" value="${shellIsCustom ? escHtml(_shellValue || "") : ""}" ${shellIsCustom ? "" : "disabled"}></div>
-    <button id="sh-save-btn" class="key-btn">${t("settings.save")}</button>`
+    <div class="key-field"><label>${t("settings.shellPath")}</label><input id="sh-custom" placeholder="C:\\Program Files\\Git\\bin\\bash.exe" value="${shellIsCustom ? escHtml(_shellValue || "") : ""}" ${shellIsCustom ? "" : "disabled"}></div>`
   })()}`
   html += `</div></section>`
 
@@ -573,105 +578,86 @@ function buildSettings() {
   document.getElementById("pa-cancel-btn").addEventListener("click", () => window._toggleAddForm(false))
   paTypeChanged()
 
-  // Bind Proxy settings save + test
-  const pxSave = document.getElementById("px-save-btn")
-  if (pxSave) {
-    pxSave.addEventListener("click", () => {
+  // Agent/Advisor/Consult settings: CHANGE-TO-SAVE (no submit button).
+  // Every control mutates → debounce 400ms → saveAgentSettings. Half-filled consult
+  // rows only withhold the consultModels portion (flagged red); the rest still saves.
+  const agCard = document.querySelector("#ag-maxturns")?.closest(".settings-card") || document
+  const buildAgentPayload = () => {
+    const get = (id) => document.getElementById(id)?.value?.trim()
+    const chk = (id) => document.getElementById(id)?.checked ?? false
+    const compactRaw = get("ag-compact")
+    const subModels = {}
+    for (const role of ["explore", "plan", "coder", "eng-coder"]) {
+      const v = get(`ag-submodel-${role}`)
+      if (v) subModels[role] = v
+    }
+    document.querySelectorAll("#consult-rows .consult-row").forEach((r) => r.classList.remove("consult-invalid"))
+    const { models, invalid } = collectConsultRows()
+    const consultBlocked = invalid.length > 0
+    if (consultBlocked) {
+      invalid.forEach((r) => r.classList.add("consult-invalid"))
+      const status = document.getElementById("consult-status")
+      if (status) { status.textContent = t("settings.consultIncomplete"); status.classList.add("consult-status-error") }
+    }
+    return {
+      consultBlocked,
+      settings: {
+        maxTurns: get("ag-maxturns") || undefined,
+        subagentTurns: get("ag-subturns") || undefined,
+        subagentModel: get("ag-submodel-global") || undefined,
+        subagentModels: subModels,
+        compactThreshold: compactRaw === "" ? "" : (compactRaw || undefined),
+        verifyGuard: chk("ag-verifyguard"),
+        advisor: {
+          enabled: chk("adv-enabled"),
+          guard: chk("adv-guard"),
+          provider: get("adv-provider") || undefined,
+          model: get("adv-model") || undefined,
+        },
+        ...(consultBlocked ? {} : { consultModels: models }),
+      },
+    }
+  }
+  let _agentSaveTimer = null
+  const autoSaveAgent = () => {
+    clearTimeout(_agentSaveTimer)
+    _agentSaveTimer = setTimeout(() => {
+      try {
+        const { settings } = buildAgentPayload()
+        window._vscode.postMessage({ type: "saveAgentSettings", settings })
+        const badge = document.getElementById("agent-saved-badge")
+        if (badge) { badge.textContent = t("settings.autoSaved"); badge.classList.add("visible"); setTimeout(() => badge.classList.remove("visible"), 1200) }
+      } catch (e) { console.error("[settings] agent auto-save failed:", e) }
+    }, 400)
+  }
+  agCard.querySelectorAll("input, select").forEach((el) => el.addEventListener("change", autoSaveAgent))
+  document.getElementById("consult-rows")?.addEventListener("consult-rows-changed", autoSaveAgent)
+  // Consult row interactions (add/remove/cascade) drive auto-save via the custom event
+  try { bindConsultRows() } catch (e) { console.error("[consult] bindConsultRows failed:", e) }
+
+  // Proxy settings: CHANGE-TO-SAVE (test button stays — it's an action, not a save)
+  const pxCard = document.getElementById("px-save-btn")?.closest(".settings-card") || document
+  let _pxTimer = null
+  const autoSaveProxy = () => {
+    clearTimeout(_pxTimer)
+    _pxTimer = setTimeout(() => {
       const uri = document.getElementById("px-uri")?.value?.trim() ?? ""
       const web = document.getElementById("px-web")?.checked ?? false
       const model = document.getElementById("px-model")?.checked ?? false
       window._vscode.postMessage({ type: "saveProxySettings", settings: { uri, web, model } })
-      flashSaved(pxSave)
-    })
+      flashSaved(document.getElementById("px-test-btn"))
+    }, 400)
   }
+  pxCard.querySelectorAll("input").forEach((el) => el.addEventListener("change", autoSaveProxy))
+  document.getElementById("px-save-btn")?.remove()
+
   const pxTest = document.getElementById("px-test-btn")
   if (pxTest) {
     pxTest.addEventListener("click", () => {
       const result = document.getElementById("px-test-result")
       if (result) result.textContent = t("settings.proxyTestRunning")
       const uri = document.getElementById("px-uri")?.value?.trim() || ""
-      // Test runs in the extension host (Node) — the webview cannot import Node modules.
       window._vscode.postMessage({ type: "testProxy", uri })
-    })
-  }
-  // Bind Agent/Advisor settings save
-  const agSave = document.getElementById("ag-save-btn")
-  if (agSave) {
-    agSave.addEventListener("click", () => {
-      try {
-      const get = (id) => document.getElementById(id)?.value?.trim()
-      const chk = (id) => document.getElementById(id)?.checked ?? false
-      const compactRaw = get("ag-compact")
-      const subModels = {}
-      for (const role of ["explore", "plan", "coder", "eng-coder"]) {
-        const v = get(`ag-submodel-${role}`)
-        if (v) subModels[role] = v
-      }
-      window._vscode.postMessage({
-        type: "saveAgentSettings",
-        settings: {
-          maxTurns: get("ag-maxturns") || undefined,
-          subagentTurns: get("ag-subturns") || undefined,
-          subagentModel: get("ag-submodel-global") || undefined,
-          subagentModels: subModels,
-          compactThreshold: compactRaw === "" ? "" : (compactRaw || undefined),
-          verifyGuard: chk("ag-verifyguard"),
-          advisor: {
-            enabled: chk("adv-enabled"),
-            guard: chk("adv-guard"),
-            provider: get("adv-provider") || undefined,
-            model: get("adv-model") || undefined,
-          },
-          // Consult rows: half-filled rows BLOCK the save (marked red) — never silently dropped
-          consultModels: (() => {
-            const { models, invalid } = collectConsultRows()
-            document.querySelectorAll("#consult-rows .consult-row").forEach((r) => r.classList.remove("consult-invalid"))
-            if (invalid.length > 0) {
-              invalid.forEach((r) => r.classList.add("consult-invalid"))
-              const status = document.getElementById("consult-status")
-              if (status) { status.textContent = t("settings.consultIncomplete"); status.classList.add("consult-status-error") }
-              throw new Error("consult-incomplete")
-            }
-            return models
-          })(),
-        },
-      })
-      flashSaved(agSave)
-      } catch (e) {
-        if (e?.message === "consult-incomplete") return // already surfaced in the UI
-        console.error("[settings] agent save failed:", e)
-        throw e
-      }
-    })
-  }
-  // Consult rows: bind OUTSIDE the agSave guard — a missing save button must not
-  // silently kill the add/remove wiring (invisible dead button symptom).
-  try {
-    bindConsultRows()
-  } catch (e) {
-    console.error("[consult] bindConsultRows failed:", e)
-  }
-
-  // Bind Shell save: select (default/candidate/custom) + custom path input
-  const shSave = document.getElementById("sh-save-btn")
-  if (shSave) {
-    // Custom path input enables only when the dropdown is on "Custom path…"
-    const shSelect = document.getElementById("sh-select")
-    const shCustom = document.getElementById("sh-custom")
-    const syncShCustom = () => {
-      const isCustom = shSelect?.value === "__custom__"
-      if (shCustom) {
-        shCustom.disabled = !isCustom
-        if (!isCustom) shCustom.value = ""
-      }
-    }
-    if (shSelect) shSelect.addEventListener("change", syncShCustom)
-    shSave.addEventListener("click", () => {
-      const sel = shSelect?.value ?? ""
-      const custom = shCustom?.value?.trim() ?? ""
-      const value = sel === "__custom__" ? custom : sel
-      window._vscode.postMessage({ type: "saveShellSettings", value })
-      flashSaved(shSave)
     })
   }
 

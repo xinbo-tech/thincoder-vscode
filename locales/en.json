@@ -187,5 +187,6 @@
   "settings.consultPickModel": "model…",
   "settings.consultActive": "Consultation active — ${n} model(s) will analyze in parallel when stuck",
   "settings.consultInactive": "Consultation is OFF — add models below to enable multi-model consults",
-  "settings.consultIncomplete": "Incomplete consult row(s): pick BOTH a provider and a model (or remove the row)"
+  "settings.consultIncomplete": "Incomplete consult row(s): pick BOTH a provider and a model (or remove the row)",
+  "settings.autoSaved": "✓ saved"
 }

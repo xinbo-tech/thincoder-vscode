@@ -341,3 +341,7 @@
 .consult-row.consult-invalid select { border-color: #f14c4c; }
 .consult-status { font-size: 11px; opacity: 0.6; margin-top: 2px; }
 .consult-status-error { opacity: 1; color: #f14c4c; }
+
+/* Change-to-save "saved" badge (agent card) */
+.agent-saved-badge { font-size: 11px; color: #4ec9b0; opacity: 0; transition: opacity .3s; height: 14px; }
+.agent-saved-badge.visible { opacity: 1; }
