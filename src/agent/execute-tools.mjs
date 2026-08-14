@@ -171,12 +171,14 @@ export async function executeToolBatches(agent, { response, history, fullHistory
     for (const r of results) {
       const { tool_call_id, toolName, content, multimodal, meta } = r
 
+      // name rides along so restored history cards show the tool name
+      // (history-window emits m.name; without it restored cards render "tool").
       if (multimodal) {
-        pushReal(history, fullHistory, { role: "tool", tool_call_id, content: multimodal.text })
+        pushReal(history, fullHistory, { role: "tool", tool_call_id, name: toolName, content: multimodal.text })
         pushReal(history, fullHistory, { role: "user", content: [{ type: "text", text: multimodal.text }, ...multimodal.images] })
         if (depth === 0) callbacks.onToolResult?.(toolName, multimodal.text, tool_call_id)
       } else {
-        pushReal(history, fullHistory, { role: "tool", tool_call_id, content })
+        pushReal(history, fullHistory, { role: "tool", tool_call_id, name: toolName, content })
         if (depth === 0) callbacks.onToolResult?.(toolName, content, tool_call_id)
       }
 

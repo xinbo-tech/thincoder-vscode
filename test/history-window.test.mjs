@@ -114,3 +114,31 @@ describe("historyWindow", () => {
     assert.equal(first.messages.find((m) => m.idx === 6).turnStart, true)
   })
 })
+
+describe("tool name survives the restore path (write side + window passthrough)", () => {
+  it("executeToolBatches pushes the tool NAME onto history tool messages", async () => {
+    const { executeToolBatches } = await import("../src/agent/execute-tools.mjs")
+    const tool = { name: "bash", readonly: false, async execute() { return "Wrote 1 file" } }
+    const toolByName = new Map([["bash", tool]])
+    const history = []
+    const fullHistory = []
+    const agent = { _planMode: false, config: { agent: {} } }
+    const response = { toolCalls: [{ id: "t1", name: "bash", arguments: "{}" }] }
+    await executeToolBatches(agent, { response, history, fullHistory, toolByName, getAuto: () => true, callbacks: {}, signal: undefined, cwd: process.cwd(), depth: 0 })
+    const toolMsg = history.find((m) => m.role === "tool")
+    assert.ok(toolMsg, "tool message pushed")
+    assert.equal(toolMsg.name, "bash", "name rides on the tool message")
+    assert.equal(toolMsg.tool_call_id, "t1")
+  })
+
+  it("historyWindow passes the tool name through to the restored card", () => {
+    const h = [
+      { role: "user", content: "do it" },
+      { role: "assistant", content: null, tool_calls: [{ id: "t1", type: "function", function: { name: "bash", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "t1", name: "bash", content: "done" },
+    ]
+    const { messages } = historyWindow(h, null)
+    const toolMsg = messages.find((m) => m.kind === "tool")
+    assert.equal(toolMsg.name, "bash", "restored history card gets the tool name, not the 'tool' fallback")
+  })
+})
