@@ -97,12 +97,12 @@ consult_start
 consult_check
   - id (required)
   → 返回「下一个」先到的回复；回复耗尽且全部 settle 时 done:true
-  → { reply: "<该模型的分析全文>", model, received, total, done }
+  → { reply: "<该模型的分析全文>", model, received, failed, terminated, total, done }
   → 边界：未知/已失效 id → { error: "unknown consult id" }；done 后再 check → 仍返回 { done:true }（幂等）
 
 consult_stop
   - id (required)
-  → { stopped: N }   // abort 剩余 N 个（均以 "terminated" settle），已回完的保留在会话里
+  → { stopped: N }   // abort 剩余 N 个（以 terminated settle —— **计数但不入回复队列**），已回完的保留在会话里
   → 边界：未知 id → { error }；0 剩余 → { stopped: 0 }
 ```
 
@@ -110,18 +110,22 @@ consult_stop
 ```
   - limit (optional): 返回主会话最近 N 条消息（默认 20，最大 100）
   → 主 agent 的 machine-line 历史尾部窗口（含失败轨迹原文）
+  → 加固（2026-08-15 元会诊 D5）：多模态 base64 图片替换为 [image omitted]；
+     assistant 的 tool_calls 显形（name + args 截 200 字符）；总字节预算 60KB（超出截尾注明）
 ```
+
 **接线路径**：`main_history` 在 consult.mjs 里定义，**不注册进 `index.mjs`**（主 agent 工具表不暴露它），仅通过 `runAgent` 的 `opts.extraTools` 注入会诊子 agent 的工具集。
 
-**会诊子任务系统 prompt（`src/prompts/consult.md`）**：只读约束 + 提示可用 `main_history` 拉主会话历史 + "你是多名独立会诊之一，给出最透彻的分析与建议，不要改文件，不要等别人"。
+**会诊子任务系统 prompt（`src/prompts/consult.md`）**：只读约束 + 提示可用 `main_history` 拉主会话历史 + "你是多名独立会诊之一，给出最透彻的分析与建议，不要改文件，不要等别人"。**以独立 role `"consult"` 注入**（2026-08-15 元会诊 D8/D13）：裸 system prompt + consult.md 作 overlay——不背编码纪律块（只读会诊无关）、不与 explore.md 人格冲突；工具集按只读过滤（同 explore/plan）。
 
-**会话状态**：**挂在主 agent 对象上**（`agent._consultSessions = Map<id, Session>`，实现评审修订——runAgent 每次调用新建 agent 对象，天然 turn 绑定，无需模块级 Map + turnId 注册表）。`Session = { id, controllers: AbortController[], replies: [], pending: number, waiters: [resolve], failed: number, stopped: boolean, total, received }`。
+**会话状态**：**挂在主 agent 对象上**（`agent._consultSessions = Map<id, Session>`，实现评审修订——runAgent 每次调用新建 agent 对象，天然 turn 绑定，无需模块级 Map + turnId 注册表）。`Session = { id, controllers: AbortController[], replies: [], pending: number, waiters: [resolve], failed: number, terminated: number, stopped: boolean, total, received }`。
 
-- `pending` = 尚未"settled"的会诊子任务数。每个子任务**必会 settled**：正常回复 / 报错（buildProvider 抛错、runAgent 抛错）/ abort（consult_stop 或用户 Stop）/ 撞 turn 上限（ContinueError）。settled 时：有回复则入队，`pending--`，唤醒 waiters。
+- `pending` = 尚未"settled"的会诊子任务数。每个子任务**必会 settled**：正常回复 / 报错（buildProvider 抛错、runAgent 抛错）/ abort（consult_stop 或用户 Stop）/ 撞 turn 上限（ContinueError）/ 撞墙钟看门狗。settled 时：有回复则入队，`pending--`，唤醒 waiters。
+- **terminated 语义**（2026-08-15 元会诊 D1 修正）：`session.stopped` 为真后被 abort 的子任务计 `terminated++`、**不入 replies 队列**——主 agent 早停后无需 drain 假失败 note（原实现把 abort 当 failed 入队，曾由测试固化该错误行为）。
 - `done = 回复队列空 AND pending == 0`——**不依赖"所有模型都回复"**，失败的模型也 settle，所以全失败时 `done` 仍能成立，`consult_check` 不会挂死（🔴 评审整改）。
-- `consult_check(id)`：回复队列非空 → 弹下一个；否则 `pending == 0` → 返回 `{ done:true }`；否则挂起在 waiter 上等下一个 settle。同时监听 turn signal——用户 Stop 时 abort 全部子任务并返回 `{ done:true, stopped:true }`。
-- **超时边界**：会诊子 agent 走 `runAgent` 的 turn 上限（复用共享 `subagentTurns`），叠加 provider 的 fetch 超时（`FETCH_TIMEOUT_MS`）——子 agent 必然在有限时间内 settle，无需新增超时配置。
-- turn 结束（runAgent finally）→ 遍历 `agent._consultSessions`，abort 所有未完成的 controller、唤醒 waiters、清空 Map。
+- `consult_check(id)`：回复队列非空 → 弹下一个；否则 `pending == 0` → 返回 `{ done:true }`；否则挂起在 waiter 上等下一个 settle。同时监听 turn signal——用户 Stop 时 abort 全部子任务并返回 `{ done:true, stopped:true }`。**停滞检测豁免**：execute-tools 的 3× 同签名 stall 检测跳过 consult_check（连续 check 是设计用法，不是卡死）。
+- **超时边界**（2026-08-15 元会诊 D2 修正）：双保险——①turn 上限 `agent.consultTurns`（默认 15，诊断任务足够；原复用 subagentTurns=100 是成本敞口）；②**墙钟看门狗** `agent.consultTimeoutMs`（默认 300_000 = 5 分钟）——turn 上限只数 LLM 响应次数，不管卡在慢工具/慢 provider 里的墙钟时间。
+- turn 结束（runAgent finally）→ 遍历 `agent._consultSessions`，abort 所有未完成的 controller、唤醒 waiters、清空 Map。已知边界：Ctrl+I 中断恢复会终止进行中的会诊（新 turn 新 agent 对象）——元会诊 D3，修复方案（跨 resume 的 consultSlot）记录在案未实施。
 
 **面板状态回调**：`onConsult({ id, model, status })`，`status ∈ started | answered | terminated | failed`（复用 subagent 面板通道）。
 
@@ -147,6 +151,9 @@ consult_stop
 - **只读会诊 + main_history**：会诊子 agent 不改文件；按需拉主会话历史补足上下文。
 - **turn 绑定生命周期**：会诊挂在发起它的 turn 上，turn 结束清理，避免孤儿子任务泄漏。
 - **问题简报归主 agent，证据由 main_history 拉取**。
+- **独立 consult role**（2026-08-15 元会诊）：会诊子任务不复用 explore 身份——consult.md 作 overlay，裸 system prompt；turn 预算独立（consultTurns=15）。
+- **成本默认最低档**：effort 未显式配置时回落到枚举最低档而非最高档（省 token 功能不应默认烧钱档）；官方默认档（reasoningEffortDefault）优先。
+- **机制化触发**（2026-08-15 元会诊 D7）：stall 检测与 verify 耗尽提醒在会诊已配置时主动提及 consult_start——两个最高命中率触发点，不靠模型自觉。main.md 写明"何时不用"边界与简报质量规则。
 
 ### 2.6 被否决的备选
 
@@ -175,4 +182,22 @@ consult_stop
 | 错误-全失败不挂死 | 非功能-健壮 | 所有模型都失败/超时 | consult_check 返回 done:true（pending 归零），不永久挂起 |
 | 错误-用户 Stop | 非功能-可终止 | 会诊中用户 Ctrl+C | 全部 abort，consult_check 返回 done |
 | 错误-turn 结束清理 | 非功能-生命周期 | turn 结束但未 consult_stop | 残留会诊被 abort，Map 清空 |
-| UI-状态流转 | FR6 | 4 模型（含一个报错） | 面板 4 块，status 按 started→answered/terminated/failed 流转 |
+| UI-状态流转 | FR6 | 4 模型（含一个报错） | 面板 4 块（**显示模型名**），status 按 started→answered(绿)/terminated(灰)/failed(红) 流转，中文文案 |
+
+## 4. 元会诊整改记录（2026-08-15）
+
+用会诊功能自评后修掉的缺陷（三批，DeepSeek V4 Pro + Kimi K3 交叉验证）：
+
+| 批次 | 缺陷 | 修复 |
+|---|---|---|
+| 1 契约 | consult_stop 后 abort 当 failed 入队（假失败回复） | terminated 计数、不入队（D1） |
+| 1 契约 | 无墙钟超时（100 turn × 10min 可拖数小时） | 子任务看门狗 consultTimeoutMs=5min（D2） |
+| 1 契约 | 连续 consult_check 触发停滞误报 | stall 检测豁免 consult_check（D4） |
+| 1 面板 | 模型名丢失、answered 显示红色、终态不清理 | 存 model、三态颜色+i18n、autoClean 纳入终态（D9） |
+| 2 成本 | explore.md + consult.md 双人格冲突 | 独立 role "consult"，consult.md 作 overlay（D8） |
+| 2 成本 | 复用 subagentTurns=100 | consultTurns=15 |
+| 2 成本 | effort 默认回落最高档（max） | 官方默认档优先、回落最低档 |
+| 2 成本 | main_history：base64 炸弹/null 渲染/无上限 | 图片省略、tool_calls 显形、60KB 预算（D5） |
+| 3 引导 | 想不起来用/滥用无边界 | stall/verify 提醒挂钩 + main.md 双向边界（D7） |
+
+**记录在案未实施**：D3（Ctrl+I 中断杀会诊——需跨 resume 的 consultSlot）；D6（consult_check 与依赖其结果的调用并行的理论陷阱）；D10（面板不可见回复内容——需 consultReply 消息 + 可展开预览）；D11/D12（半填行静默丢弃、子任务 usage 不上报）。
