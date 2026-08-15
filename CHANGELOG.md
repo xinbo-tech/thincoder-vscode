@@ -1,9 +1,36 @@
 # Changelog
 
+## [0.1.20] — 2026-08-15
+
+### Settings panel reorganization (consultation-derived design)
+
+- **7 cards → 5**: the Agent junk drawer split into Agent (run parameters + subagent model assignments) and Consult & Advisor; MCP/Web Search/Semantic Index merged into Tools & Services; Proxy+Shell merged into Environment
+- Three copy-paste implementations consolidated into shared keyRowEdit / buildEffortSelect components
+- Key-row cancel restores the row in place instead of rebuilding the whole panel — in-progress edits elsewhere survive
+- Delete is single-click (the 2.5s two-step armed timer is gone); save feedback unified to one card-level badge
+
+### Consultation hardening (the feature reviewed itself)
+
+- consult_stop'd children settle as terminated and no longer flood the reply queue with fake-failure notes
+- Wall-clock watchdog per consultant (`agent.consultTimeoutMs`, default 5 min) + turn budget cut to 15 (`agent.consultTurns`)
+- Consultants run as their own `consult` role — consult.md overlay, no explore-persona conflict, read-only tools
+- Stall detection no longer false-fires on consult_check loops; stall / verify-exhaustion reminders suggest consult_start when configured
+- main_history hardened: base64 images omitted, assistant tool calls surfaced, 60KB byte budget
+- Panel: consult cards show the model name; answered/terminated/failed get proper colors + localized labels (was: everything red + raw English)
+- Effort default prefers the model's official default and falls back to the LOWEST tier (was: highest)
+
+### Fixed (five live bugs found by the consultation)
+
+- Shell card was dead — no change listeners, selections silently dropped
+- Proxy binding fell through to `document` and bound autoSaveProxy to EVERY input in the panel
+- Light settings push stripped the shell value and never carried providerStatus (per-provider proxy checkboxes reverted)
+- Clearing a subagent slot also wiped the Advisor effort dropdown
+- Consult/advisor effort dropdowns missing on panel open (the enum depended on network-probe timing)
+
+
 All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-
 ## [0.1.19] — 2026-08-15
 
 ### Added
