@@ -251,18 +251,6 @@ export function saveAgentSettings(patch) {
       else raw.agent[k] = v
     }
   })
-  // Post-write readback: if the disk doesn't carry what we just wrote, SAY so
-  // (extension-host console) instead of silently losing the user's settings.
-  try {
-    const back = loadRaw().agent ?? {}
-    for (const [k, v] of Object.entries(patch ?? {})) {
-      const want = v === undefined || v === null || v === "" ? undefined : v
-      const got = back[k]
-      if (JSON.stringify(got ?? null) !== JSON.stringify(want ?? null)) {
-        console.error(`[thincoder] config readback mismatch on agent.${k}: wrote ${JSON.stringify(want ?? null)} disk has ${JSON.stringify(got ?? null)}`)
-      }
-    }
-  } catch (e) { console.error("[thincoder] config readback failed:", e?.message) }
 }
 
 /** Panel persistence: build the agent.* patch from a webview payload (CLI-parity field names).
@@ -298,7 +286,6 @@ export function saveAgentSettingsFromPanel(payload) {
         ...(typeof m.effort === "string" && m.effort.trim() ? { effort: m.effort.trim() } : { effort: null }),
       }))
     patch.consultModels = clean.length > 0 ? clean : undefined
-    console.error("[thincoder] consultModels save:", JSON.stringify(patch.consultModels ?? null))
   }
   if (payload.advisor !== undefined) {
     // Merge with existing advisor values; "in" guards allow clearing provider/model

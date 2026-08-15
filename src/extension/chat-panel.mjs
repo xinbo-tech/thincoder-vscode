@@ -337,10 +337,14 @@ export class ChatPanel {
    *  Used for save acknowledgements — the panel already shows what the user typed;
    *  a full re-probe would rebuild the settings panel and drop in-progress edits. */
   _pushSettingsLight() {
+    // Snapshot-only (no network probe) — but the snapshot must be COMPLETE: providerStatus
+    // (per-provider proxy checkboxes revert without it) and shellCandidates WITH current
+    // (the webview nulls the shell value when current is missing).
+    pushStatus(this._panel)
     this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
     this._panel?.webview.postMessage({ type: "proxySettings", settings: proxySettings() })
     this._panel?.webview.postMessage({ type: "websearchSettings", settings: websearchSettings() })
-    this._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates() })
+    this._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates(), current: loadRaw().shell ?? null })
   }
 
   _pushSettings() {

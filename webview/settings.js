@@ -239,7 +239,8 @@ function refreshClearBtn(slot, provider, model) {
       slot.dataset.provider = ""
       slot.dataset.model = ""
       slot.querySelector(".model-menu-btn").textContent = t("settings.inherit")
-      refreshAdvisorEffort(null)
+      // Advisor's effort dropdown follows ONLY the advisor slot — a subagent clear must not touch it
+      if (slot.id === "adv-model-slot") refreshAdvisorEffort(null)
       refreshClearBtn(slot)
       fireAgentSave()
     })
@@ -711,7 +712,6 @@ function buildSettings() {
       if (v) subModels[role] = v
     }
     const models = collectConsultRows()
-    console.error("[thincoder] consult collect:", models.length, "complete;", JSON.stringify(readConsultRowsFromDom()))
     return {
       settings: {
         maxTurns: get("ag-maxturns") || undefined,
