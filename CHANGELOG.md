@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.22] — 2026-08-15
+
+### Escalate (飞刀) — hand intractable work to a stronger model
+
+- New `escalate(task, model?)` tool: a flown-in expert surgeon gets WRITE access and does the implementation itself (reads, edits, runs tests), returning a post-op report the main agent reviews
+- **Surgeon hooks**: consult rows carry a 飞刀 checkbox — hooked models form the candidate pool; the status line shows "consult N · surgeon M"; empty pool → tool not registered
+- Reuses the coder subagent path: permission gate, activity stream in the conversation panel, mutations merged into the parent's verify/advisor bookkeeping
+- Free-discretion trigger: early or late, the model's own judgment (no hard gates — one expert run costs about the same as doing it itself); user can also fire it manually
+- Depth guard (a surgeon cannot fly in another surgeon) via `ctx.depth`, now exposed to all tools
+
+### Consult boundaries liberalized
+
+- The first-failure / simple-error / in-context bans are gone: when to consult is the model's judgment; the clause describes what benefits from independent perspectives and states the cost for the model to weigh itself. Mechanized hooks (verify-exhaust/stall) stay as entrance hints for consult (judgment gaps); escalate deliberately has none — it is a PRIOR ability assessment
+
+### Fixed
+
+- Time injection moved out of the system prompt into a transient per-run user reminder — system prompts fully static again (provider prefix caches hit across hours, not minutes); local time + IANA zone at second precision, covers all agent depths
+
 ## [0.1.21] — 2026-08-15
 
 ### Subagent & consultation visibility (user-requested)
