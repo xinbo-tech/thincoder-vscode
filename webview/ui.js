@@ -368,6 +368,28 @@ export function escHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 }
 
+/** Follow-scroll: pinned to the bottom by default; the user scrolling up unpins
+ *  (reading history), scrolling back to the bottom repins. Stream-driven callers use
+ *  maybeScrollDown; explicit user actions (the scroll-bottom button) call scrollDown. */
 export function scrollDown(ctx) {
   ctx.messagesEl.scrollTop = ctx.messagesEl.scrollHeight
+  ctx._pinBottom = true
+}
+
+export function maybeScrollDown(ctx) {
+  if (ctx._pinBottom !== false) ctx.messagesEl.scrollTop = ctx.messagesEl.scrollHeight
+}
+
+/** Wire the pin/unpin listeners once. Threshold ~24px counts "near the bottom" as bottom. */
+export function initScrollFollow(ctx) {
+  ctx._pinBottom = true
+  ctx.messagesEl.addEventListener("wheel", () => {
+    const el = ctx.messagesEl
+    ctx._pinBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  }, { passive: true })
+  // touch drag on mobile/webview
+  ctx.messagesEl.addEventListener("touchmove", () => {
+    const el = ctx.messagesEl
+    ctx._pinBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  }, { passive: true })
 }

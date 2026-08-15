@@ -7,7 +7,7 @@ import { fmtK, patchLineType } from "./lib.js"
 import { renderDiff, lineDiff } from "./diff.js"
 import {
   showWelcome, showBanner, addUser, addAssistantHistory, newBlock,
-  addTool, addToolHistory, finishTool, setLoading, showError, scrollDown, escHtml,
+  addTool, addToolHistory, finishTool, setLoading, showError, scrollDown, maybeScrollDown, initScrollFollow, escHtml,
   buildHistoryMessage, buildAdvisorBlock, appendAdvisorChunk,
 } from "./ui.js"
 import { setStrings, t } from "./i18n.js"
@@ -834,6 +834,8 @@ function renderPatch(patch) {
 // Lazy history made scrolling back a long trip — a floating button returns to
 // the latest message in one click. Positioned just above the toolbar.
 
+initScrollFollow(ctx)
+
 const scrollBottomBtn = document.createElement("button")
 scrollBottomBtn.id = "scroll-bottom-btn"
 scrollBottomBtn.className = "scroll-bottom-btn"
@@ -1021,7 +1023,7 @@ window.addEventListener("message", (e) => {
       ref.b.classList.add("open")
       ref.h.querySelector(".tool-call-icon")?.classList.add("open")
       ref.h.setAttribute("aria-expanded", "true")
-      scrollDown(ctx)
+      maybeScrollDown(ctx)
       break
     }
     case "toolHistory":      addToolHistory(ctx, m.name, m.text, m.idx); break
@@ -1259,7 +1261,7 @@ function advisorChunk(m) {
   appendAdvisorChunk(_advisorBlock, m.kind ?? "text", m.text)
   const content = _advisorBlock.querySelector(".advisor-content")
   if (content) content.scrollTop = content.scrollHeight
-  scrollDown(ctx)
+  maybeScrollDown(ctx)
 }
 
 
@@ -1348,7 +1350,7 @@ function onReasoning(text) {
   try { ctx.currentReasoning.innerHTML = md(ctx.currentReasoningRaw) } catch { ctx.currentReasoning.textContent = ctx.currentReasoningRaw }
   // Scroll reasoning content itself (it has max-height + overflow)
   ctx.currentReasoning.scrollTop = ctx.currentReasoning.scrollHeight
-  scrollDown(ctx)
+  maybeScrollDown(ctx)
 }
 
 function onToken(text) {
@@ -1365,7 +1367,7 @@ function onToken(text) {
   // md() failure on pathological input must not break all subsequent token
   // rendering for the rest of the turn — plain-text fallback.
   try { ctx.currentBubble.innerHTML = md(ctx.currentRaw) } catch { ctx.currentBubble.textContent = ctx.currentRaw }
-  scrollDown(ctx)
+  maybeScrollDown(ctx)
 }
 
 function finish(aborted) {
