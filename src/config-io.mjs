@@ -236,7 +236,7 @@ export function loadAgentSettings() {
     verifyGuard: a?.verifyGuard ?? false,
       engineering: a?.engineering ?? false, // engineering mode flag (VS Code: config-level; the eng tool persists here)
     consultTurns: a?.consultTurns ?? 40, // consultation turn budget (was 100, then 15 was too tight)
-    consultTimeoutMs: a?.consultTimeoutMs ?? 300000, // wall-clock watchdog per consultant (5 min)
+    consultTimeoutMs: a?.consultTimeoutMs ?? 600000, // wall-clock watchdog per consultant (5 min)
     advisor: a?.advisor ?? { enabled: false },
     consultModels: Array.isArray(a?.consultModels) ? a.consultModels : [],
   }

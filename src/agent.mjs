@@ -125,7 +125,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   let cfgMaxTurns = 100
   let cfgConsultModels = []
   let cfgConsultTurns = 40
-  let cfgConsultTimeoutMs = 300_000
+  let cfgConsultTimeoutMs = 600_000
   let cfgProviders = []
   let cfgWebsearch = { provider: "tavily", apiKey: "" } // structured search; empty key → Bing fallback
   try {
@@ -142,7 +142,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     cfgMaxTurns = raw.agent?.maxTurns ?? 100
     cfgConsultModels = raw.agent?.consultModels ?? [] // consultation model list (CONSULTATION.md)
     cfgConsultTurns = raw.agent?.consultTurns ?? 40 // consultation turn budget (panel-exposed)
-    cfgConsultTimeoutMs = raw.agent?.consultTimeoutMs ?? 300_000 // consultation wall-clock watchdog (panel-exposed)
+    cfgConsultTimeoutMs = raw.agent?.consultTimeoutMs ?? 600_000 // consultation wall-clock watchdog (panel-exposed)
     cfgProviders = resolveProviders().providers // for subagent model overrides
     cfgWebsearch = raw.websearch ?? { provider: "tavily", apiKey: "" }
   } catch { /* config unreadable — defaults */ }

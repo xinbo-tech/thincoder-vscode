@@ -653,7 +653,7 @@ function buildSettings() {
   }
   html += `<div class="settings-subtitle">${t("settings.consultBudgetSection")}</div>`
   html += `<div class="key-field"><label title="${t("settings.consultTurnsHelp")}">${t("settings.consultTurns")}</label><input id="consult-turns" type="number" min="1" value="${as.consultTurns ?? 40}"></div>`
-  html += `<div class="key-field"><label title="${t("settings.consultTimeoutHelp")}">${t("settings.consultTimeout")}</label><input id="consult-timeout" type="number" min="1" value="${Math.round((as.consultTimeoutMs ?? 300000) / 60000)}"></div>`
+  html += `<div class="key-field"><label title="${t("settings.consultTimeoutHelp")}">${t("settings.consultTimeout")}</label><input id="consult-timeout" type="number" min="1" value="${Math.round((as.consultTimeoutMs ?? 600000) / 60000)}"></div>`
   html += `</div></section>`
 
   // ─── Tools & Services card (MCP servers + web search key + semantic index) ───

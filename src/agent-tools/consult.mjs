@@ -98,7 +98,7 @@ function settleChild(ctx, session, id, label, ok, payload) {
 async function runConsultChild(ctx, session, id, m, problem, ctrl) {
   // Wall-clock ceiling: turn limits count LLM responses, not wall time — a child stuck in
   // a slow tool/provider must not hold consult_check for hours (design review D2).
-  const timeoutMs = ctx.agent?.config?.agent?.consultTimeoutMs ?? 300_000
+  const timeoutMs = ctx.agent?.config?.agent?.consultTimeoutMs ?? 600_000
   let timedOut = false // watchdog kills settle as TIMEOUT, not a provider failure (review D-GLM)
   const watchdog = setTimeout(() => {
     timedOut = true
