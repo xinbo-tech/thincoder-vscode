@@ -456,10 +456,20 @@ function renderSubagentPanel() {
   if (subs.length === 0) { panel.style.display = "none"; return }
   panel.innerHTML = `<div class="panel-desc">${t("panel.subDesc") || "Background sub-tasks — explore, plan, or implement independently"}</div>` +
     subs.map((s) => {
-    const statusCls = s.status === "started" ? "started" : s.status === "done" ? "done" : "error"
-    const statusText = s.status === "started" ? t("sub.running") : s.status
+    // Consult states get their own colors + labels (answered was rendering as red "error")
+    const statusCls = s.status === "started" ? "started"
+      : (s.status === "done" || s.status === "answered") ? "done"
+      : s.status === "terminated" ? "terminated"
+      : "error"
+    const statusText = s.status === "started" ? t("sub.running")
+      : s.status === "answered" ? t("consult.answered")
+      : s.status === "terminated" ? t("consult.terminated")
+      : s.status === "failed" ? t("consult.failed")
+      : s.status
+    // consult rows show the model so parallel consultants are distinguishable
+    const label = s.role === "consult" && s.model ? `consult · ${s.model}` : s.role
     return `<div class="sub-item">
-      <span class="sub-role">${escHtml(s.role)}</span>
+      <span class="sub-role">${escHtml(label)}</span>
       <span class="sub-tool">${s.tool ? escHtml(s.tool) : ""}</span>
       <span class="sub-status ${statusCls}">${statusText}</span>
     </div>`
@@ -496,11 +506,11 @@ function clearPanels() {
 }
 
 function autoCleanPanels() {
-  // Remove done subagents after 3s
+  // Remove finished subagents/consultants after a short linger
   const now = Date.now()
   for (const [id, s] of Object.entries(_subagentMap)) {
-    if (s.status === "done" && s.doneAt && now - s.doneAt > 3000) delete _subagentMap[id]
-    if (s.status === "error" && s.doneAt && now - s.doneAt > 5000) delete _subagentMap[id]
+    if ((s.status === "done" || s.status === "answered" || s.status === "terminated") && s.doneAt && now - s.doneAt > 3000) delete _subagentMap[id]
+    if ((s.status === "error" || s.status === "failed") && s.doneAt && now - s.doneAt > 5000) delete _subagentMap[id]
   }
   renderSubagentPanel()
   // Refresh elapsed seconds while a turn is running (CLI 1s ticker parity)
@@ -1221,7 +1231,7 @@ window.addEventListener("message", (e) => {
       break
     case "subagent":
       if (m.status === "started") {
-        _subagentMap[m.id] = { role: m.role, status: "started", startedAt: m.startedAt || Date.now(), tool: null }
+        _subagentMap[m.id] = { role: m.role, status: "started", startedAt: m.startedAt || Date.now(), tool: null, model: m.model ?? null }
       } else {
         const s = _subagentMap[m.id]
         if (s) { s.status = m.status; s.doneAt = Date.now(); if (m.error) s.error = m.error }

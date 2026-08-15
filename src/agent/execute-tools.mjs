@@ -230,8 +230,10 @@ export async function executeToolBatches(agent, { response, history, fullHistory
         }
       }
 
-      // Stall detection (stable serialization)
+      // Stall detection (stable serialization). consult_check is exempt: a check loop
+      // parked on replies is the DESIGNED consult usage, not a stall (design review D4).
       try {
+        if (toolName === "consult_check") { recentSigs.length = 0 } else {
         const sig = `${toolName}:${meta?.args ? JSON.stringify(meta.args, Object.keys(meta.args).sort()) : ""}`
         recentSigs.push(sig)
         if (recentSigs.length > STALL_WINDOW) recentSigs.shift()
@@ -244,6 +246,7 @@ export async function executeToolBatches(agent, { response, history, fullHistory
             })
             recentSigs.length = 0
           }
+        }
         }
       } catch { /* */ }
     }

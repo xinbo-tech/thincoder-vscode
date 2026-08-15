@@ -386,3 +386,5 @@
   opacity: 0.5;
 }
 
+
+.sub-status.terminated { color: var(--muted, #888); }

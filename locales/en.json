@@ -187,5 +187,8 @@
   "settings.mcp.noTools": "no tools exposed",
   "settings.consultAdvisorSection": "Consultation & Advisor",
   "settings.toolsSection": "Tools & Services",
-  "settings.envSection": "Environment"
+  "settings.envSection": "Environment",
+  "consult.answered": "answered",
+  "consult.terminated": "terminated",
+  "consult.failed": "failed"
 }

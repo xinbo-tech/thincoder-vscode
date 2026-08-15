@@ -66,16 +66,26 @@ function settleChild(ctx, session, id, label, ok, payload) {
     session.received++
     session.replies.push({ model: label, reply: payload })
     ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "answered" })
+  } else if (session.stopped) {
+    // consult_stop already ran: an aborted child settles as TERMINATED — counted, never
+    // enqueued (a "(consultation failed: Aborted)" note after an intentional stop is pure
+    // noise the main agent would have to drain; consult_check done still fires via pending--).
+    session.terminated = (session.terminated ?? 0) + 1
+    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "terminated", error: payload })
   } else {
     session.failed++
     session.replies.push({ model: label, reply: `(consultation failed: ${payload})`, failed: true })
-    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: session.stopped ? "terminated" : "failed", error: payload })
+    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "failed", error: payload })
   }
   session.pending--
   wakeWaiters(session)
 }
 
 async function runConsultChild(ctx, session, id, m, problem, consultPrompt, ctrl) {
+  // Wall-clock ceiling: turn limits count LLM responses, not wall time — a child stuck in
+  // a slow tool/provider must not hold consult_check for hours (design review D2).
+  const timeoutMs = ctx.agent?.config?.agent?.consultTimeoutMs ?? 300_000
+  const watchdog = setTimeout(() => { try { ctrl.abort() } catch { /* already settled */ } }, timeoutMs)
   const label = consultLabel(m)
   try {
     const build = ctx.buildProvider ?? buildProvider // test-injectable (like ctx.runAgent)
@@ -94,6 +104,8 @@ async function runConsultChild(ctx, session, id, m, problem, consultPrompt, ctrl
     settleChild(ctx, session, id, label, true, String(result ?? ""))
   } catch (e) {
     settleChild(ctx, session, id, label, false, e?.message ?? String(e))
+  } finally {
+    clearTimeout(watchdog)
   }
 }
 
@@ -137,7 +149,7 @@ export const consultStartTool = {
     const id = String((agent._consultIdCounter = (agent._consultIdCounter ?? 0) + 1))
     const session = {
       id, controllers: [], replies: [], pending: 0, waiters: [],
-      failed: 0, stopped: false, received: 0, total: models.length,
+      failed: 0, terminated: 0, stopped: false, received: 0, total: models.length,
       models: models.map(consultLabel),
     }
     agent._consultSessions.set(id, session)
@@ -185,7 +197,9 @@ export const consultCheckTool = {
         const r = s.replies.shift()
         return JSON.stringify({
           reply: r.reply, model: r.model, failedReply: r.failed === true,
-          received: s.received, failed: s.failed, total: s.total,
+          received: s.received,
+      failed: s.failed,
+      terminated: s.terminated ?? 0, total: s.total,
           done: s.replies.length === 0 && s.pending === 0,
         })
       }

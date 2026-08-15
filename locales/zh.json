@@ -187,5 +187,8 @@
   "settings.mcp.noTools": "该服务未提供工具",
   "settings.consultAdvisorSection": "会诊与审查",
   "settings.toolsSection": "工具与服务",
-  "settings.envSection": "运行环境"
+  "settings.envSection": "运行环境",
+  "consult.answered": "已回复",
+  "consult.terminated": "已终止",
+  "consult.failed": "失败"
 }
