@@ -125,7 +125,7 @@ export async function executeToolBatches(agent, { response, history, fullHistory
         if (!approved) return { tool_call_id: tc.id, toolName, content: "Denied by user (permission mode).", meta: null }
       }
 
-      if (depth === 0) callbacks.onToolCall?.(toolName, args, tc.id)
+      callbacks.onToolCall?.(toolName, args, tc.id) // subagents forward to the activity stream (depth guard removed)
 
       let result
       if (!tool) {
@@ -181,10 +181,10 @@ export async function executeToolBatches(agent, { response, history, fullHistory
       if (multimodal) {
         pushReal(history, fullHistory, { role: "tool", tool_call_id, name: toolName, content: multimodal.text })
         pushReal(history, fullHistory, { role: "user", content: [{ type: "text", text: multimodal.text }, ...multimodal.images] })
-        if (depth === 0) callbacks.onToolResult?.(toolName, multimodal.text, tool_call_id)
+        callbacks.onToolResult?.(toolName, multimodal.text, tool_call_id)
       } else {
         pushReal(history, fullHistory, { role: "tool", tool_call_id, name: toolName, content })
-        if (depth === 0) callbacks.onToolResult?.(toolName, content, tool_call_id)
+        callbacks.onToolResult?.(toolName, content, tool_call_id)
       }
 
       // Track mutations + advisor/verify bookkeeping (CLI parity)

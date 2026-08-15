@@ -96,17 +96,19 @@ export const subagentTool = {
 
     ctx.callbacks?.onSubagent?.({ id: subId, role, status: "started", startedAt: Date.now() })
 
-    // Subagent runs without UI callbacks — results are captured.
-    // EXCEPT onQuestion: the child's question tool must surface in the panel like the
-    // parent's (inline card, not a native popup at the window top).
+    // Subagent runs without MAIN-CONVERSATION callbacks — results are captured.
+    // onQuestion: the child's question tool must surface in the panel like the parent's.
+    // onToolCall/onToolResult: forwarded to the toolPanel channel as a live activity stream
+    // (subagent visibility — the user watches WHAT the child reads/runs, not just a dot).
     // stateSink receives the child's live mutation state (runAgent fills it every turn).
     let output = ""
     const sink = {}
+    const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:${role}`, chunk)
     try {
       const result = await runAgent(provider, cwd, task, {
         onToken: (t) => { output += t },
-        onToolCall: () => {},
-        onToolResult: () => {},
+        onToolCall: (name, args) => panel({ kind: "tool", text: name + " " + (JSON.stringify(args) || "").slice(0, 120) }),
+        onToolResult: (name, text) => panel({ kind: "tool", text: "→ " + String(text ?? "").slice(0, 80).replace(/\n/g, " ") }),
         onComplete: () => {},
         onQuestion: ctx.callbacks?.onQuestion ?? null,
       }, ctx.signal, true, {

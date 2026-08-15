@@ -72,6 +72,8 @@ let _goalInfo = null
 // Current live-turn advisor block (in-conversation details element) — advisor
 // output streams here like reasoning instead of the side tool panel.
 let _advisorBlock = null
+// Subagent/consultant activity-stream blocks (reset per turn together with _advisorBlock).
+const _subBlocks = new Map()
 // Lazy history loading: _hasOlder = more pages exist before the first rendered
 // message; _loadingOlder guards against scroll-triggered double requests.
 let _hasOlder = false
@@ -454,7 +456,11 @@ function renderSubagentPanel() {
   const panel = document.getElementById("subagent-panel")
   const subs = Object.values(_subagentMap)
   if (subs.length === 0) { panel.style.display = "none"; return }
-  panel.innerHTML = `<div class="panel-desc">${t("panel.subDesc") || "Background sub-tasks — explore, plan, or implement independently"}</div>` +
+  const consults = subs.filter((s) => s.role === "consult")
+  const consultProgress = consults.length > 0
+    ? ` · 👥 ${consults.filter((s) => s.status === "answered").length}/${consults.length} ${t("consult.answered")}`
+    : ""
+  panel.innerHTML = `<div class="panel-desc">${t("panel.subDesc") || "Background sub-tasks — explore, plan, or implement independently"}${consultProgress}</div>` +
     subs.map((s) => {
     // Consult states get their own colors + labels (answered was rendering as red "error")
     const statusCls = s.status === "started" ? "started"
@@ -514,8 +520,12 @@ function autoCleanPanels() {
   // Remove finished subagents/consultants after a short linger
   const now = Date.now()
   for (const [id, s] of Object.entries(_subagentMap)) {
-    if ((s.status === "done" || s.status === "answered" || s.status === "terminated") && s.doneAt && now - s.doneAt > 3000) delete _subagentMap[id]
-    if ((s.status === "error" || s.status === "failed") && s.doneAt && now - s.doneAt > 5000) delete _subagentMap[id]
+    // consult cards linger 60s — the answered reply preview is the consultation's core
+    // output; 3s (plain subagents) would delete it before the user looks up.
+    const linger = s.role === "consult" ? 60000 : 3000
+    const lingerErr = s.role === "consult" ? 60000 : 5000
+    if ((s.status === "done" || s.status === "answered" || s.status === "terminated") && s.doneAt && now - s.doneAt > linger) delete _subagentMap[id]
+    if ((s.status === "error" || s.status === "failed") && s.doneAt && now - s.doneAt > lingerErr) delete _subagentMap[id]
   }
   renderSubagentPanel()
   // Refresh elapsed seconds while a turn is running (CLI 1s ticker parity)
@@ -1066,7 +1076,7 @@ window.addEventListener("message", (e) => {
     case "clearMessages":
       ctx.messagesEl.replaceChildren()
       ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""
-      _advisorBlock = null
+      _advisorBlock = null; _subBlocks.clear()
       _hasOlder = false
       _loadingOlder = false
       renderStatusBar()
@@ -1253,6 +1263,7 @@ window.addEventListener("message", (e) => {
       // Advisor streams into an in-conversation details block (like reasoning),
       // round-tagged and never truncated — NOT a side panel.
       if (m.name === "advisor") advisorChunk(m)
+      else if (m.name?.startsWith("sub:")) subagentChunk(m)
       break
   }
 })
@@ -1279,6 +1290,24 @@ function advisorChunk(m) {
   maybeScrollDown(ctx)
 }
 
+
+/** Subagent/consultant activity stream — same in-conversation details block as the
+ *  advisor, one block per subagent label ("sub:explore", "sub:consult glm:glm-5.2" ...).
+ *  Collapses when done so a busy turn with several children stays readable. */
+function subagentChunk(m) {
+  let block = _subBlocks.get(m.name)
+  if (!block) {
+    block = buildAdvisorBlock(m.name.slice(4)) // strip "sub:" — the label IS the header
+    block.open = true
+    if (ctx.currentBlock) ctx.currentBlock.appendChild(block)
+    else ctx.messagesEl.appendChild(block)
+    _subBlocks.set(m.name, block)
+  }
+  appendAdvisorChunk(block, m.kind ?? "tool", m.text)
+  const content = block.querySelector(".advisor-content")
+  if (content) content.scrollTop = content.scrollHeight
+  maybeScrollDown(ctx)
+}
 
 // ─── Send ──────────────────────────────────────
 
@@ -1411,7 +1440,7 @@ function finish(aborted) {
   ctx._toolRefs = {}
   _currentTool = null
   _turnStart = null
-  _advisorBlock = null // turn over — the next advisor call opens a fresh round block
+  _advisorBlock = null; _subBlocks.clear() // turn over — blocks reset with the turnrn over — blocks reset with the turnens a fresh round block
   setLoading(ctx, false)
   renderStatusBar()
 }

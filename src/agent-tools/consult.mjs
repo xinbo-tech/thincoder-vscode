@@ -78,8 +78,8 @@ function settleChild(ctx, session, id, label, ok, payload) {
     session.received++
     session.replies.push({ model: label, reply: payload })
     // Panel visibility (review D10): the user sees WHAT each consultant concluded, not just
-    // a status dot — first ~2KB of the reply travels with the answered event.
-    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "answered", replyPreview: String(payload ?? "").slice(0, 2000) })
+    // a status dot — first ~8KB of the reply travels with the answered event.
+    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "answered", replyPreview: String(payload ?? "").slice(0, 8000) })
   } else if (session.stopped) {
     // consult_stop already ran: an aborted child settles as TERMINATED — counted, never
     // enqueued (a "(consultation failed: Aborted)" note after an intentional stop is pure
@@ -113,7 +113,13 @@ async function runConsultChild(ctx, session, id, m, problem, ctrl) {
     // default filled by the panel at pick time. Non-thinking models carry effort:null.
     const withEffort = m.effort ? { ...provider, reasoningEffort: m.effort } : provider
     const runner = ctx.runAgent ?? (await import("../agent.mjs")).runAgent
-    const result = await runner({ ...withEffort, model: m.model }, ctx.cwd, "# Problem\n" + problem, {}, ctrl.signal, true, {
+    // Activity stream: the consultant's tool calls stream to the panel under its own
+    // label (subagent visibility — same channel the subagent tool uses).
+    const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:consult ${label}`, chunk)
+    const result = await runner({ ...withEffort, model: m.model }, ctx.cwd, "# Problem\n" + problem, {
+      onToolCall: (name, args) => panel({ kind: "tool", text: name + " " + (JSON.stringify(args) || "").slice(0, 120) }),
+      onToolResult: (name, text) => panel({ kind: "tool", text: "→ " + String(text ?? "").slice(0, 80).replace(/\n/g, " ") }),
+    }, ctrl.signal, true, {
       // role "consult": lean consult-base.md system prompt, read-only tools, small turn budget.
       // Consultations are diagnosis tasks — 40 tool turns is enough to read the relevant files
       // (15 was too tight: consultants died mid-file-read at "reached max turns").

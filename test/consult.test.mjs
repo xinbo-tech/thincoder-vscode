@@ -176,6 +176,27 @@ describe("consult mechanism", () => {
     await cleanupConsultSessions(agent)
   })
 
+  it("consultant tool activity streams to the panel under sub:consult <label>", async () => {
+    const agent = makeAgent(MODELS)
+    const panels = []
+    const runner = async (provider, cwd, task, callbacks) => {
+      // simulate the child doing tool work
+      callbacks.onToolCall?.("read", { path: "src/a.mjs" })
+      callbacks.onToolResult?.("read", "file contents")
+      return "diagnosis"
+    }
+    const ctx = makeCtx(agent, runner)
+    ctx.callbacks = { onToolPanel: (name, chunk) => panels.push({ name, chunk }) }
+    await consultStartTool.execute({ problem: "stuck" }, ctx)
+    await sleep(50)
+    const names = [...new Set(panels.map((p) => p.name))]
+    assert.equal(names.length, 3, "one stream per consultant")
+    for (const n of names) assert.ok(n.startsWith("sub:consult "), `stream name, got ${n}`)
+    assert.ok(panels.some((p) => p.chunk.text.includes("read")), "tool calls streamed")
+    assert.ok(panels.some((p) => p.chunk.text.startsWith("→ ")), "tool results streamed")
+    await cleanupConsultSessions(agent)
+  })
+
   it("watchdog timeout settles as 'timed out', not 'aborted' (a timeout is not a provider crash)", async () => {
     const agent = makeAgent(MODELS)
     agent.config.agent.consultTimeoutMs = 50
