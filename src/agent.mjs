@@ -124,6 +124,8 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   let cfgSubagentTurns = 100
   let cfgMaxTurns = 100
   let cfgConsultModels = []
+  let cfgConsultTurns = 40
+  let cfgConsultTimeoutMs = 300_000
   let cfgProviders = []
   let cfgWebsearch = { provider: "tavily", apiKey: "" } // structured search; empty key → Bing fallback
   try {
@@ -139,6 +141,8 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     cfgSubagentTurns = raw.agent?.subagentTurns ?? 100 // subagent turn cap (CLI parity)
     cfgMaxTurns = raw.agent?.maxTurns ?? 100
     cfgConsultModels = raw.agent?.consultModels ?? [] // consultation model list (CONSULTATION.md)
+    cfgConsultTurns = raw.agent?.consultTurns ?? 40 // consultation turn budget (panel-exposed)
+    cfgConsultTimeoutMs = raw.agent?.consultTimeoutMs ?? 300_000 // consultation wall-clock watchdog (panel-exposed)
     cfgProviders = resolveProviders().providers // for subagent model overrides
     cfgWebsearch = raw.websearch ?? { provider: "tavily", apiKey: "" }
   } catch { /* config unreadable — defaults */ }
@@ -164,7 +168,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     _lastEngState: engineering, _pendingReminders: [],
     config: {
       advisor: advisorCfg,
-      agent: { engineering, subagentModel: cfgSubagentModel, subagentModels: cfgSubagentModels, subagentTurns: cfgSubagentTurns, maxTurns: cfgMaxTurns, verifyGuard: cfgVerifyGuard, compactThreshold: cfgCompactThreshold, consultModels: cfgConsultModels },
+      agent: { engineering, subagentModel: cfgSubagentModel, subagentModels: cfgSubagentModels, subagentTurns: cfgSubagentTurns, maxTurns: cfgMaxTurns, verifyGuard: cfgVerifyGuard, compactThreshold: cfgCompactThreshold, consultModels: cfgConsultModels, consultTurns: cfgConsultTurns, consultTimeoutMs: cfgConsultTimeoutMs },
       proxy: cfgProxy, shell: cfgShell, providersList: cfgProviders,
       websearch: cfgWebsearch,
     },

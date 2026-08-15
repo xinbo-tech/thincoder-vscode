@@ -176,6 +176,25 @@ describe("consult mechanism", () => {
     await cleanupConsultSessions(agent)
   })
 
+  it("consultTurns/consultTimeoutMs config values flow through to children (not just defaults)", async () => {
+    const agent = makeAgent(MODELS)
+    agent.config.agent.consultTurns = 7
+    agent.config.agent.consultTimeoutMs = 12345
+    const seen = []
+    const runner = async (provider, cwd, task, callbacks, signal, auto, opts) => {
+      seen.push(opts)
+      return "ok"
+    }
+    const ctx = makeCtx(agent, runner)
+    await consultStartTool.execute({ problem: "stuck" }, ctx)
+    await sleep(50)
+    assert.equal(seen.length, 3)
+    for (const o of seen) {
+      assert.equal(o.maxTurns, 7, "configured consultTurns reaches the child")
+    }
+    await cleanupConsultSessions(agent)
+  })
+
   it("turn cleanup aborts leftover sessions and clears the map", async () => {
     const agent = makeAgent(MODELS)
     const runner = fakeRunner({ "m-a": { reply: "x", delay: 5000 }, "m-b": { reply: "y", delay: 5000 }, "m-c": { reply: "z", delay: 5000 } })

@@ -116,7 +116,7 @@ consult_stop
 
 **接线路径**：`main_history` 在 consult.mjs 里定义，**不注册进 `index.mjs`**（主 agent 工具表不暴露它），仅通过 `runAgent` 的 `opts.extraTools` 注入会诊子 agent 的工具集。
 
-**会诊子任务系统 prompt（`src/prompts/consult.md`）**：只读约束 + 提示可用 `main_history` 拉主会话历史 + "你是多名独立会诊之一，给出最透彻的分析与建议，不要改文件，不要等别人"。**以独立 role `"consult"` 注入**（2026-08-15 元会诊 D8/D13）：裸 system prompt + consult.md 作 overlay——不背编码纪律块（只读会诊无关）、不与 explore.md 人格冲突；工具集按只读过滤（同 explore/plan）。
+**会诊子任务系统 prompt（`src/prompts/consult-base.md`）**：只读约束 + 提示可用 `main_history` 拉主会话历史 + "你是多名独立会诊之一，给出最透彻的分析与建议，不要改文件，不要等别人"。**以独立 role `"consult"` 注入**（2026-08-15 元会诊 D8/D13）：裸 system prompt + consult.md 作 overlay——不背编码纪律块（只读会诊无关）、不与 explore.md 人格冲突；工具集按只读过滤（同 explore/plan）。
 
 **会话状态**：**挂在主 agent 对象上**（`agent._consultSessions = Map<id, Session>`，实现评审修订——runAgent 每次调用新建 agent 对象，天然 turn 绑定，无需模块级 Map + turnId 注册表）。`Session = { id, controllers: AbortController[], replies: [], pending: number, waiters: [resolve], failed: number, terminated: number, stopped: boolean, total, received }`。
 
@@ -136,7 +136,7 @@ consult_stop
 | `src/agent-tools/consult.mjs` | 新增：consult_start/check/stop + main_history + 会话状态管理 + turn 清理 |
 | `src/agent.mjs` | 扩展：runAgent 支持 `opts.extraTools`（注入 main_history）+ turn 结束清理钩子 |
 | `src/agent-tools/index.mjs` | 注册三个 consult 工具 |
-| `src/prompts/consult.md` | 新增：会诊子任务系统 prompt |
+| `src/prompts/consult-base.md` | 新增：会诊子任务系统 prompt |
 | `src/prompts/main.md` | 主 agent prompt 补一句：遇到反复失败的疑难杂症时主动 consult_start |
 | `src/config-io.mjs` | consultModels 读取/校验（≤5） |
 | `src/extension/panel-chat.mjs` | onConsult 回调 → webview |
@@ -151,7 +151,7 @@ consult_stop
 - **只读会诊 + main_history**：会诊子 agent 不改文件；按需拉主会话历史补足上下文。
 - **turn 绑定生命周期**：会诊挂在发起它的 turn 上，turn 结束清理，避免孤儿子任务泄漏。
 - **问题简报归主 agent，证据由 main_history 拉取**。
-- **独立 consult role**（2026-08-15 元会诊）：会诊子任务不复用 explore 身份——consult.md 作 overlay，裸 system prompt；turn 预算独立（consultTurns=15）。
+- **独立 consult role**（2026-08-15 元会诊）：会诊子任务不复用 explore 身份——consult.md 作 overlay，裸 system prompt；turn 预算独立（consultTurns=40，15 曾致子任务读文件途中撞墙）。
 - **成本默认最低档**：effort 未显式配置时回落到枚举最低档而非最高档（省 token 功能不应默认烧钱档）；官方默认档（reasoningEffortDefault）优先。
 - **机制化触发**（2026-08-15 元会诊 D7）：stall 检测与 verify 耗尽提醒在会诊已配置时主动提及 consult_start——两个最高命中率触发点，不靠模型自觉。main.md 写明"何时不用"边界与简报质量规则。
 
@@ -199,5 +199,14 @@ consult_stop
 | 2 成本 | effort 默认回落最高档（max） | 官方默认档优先、回落最低档 |
 | 2 成本 | main_history：base64 炸弹/null 渲染/无上限 | 图片省略、tool_calls 显形、60KB 预算（D5） |
 | 3 引导 | 想不起来用/滥用无边界 | stall/verify 提醒挂钩 + main.md 双向边界（D7） |
+
+| 4 提示词 | 子 agent 背完整主 agent system.md（人格/工具引用冲突） | 精简 consult-base.md 底座（consult.md 删除） |
+| 4 提示词 | question 工具泄漏给子 agent（会挂起提问用户） | depth>0 全排除 |
+| 4 提示词 | 预算/聚焦/联网/长度无引导 | base 写明 40 turns/5min、2–5 文件预期、本地优先、~500 词 |
+| 4 提示词 | consult_check 可与依赖调用并行 | 描述加"单独调用"警告 |
+| 4 契约 | consultTurns/consultTimeoutMs 是死配置（agent 装配层漏传） | agent.mjs 装配补齐 + 配置传递测试 |
+| 4 契约 | watchdog 超时 settle 文案是 "aborted"（误读为 provider 崩） | 区分 "timed out after Nmin" |
+
+**评审后决定不修**：D3（Ctrl+I 杀会诊——turn 绑定是刻意设计，中断后重发即可）；D6（批处理陷阱——描述警告够用，机制级序列化得不偿失）；D10（面板回复可见性——回复全文在主 agent 上下文，面板预览下批再议）。
 
 **记录在案未实施**：D3（Ctrl+I 中断杀会诊——需跨 resume 的 consultSlot）；D6（consult_check 与依赖其结果的调用并行的理论陷阱）；D10（面板不可见回复内容——需 consultReply 消息 + 可展开预览）；D11/D12（半填行静默丢弃、子任务 usage 不上报）。

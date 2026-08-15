@@ -97,7 +97,11 @@ async function runConsultChild(ctx, session, id, m, problem, ctrl) {
   // Wall-clock ceiling: turn limits count LLM responses, not wall time — a child stuck in
   // a slow tool/provider must not hold consult_check for hours (design review D2).
   const timeoutMs = ctx.agent?.config?.agent?.consultTimeoutMs ?? 300_000
-  const watchdog = setTimeout(() => { try { ctrl.abort() } catch { /* already settled */ } }, timeoutMs)
+  let timedOut = false // watchdog kills settle as TIMEOUT, not a provider failure (review D-GLM)
+  const watchdog = setTimeout(() => {
+    timedOut = true
+    try { ctrl.abort() } catch { /* already settled */ }
+  }, timeoutMs)
   const label = consultLabel(m)
   try {
     const build = ctx.buildProvider ?? buildProvider // test-injectable (like ctx.runAgent)
@@ -117,7 +121,9 @@ async function runConsultChild(ctx, session, id, m, problem, ctrl) {
     })
     settleChild(ctx, session, id, label, true, String(result ?? ""))
   } catch (e) {
-    settleChild(ctx, session, id, label, false, e?.message ?? String(e))
+    // Timeout reads as timeout — "(consultation failed: aborted)" would read as a provider crash
+    const note = timedOut ? `consultation timed out after ${Math.round(timeoutMs / 60000)}min (agent.consultTimeoutMs)` : e?.message ?? String(e)
+    settleChild(ctx, session, id, label, false, note)
   } finally {
     clearTimeout(watchdog)
   }
