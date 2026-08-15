@@ -41,12 +41,33 @@ export function makeMainHistoryTool(parentAgent) {
       const h = parentAgent?.history ?? []
       const slice = h.slice(-n)
       if (slice.length === 0) return "(empty history)"
-      return slice
-        .map((m) => {
-          const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content)
-          return `--- [${m.role}] ---\n${content}`
-        })
-        .join("\n\n")
+      const render = (m) => {
+        // Multimodal content: replace base64 image payloads (a pasted screenshot is a
+        // 100k-token bomb; meta-review D5) and surface tool_calls (assistant turns with
+        // content:null would otherwise render as "null" and hide what the agent ran).
+        let content
+        if (typeof m.content === "string") content = m.content
+        else if (Array.isArray(m.content)) {
+          content = m.content.map((part) => {
+            if (part?.type === "image_url" || part?.type === "image") return "[image omitted]"
+            if (part?.type === "text") return part.text ?? ""
+            return JSON.stringify(part)
+          }).join("\n")
+        } else content = m.content == null ? "" : JSON.stringify(m.content)
+        const calls = Array.isArray(m.tool_calls)
+          ? m.tool_calls.map((c) => `[tool: ${c.function?.name ?? c.name}(${String(c.function?.arguments ?? c.args ?? "").slice(0, 200)})]`).join("\n")
+          : ""
+        return `--- [${m.role}] ---\n${content}${calls ? "\n" + calls : ""}`
+      }
+      // Total byte budget — 100 × 16KB offload-sized tool results would be 1.6MB of context.
+      const BUDGET = 60_000
+      let out = ""
+      for (let i = slice.length - 1; i >= 0; i--) {
+        const line = render(slice[i])
+        if (out.length + line.length > BUDGET) { out = `(earlier messages trimmed — budget ${BUDGET} chars)\n\n` + out; break }
+        out = out ? line + "\n\n" + out : line
+      }
+      return out
     },
   }
 }
@@ -95,10 +116,11 @@ async function runConsultChild(ctx, session, id, m, problem, consultPrompt, ctrl
     // default filled by the panel at pick time. Non-thinking models carry effort:null.
     const withEffort = m.effort ? { ...provider, reasoningEffort: m.effort } : provider
     const runner = ctx.runAgent ?? (await import("../agent.mjs")).runAgent
-    const task = (consultPrompt ? consultPrompt + "\n\n" : "") + "# Problem\n" + problem
-    const result = await runner({ ...withEffort, model: m.model }, ctx.cwd, task, {}, ctrl.signal, true, {
-      depth: 1, role: "explore",
-      maxTurns: ctx.agent?.config?.agent?.subagentTurns ?? 100,
+    const result = await runner({ ...withEffort, model: m.model }, ctx.cwd, "# Problem\n" + problem, {}, ctrl.signal, true, {
+      // role "consult": own overlay (consult.md, no explore-persona conflict), read-only tools.
+      // Consultations are diagnosis tasks — 15 tool turns is generous (subagentTurns=100 was a cost exposure).
+      depth: 1, role: "consult",
+      maxTurns: ctx.agent?.config?.agent?.consultTurns ?? 15,
       extraTools: [makeMainHistoryTool(ctx.agent)],
     })
     settleChild(ctx, session, id, label, true, String(result ?? ""))
@@ -154,7 +176,7 @@ export const consultStartTool = {
     }
     agent._consultSessions.set(id, session)
 
-    const consultPrompt = loadConsultPrompt()
+    const consultPrompt = loadConsultPrompt() // kept for backward-compat arg; overlay now carries it
     for (const m of models) {
       session.pending++
       const ctrl = new AbortController()

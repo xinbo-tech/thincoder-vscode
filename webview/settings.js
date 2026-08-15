@@ -50,7 +50,7 @@ function effortEnumFor(modelId) {
 function defaultEffortFor(modelId) {
   const entry = (_getModels?.() || []).find((m) => m.id === modelId)
   const levels = effortEnumFor(modelId)
-  return (entry && entry.effortDefault) || levels[levels.length - 1] || null
+  return (entry && entry.effortDefault) || levels[0] || null
 }
 /** Provider display label. */
 function labelFor(provider) {
