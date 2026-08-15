@@ -4,6 +4,29 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.19] — 2026-08-15
+
+### Added
+
+- **Unified model picker** — every model selection (main panel, subagent slots, advisor, consult rows) now uses ONE two-level hover menu component, rebuilt on the overlay paradigm: full-screen fixed backdrop + viewport-rect positioning, up/left flips, zero style inheritance, no clipping possible.
+- **Consultation + advisor effort levels** — per-model thinking-effort dropdown (spec-driven enums, official defaults preselected: DeepSeek high, GLM/Kimi max, qwen3.8 xhigh); persisted explicitly as {provider, model, effort} and injected into consult/advisor sub-requests.
+- **MCP tools expander** — each server row has a Tools button that lists the server's exposed tools (name/description/params) inline; doubles as a connectivity test.
+- **Follow-scroll pin** — scrolling up during streaming pauses auto-scroll (read history without fighting the stream); scrolling back to the bottom or the floating button re-pins.
+- **qwen3.8-max effort enum** — xhigh (official default) / medium / low.
+
+### Changed
+
+- **Settings cards are change-to-save** — Agent/Consult, Proxy, and Shell cards save immediately on change (submit buttons removed); form-style dialogs (API keys, add-provider, MCP) keep their confirm buttons.
+- **Settings panel rebuilds only on open** — the whole push-driven rebuild machinery (rebuildIfIdle, echo suppression, dirty windows, debounce) is deleted; saves write config.json and never repaint the panel under your hands.
+
+### Fixed
+
+- Consult models lost on window reload (the read path dropped the field).
+- Consult rows vanishing after add/pick (preselect-created half-filled row blocked every save).
+- Cleared subagent/advisor values resurrecting (undefined never survives postMessage; clears now send explicit null).
+- Model picker: popup clipped by cards, flyout dying under a stationary pointer, flyout never reopening, backdrop wheel killing in-flyout scrolling, long provider descriptions blowing the menu width.
+- Advisor pick not repainting the trigger; consult status line not updating after adding a model.
+
 ## [0.1.18] — 2026-08-14
 
 ### Fixed
