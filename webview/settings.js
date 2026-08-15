@@ -55,6 +55,52 @@ function labelFor(provider) {
   return _providerStatus.labels?.[provider] || PROVIDER_LABELS[provider] || provider
 }
 
+/** Shared key-edit row (provider/embedding/websearch keys were three copy-paste blocks).
+ *  Renders input + Save + Cancel into the row; Enter saves, Escape cancels. */
+function keyRowEdit(row, { label, placeholder, onSave, onCancel }) {
+  row.replaceChildren()
+  const lbl = document.createElement("span")
+  lbl.className = "key-label"
+  lbl.textContent = label
+  const inp = document.createElement("input")
+  inp.type = "password"
+  inp.placeholder = placeholder
+  inp.autocomplete = "off"
+  inp.style.cssText = "flex:1;margin:0 8px;"
+  const saveBtn = document.createElement("button")
+  saveBtn.className = "key-btn"
+  saveBtn.textContent = t("settings.save")
+  const cancelBtn = document.createElement("button")
+  cancelBtn.className = "key-btn"
+  cancelBtn.textContent = t("settings.cancel")
+  const doSave = () => {
+    const v = inp.value.trim()
+    if (!v) { onCancel(); return }
+    onSave(v, saveBtn)
+  }
+  saveBtn.addEventListener("click", doSave)
+  cancelBtn.addEventListener("click", onCancel)
+  inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") doSave()
+    else if (e.key === "Escape") onCancel()
+  })
+  row.append(lbl, inp, saveBtn, cancelBtn)
+  setTimeout(() => inp.focus(), 50)
+}
+
+/** Shared effort dropdown (consult rows / advisor were three copies). Returns null for
+ *  non-thinking models (caller hides the control). */
+function buildEffortSelect({ model, current, onChange, className = "consult-effort" }) {
+  const enum_ = model ? effortEnumFor(model) : null
+  if (!enum_ || enum_.length === 0) return null
+  const sel = document.createElement("select")
+  sel.className = className
+  const value = current || defaultEffortFor(model)
+  sel.innerHTML = enum_.map((e) => `<option value="${escHtml(e)}" ${value === e ? "selected" : ""}>${escHtml(e)}</option>`).join("")
+  if (onChange) sel.addEventListener("change", () => onChange(sel.value))
+  return sel
+}
+
 /** Consult row: provider dropdown over CONFIGURED providers (consultation calls them directly).
  *  Null-safe: status entries may be null (e.g. custom: null) — guard before .configured. */
 
@@ -199,28 +245,20 @@ function setRowModel(row, provider, model) {
 }
 
 function refreshRowEffort(row, model) {
-  let sel = row.querySelector(".consult-effort")
-  const enum_ = model ? effortEnumFor(model) : null
-  if (!enum_ || enum_.length === 0) { sel?.remove(); return }
-  const current = sel?.value || defaultEffortFor(model)
-  if (!sel) {
-    sel = document.createElement("select")
-    sel.className = "consult-effort"
-    sel.addEventListener("change", () => document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true })))
-    row.insertBefore(sel, row.querySelector(".consult-del"))
-  }
-  sel.innerHTML = enum_.map((e) => '<option value="' + escHtml(e) + '" ' + (current === e ? "selected" : "") + ">" + escHtml(e) + "</option>").join("")
+  const old = row.querySelector(".consult-effort")
+  const sel = buildEffortSelect({ model, current: old?.value, onChange: () => document.getElementById("consult-rows")?.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true })) })
+  old?.remove()
+  if (sel) row.insertBefore(sel, row.querySelector(".consult-del"))
 }
 
 function refreshAdvisorEffort(model) {
   const wrap = document.getElementById("adv-effort")?.closest(".key-field")
-  const enum_ = model ? effortEnumFor(model) : null
-  if (!enum_ || enum_.length === 0) { wrap?.remove(); return }
-  if (wrap) {
-    const sel = wrap.querySelector("select")
-    const current = sel?.value || defaultEffortFor(model)
-    sel.innerHTML = enum_.map((e) => '<option value="' + escHtml(e) + '" ' + (current === e ? "selected" : "") + ">" + escHtml(e) + "</option>").join("")
-  }
+  if (!wrap) return
+  const sel = buildEffortSelect({ model, current: wrap.querySelector("select")?.value, className: "" })
+  if (!sel) { wrap.remove(); return }
+  sel.id = "adv-effort"
+  sel.addEventListener("change", fireAgentSave)
+  wrap.querySelector("select")?.replaceWith(sel)
 }
 
 /** Show/hide the ✕ clear button next to a submodel trigger based on current value. */
@@ -309,24 +347,24 @@ export function initSettings({ onClose, getModels }) {
     const row = document.getElementById("rowline-" + name)
     if (!row) return
     const label = _providerStatus.labels?.[name] || PROVIDER_LABELS[name] || name
-    row.innerHTML = `<span class="prov-name">${escHtml(label)}</span>
-      <input id="input-${name}" type="password" placeholder="sk-..." style="flex:1;margin:0 8px;"
-        onkeydown="if(event.key==='Enter')window._saveKey('${name}')">
-      <button class="key-btn" onclick="window._saveKey('${name}', this)">${t("settings.save")}</button>
-      <button class="key-btn" onclick="window._cancelEdit('${name}')">${t("settings.cancel")}</button>`
-    setTimeout(() => document.getElementById("input-" + name)?.focus(), 50)
-  }
-
-  window._saveKey = function(name, btn) {
-    const inp = document.getElementById("input-" + name)
-    const key = inp?.value?.trim()
-    if (!key) return
-    window._vscode.postMessage({ type: "saveProviderKey", name, key })
-    flashSaved(btn)
-  }
-
-  window._cancelEdit = function(_name) {
-    buildSettings() // local re-render, no round-trip needed
+    const s0 = _providerStatus.providers?.[name] || {}
+    keyRowEdit(row, {
+      label, placeholder: "sk-...",
+      onSave: (v, btn) => { window._vscode.postMessage({ type: "saveProviderKey", name, key: v }); flashSaved(btn) },
+      // in-place restore — cancel must NOT rebuild the panel (other cards' in-progress edits survive)
+      onCancel: () => {
+        row.replaceChildren()
+        const lbl = document.createElement("span"); lbl.className = "prov-name"; lbl.textContent = label
+        const st = document.createElement("span"); st.className = "key-status " + (s0.configured ? "ok" : ""); st.textContent = s0.configured ? (s0.masked || "****") : t("settings.notConfigured")
+        const act = document.createElement("span"); act.className = "prov-actions"
+        const editBtn = document.createElement("button"); editBtn.className = "key-btn"; editBtn.textContent = s0.configured ? t("settings.setKey") : t("settings.addKey")
+        editBtn.addEventListener("click", () => window._editKey(name))
+        const delBtn = document.createElement("button"); delBtn.className = "key-btn del-key"; delBtn.textContent = "−"; delBtn.disabled = !!s0.isActive
+        delBtn.addEventListener("click", (e) => window._removeProvider(name, e.currentTarget))
+        act.append(editBtn, delBtn)
+        row.append(lbl, st, act)
+      },
+    })
   }
 
   window._delKey = function(name, btn) {
@@ -391,44 +429,58 @@ export function initSettings({ onClose, getModels }) {
     window._toggleAddForm(false)
   }
 
-  // Embedding key row — same pattern as provider keys
+  // Embedding key row
   window._editEmbedKey = function() {
     const row = document.getElementById("row-embed")
-    row.innerHTML = `<span class="key-label">${t("settings.embeddingLabel")}</span>
-      <input id="input-embed" type="password" placeholder="sk-..." autocomplete="off" style="flex:1;margin:0 8px;"
-        onkeydown="if(event.key==='Enter')window._saveEmbedKey()">
-      <button class="key-btn" onclick="window._saveEmbedKey(this)">${t("settings.save")}</button>
-      <button class="key-btn" onclick="window._cancelEditEmbed()">${t("settings.cancel")}</button>`
-    setTimeout(() => document.getElementById("input-embed")?.focus(), 50)
+    keyRowEdit(row, {
+      label: t("settings.embeddingLabel"), placeholder: "sk-...",
+      onSave: (v, btn) => { window._vscode.postMessage({ type: "saveEmbedKey", key: v }); flashSaved(btn) },
+      onCancel: () => {
+        const row = document.getElementById("row-embed")
+        row.replaceChildren()
+        const lbl = document.createElement("span"); lbl.className = "key-label"; lbl.textContent = t("settings.embeddingLabel")
+        const has = _indexStatus?.hasEmbedder
+        const st = document.createElement("span"); st.className = "key-status " + (has ? "ok" : ""); st.textContent = has ? "****" : "—"
+        const editBtn = document.createElement("button"); editBtn.className = "key-btn"; editBtn.textContent = has ? t("settings.changeKey") : t("settings.addKey")
+        editBtn.addEventListener("click", () => window._editEmbedKey())
+        row.append(lbl, st, editBtn)
+        if (has) {
+          const delBtn = document.createElement("button"); delBtn.className = "key-btn del-key"; delBtn.textContent = "✕"
+          delBtn.addEventListener("click", (e) => window._delEmbedKey(e.currentTarget))
+          row.appendChild(delBtn)
+        }
+      },
+    })
   }
-  window._saveEmbedKey = function(btn) {
-    const val = document.getElementById("input-embed")?.value?.trim()
-    if (!val) { window._cancelEditEmbed(); return }
-    window._vscode.postMessage({ type: "saveEmbedKey", key: val })
-    flashSaved(btn)
-  }
-  window._cancelEditEmbed = function() { buildSettings() }
+
   window._delEmbedKey = function(btn) {
     window._confirmDelete(btn, () => window._vscode.postMessage({ type: "deleteEmbedKey" }))
   }
 
-  // Web search key (Tavily) — same row pattern as provider/embedding keys
+  // Web search key (Tavily)
   window._editWebsearchKey = function() {
     const row = document.getElementById("row-websearch")
-    row.innerHTML = `<span class="key-label">${t("settings.websearchLabel")}</span>
-      <input id="input-websearch" type="password" placeholder="tvly-..." autocomplete="off" style="flex:1;margin:0 8px;"
-        onkeydown="if(event.key==='Enter')window._saveWebsearchKey()">
-      <button class="key-btn" onclick="window._saveWebsearchKey(this)">${t("settings.save")}</button>
-      <button class="key-btn" onclick="window._cancelEditWebsearch()">${t("settings.cancel")}</button>`
-    setTimeout(() => document.getElementById("input-websearch")?.focus(), 50)
+    keyRowEdit(row, {
+      label: t("settings.websearchLabel"), placeholder: "tvly-...",
+      onSave: (v, btn) => { window._vscode.postMessage({ type: "saveWebsearchKey", key: v }); flashSaved(btn) },
+      onCancel: () => {
+        const row = document.getElementById("row-websearch")
+        row.replaceChildren()
+        const lbl = document.createElement("span"); lbl.className = "key-label"; lbl.textContent = t("settings.websearchLabel")
+        const has = _websearchSettings?.hasKey
+        const st = document.createElement("span"); st.className = "key-status " + (has ? "ok" : ""); st.textContent = has ? "****" : "—"
+        const editBtn = document.createElement("button"); editBtn.className = "key-btn"; editBtn.textContent = has ? t("settings.changeKey") : t("settings.addKey")
+        editBtn.addEventListener("click", () => window._editWebsearchKey())
+        row.append(lbl, st, editBtn)
+        if (has) {
+          const delBtn = document.createElement("button"); delBtn.className = "key-btn del-key"; delBtn.textContent = "✕"
+          delBtn.addEventListener("click", (e) => window._delWebsearchKey(e.currentTarget))
+          row.appendChild(delBtn)
+        }
+      },
+    })
   }
-  window._saveWebsearchKey = function(btn) {
-    const val = document.getElementById("input-websearch")?.value?.trim()
-    if (!val) { window._cancelEditWebsearch(); return }
-    window._vscode.postMessage({ type: "saveWebsearchKey", key: val })
-    flashSaved(btn)
-  }
-  window._cancelEditWebsearch = function() { buildSettings() }
+
   window._delWebsearchKey = function(btn) {
     window._confirmDelete(btn, () => window._vscode.postMessage({ type: "deleteWebsearchKey" }))
   }
@@ -437,34 +489,20 @@ export function initSettings({ onClose, getModels }) {
   // Request detected shells once (extension caches the detection — CLI /shell parity)
   window._vscode.postMessage({ type: "getShellCandidates" })
 
-  // Two-step delete confirmation: first click arms, second click (within 2.5s) executes.
-  window._confirmDelete = function(btn, action) {
-    if (btn.dataset.confirming === "1") { action(); return }
-    btn.dataset.confirming = "1"
-    const orig = btn.textContent
-    btn.textContent = t("settings.confirmDelete")
-    btn.classList.add("confirming")
-    setTimeout(() => {
-      if (btn.dataset.confirming !== "1") return
-      btn.dataset.confirming = ""
-      btn.textContent = orig
-      btn.classList.remove("confirming")
-    }, 2500)
-  }
+  // Single-click delete — these actions are reversible (provider/MCP/key can be re-added).
+  window._confirmDelete = function(btn, action) { action() }
 
   return { openSettings, closeSettings, renderMcpList, updateMcpTools, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
 }
 
-/** Brief "✓" flash on a save button — the only save feedback the panel has. */
-function flashSaved(btn) {
-  if (!btn) return
-  const orig = btn.textContent
-  btn.textContent = "✓"
-  btn.classList.add("btn-saved")
-  setTimeout(() => {
-    btn.textContent = orig
-    btn.classList.remove("btn-saved")
-  }, 1200)
+/** Unified save feedback — one form panel-wide (per SETTINGS-REORG P4): the card-level
+ *  saved badge. The btn arg is ignored (kept for call-site compatibility). */
+function flashSaved(_btn) {
+  const badge = document.getElementById("agent-saved-badge")
+  if (!badge) return
+  badge.textContent = t("settings.autoSaved")
+  badge.classList.add("visible")
+  setTimeout(() => badge.classList.remove("visible"), 1200)
 }
 
 /** Mark an input as invalid briefly (e.g. malformed JSON headers). */
@@ -570,62 +608,24 @@ function buildSettings() {
   </div>`
   html += `</div></section>`
 
-  // ─── MCP card ───
-  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.mcpSection")}</h4><div class="settings-card-body">`
-  html += `<div id="mcp-list"></div>`
-  html += `<button id="mcp-add-btn" class="key-btn">${t("settings.mcpAdd")}</button>`
-  html += `<div id="mcp-form" style="display:none">
-    <div class="key-field"><label>${t("settings.mcp.name")}</label><input id="mcp-name" placeholder="my-server"></div>
-    <div class="key-field"><label>${t("settings.mcp.type")}</label><select id="mcp-type"><option value="stdio">${t("settings.mcpStdio")}</option><option value="http">${t("settings.mcpHttp")}</option><option value="ws">${t("settings.mcpWs")}</option></select></div>
-    <div id="mcp-stdio-fields">
-      <div class="key-field"><label>${t("settings.mcp.command")}</label><input id="mcp-command" placeholder="npx"></div>
-      <div class="key-field"><label>${t("settings.mcp.args")}</label><input id="mcp-args" placeholder="-y @modelcontextprotocol/server-filesystem /path"></div>
-      <div class="key-field"><label>${t("settings.mcp.env")}</label><input id="mcp-env" placeholder="KEY=value KEY2=value2 (space-separated)"></div>
-    </div>
-    <div id="mcp-http-fields" style="display:none">
-      <div class="key-field"><label>${t("settings.mcp.url")}</label><input id="mcp-url" placeholder="https://example.com/mcp"></div>
-      <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
-    </div>
-    <div id="mcp-ws-fields" style="display:none">
-      <div class="key-field"><label>${t("settings.mcp.wsUrl")}</label><input id="mcp-ws-url" placeholder="wss://example.com/mcp"></div>
-      <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-ws-headers" placeholder='{"Authorization":"Bearer xxx"}'></div>
-    </div>
-    <button id="mcp-save-btn" class="key-btn">${t("settings.save")}</button>
-    <button id="mcp-cancel-btn" class="key-btn">${t("settings.cancel")}</button>
-  </div>`
-  html += `</div></section>`
-
-  // ─── Semantic index card ───
-  const embedConfigured = _indexStatus?.hasEmbedder || false
-  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.indexSection") || "Semantic Index"}</h4><div class="settings-card-body">`
-  html += `<div class="key-row" id="row-embed">
-    <span class="key-label">${t("settings.embeddingLabel")}</span>
-    <span class="key-status ${embedConfigured ? "ok" : ""}" id="status-embed">${embedConfigured ? "****" : "—"}</span>
-    ${embedConfigured
-      ? `<button class="key-btn" onclick="window._editEmbedKey()">${t("settings.changeKey")}</button>
-         <button class="key-btn del-key" onclick="window._delEmbedKey(this)">✕</button>`
-      : `<button class="key-btn" onclick="window._editEmbedKey()">${t("settings.addKey")}</button>`}
-  </div>
-  <div id="index-status" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>
-  <button id="index-build-btn" class="key-btn">${t("settings.indexBuild") || "Build Index"}</button>`
-  html += `</div></section>`
-
-  // ─── Agent / Advisor card ───
+  // ─── Agent card (run parameters + subagent model assignments) ───
   const as = _agentSettings || {}
   const adv = as.advisor || {}
   html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.agentSection")}</h4><div class="settings-card-body">`
   html += `<div class="key-field"><label title="${t("settings.maxTurnsHelp")}">${t("settings.maxTurns")}</label><input id="ag-maxturns" type="number" min="1" value="${as.maxTurns ?? 100}"></div>`
   html += `<div class="key-field"><label title="${t("settings.subagentTurnsHelp")}">${t("settings.subagentTurns")}</label><input id="ag-subturns" type="number" min="1" value="${as.subagentTurns ?? 100}"></div>`
+  html += `<div class="key-field"><label title="${t("settings.compactThresholdHelp")}">${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>`
+  html += `<label class="switch" title="${t("settings.verifyGuardHelp")}"><input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}> ${t("settings.verifyGuard")}</label>`
   html += `<div class="settings-subtitle">${t("settings.submodelSection")}</div>`
   html += `<div class="key-field"><label title="${t("settings.submodelHelp")}">${t("settings.submodelGlobal")}</label><span id="submodel-slot-global" class="submodel-slot" data-value="${escHtml(as.subagentModel || "")}"></span></div>`
   html += `${["explore", "plan", "coder", "eng-coder"].map((role) => `
     <div class="key-field"><label title="${t("settings.submodelHelp")}">${role}</label><span id="submodel-slot-${role}" class="submodel-slot" data-value="${escHtml(as.subagentModels?.[role] || "")}"></span></div>`).join("")}`
-  html += `<div class="key-field"><label title="${t("settings.compactThresholdHelp")}">${t("settings.compactThreshold")}</label><input id="ag-compact" type="number" min="0" placeholder="auto" value="${as.compactThreshold ?? ""}"></div>`
-  html += `<label class="switch" title="${t("settings.verifyGuardHelp")}"><input type="checkbox" id="ag-verifyguard" ${as.verifyGuard ? "checked" : ""}> ${t("settings.verifyGuard")}</label>`
+  html += `</div></section>`
+
+  // ─── Consult & Advisor card ───
+  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.consultAdvisorSection")}</h4><div class="settings-card-body">`
   html += `<div class="settings-subtitle" title="${t("settings.consultHelp")}">${t("settings.consultSection")}</div>`
   html += `<div id="consult-rows">`
-  // Source of truth on REBUILD: the live DOM rows first (a rebuild must never drop rows the
-  // user is mid-editing), then the saved config, else one empty row.
   const liveRows = readConsultRowsFromDom()
   const consultRows = liveRows.length > 0 ? liveRows
     : (Array.isArray(as.consultModels) ? as.consultModels : [])
@@ -643,44 +643,40 @@ function buildSettings() {
   html += `<div class="settings-subtitle">${t("settings.advisorSection")}</div>`
   html += `<label class="switch" title="${t("settings.advisorEnabledHelp")}"><input type="checkbox" id="adv-enabled" ${adv.enabled ? "checked" : ""}> ${t("settings.advisorEnabled")}</label>`
   html += `<label class="switch" title="${t("settings.advisorGuardHelp")}"><input type="checkbox" id="adv-guard" ${adv.guard !== false ? "checked" : ""}> ${t("settings.advisorGuard")}</label>`
-  // Provider = configured providers dropdown; model = that provider's known models.
-  const configuredNames = Object.entries(ps).filter(([, v]) => v.configured).map(([n]) => n)
   const advProvider = adv.provider || ""
   html += `<div class="key-field"><label title="${t("settings.advisorProviderHelp")}">${t("settings.advisorProvider")}</label><span id="adv-model-slot" class="adv-model-slot" data-provider="${escHtml(advProvider)}" data-model="${escHtml(adv.model || "")}"></span></div>`
   {
     const advEffortEnum = adv.model ? effortEnumFor(adv.model) : null
     if (advEffortEnum && advEffortEnum.length > 0) html += `<div class="key-field"><label title="${t("settings.advisorEffortHelp")}">${t("settings.advisorEffort")}</label><select id="adv-effort">${advEffortEnum.map((e) => `<option value="${escHtml(e)}" ${(adv.effort || defaultEffortFor(adv.model)) === e ? "selected" : ""}>${escHtml(e)}</option>`).join("")}</select></div>`
   }
-  html += ``
   html += `</div></section>`
 
-  // ─── Proxy card ───
-  const px = _proxySettings || {}
-  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.proxySection")}</h4><div class="settings-card-body">`
-  html += `<div class="key-field"><label title="${t("settings.proxyUriHelp")}">${t("settings.proxyUri")}</label><input id="px-uri" placeholder="http://127.0.0.1:7890" value="${escHtml(px.uri || "")}"></div>`
-  html += `<label class="switch" title="${t("settings.proxyWebHelp")}"><input type="checkbox" id="px-web" ${px.web !== false ? "checked" : ""}> ${t("settings.proxyWeb")}</label>`
-  html += `<label class="switch" title="${t("settings.proxyModelHelp")}"><input type="checkbox" id="px-model" ${px.model ? "checked" : ""}> ${t("settings.proxyModel")}</label>`
-  html += `<div> <button id="px-test-btn" class="key-btn">${t("settings.proxyTest")}</button></div>`
-  html += `<div id="px-test-result" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>`
-  html += `</div></section>`
-
-  // ─── Shell card ───
-  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.shellSection")}</h4><div class="settings-card-body">`
-  html += `${(() => {
-    const cands = _shellCandidates || []
-    const shellIsCustom = _shellValue !== null && !cands.some((c) => (c.value ?? null) === _shellValue)
-    return `
-    <div class="key-field"><label title="${t("settings.shellHelp")}">${t("settings.shellSelect")}</label><select id="sh-select">
-      ${cands.map((c) => `<option value="${escHtml(c.value || "")}" ${!shellIsCustom && (c.value ?? null) === _shellValue ? "selected" : ""}>${escHtml(c.name)}</option>`).join("")}
-      <option value="__custom__" ${shellIsCustom ? "selected" : ""}>${t("settings.shellCustom")}</option>
-    </select></div>
-    <div class="key-field"><label>${t("settings.shellPath")}</label><input id="sh-custom" placeholder="C:\\Program Files\\Git\\bin\\bash.exe" value="${shellIsCustom ? escHtml(_shellValue || "") : ""}" ${shellIsCustom ? "" : "disabled"}></div>`
-  })()}`
-  html += `</div></section>`
-
-  // ─── Web search card (Tavily structured search) ───
+  // ─── Tools & Services card (MCP servers + web search key + semantic index) ───
+  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.toolsSection")}</h4><div class="settings-card-body">`
+  html += `<div class="settings-subtitle">${t("settings.mcpSection")}</div>`
+  html += `<div id="mcp-list"></div>`
+  html += `<button id="mcp-add-btn" class="key-btn">${t("settings.mcpAdd")}</button>`
+  html += `<div id="mcp-form" style="display:none">
+    <div class="key-field"><label>${t("settings.mcp.name")}</label><input id="mcp-name" placeholder="my-server"></div>
+    <div class="key-field"><label>${t("settings.mcp.type")}</label><select id="mcp-type"><option value="stdio">stdio</option><option value="http">http</option><option value="ws">ws</option></select></div>
+    <div id="mcp-stdio-fields">
+      <div class="key-field"><label>${t("settings.mcp.command")}</label><input id="mcp-command" placeholder="npx"></div>
+      <div class="key-field"><label>${t("settings.mcp.args")}</label><input id="mcp-args" placeholder="-y pkg"></div>
+      <div class="key-field"><label>${t("settings.mcp.env")}</label><input id="mcp-env" placeholder="KEY=value ..."></div>
+    </div>
+    <div id="mcp-http-fields" style="display:none">
+      <div class="key-field"><label>${t("settings.mcp.url")}</label><input id="mcp-url" placeholder="https://..."></div>
+      <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-headers" placeholder='{"Authorization":"..."}'></div>
+    </div>
+    <div id="mcp-ws-fields" style="display:none">
+      <div class="key-field"><label>${t("settings.mcp.wsUrl")}</label><input id="mcp-ws-url" placeholder="ws://..."></div>
+      <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-ws-headers" placeholder='{"Authorization":"..."}'></div>
+    </div>
+    <button id="mcp-save-btn" class="key-btn">${t("settings.save")}</button>
+    <button id="mcp-cancel-btn" class="key-btn">${t("settings.cancel")}</button>
+  </div>`
+  html += `<div class="settings-subtitle">${t("settings.websearchSection")}</div>`
   const ws = _websearchSettings || {}
-  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.websearchSection")}</h4><div class="settings-card-body">`
   html += `<div class="key-row" id="row-websearch">
     <span class="key-label">${t("settings.websearchLabel")}</span>
     <span class="key-status ${ws.hasKey ? "ok" : ""}" id="status-websearch">${ws.hasKey ? "****" : "—"}</span>
@@ -690,8 +686,43 @@ function buildSettings() {
       : `<button class="key-btn" onclick="window._editWebsearchKey()">${t("settings.addKey")}</button>`}
   </div>
   <div style="font-size:11px;opacity:0.55;padding:2px 0">${t("settings.websearchHelp")}</div>`
+  html += `<div class="settings-subtitle">${t("settings.indexSection")}</div>`
+  const embedConfigured = _indexStatus?.hasEmbedder || false
+  html += `<div class="key-row" id="row-embed">
+    <span class="key-label">${t("settings.embeddingLabel")}</span>
+    <span class="key-status ${embedConfigured ? "ok" : ""}" id="status-embed">${embedConfigured ? "****" : "—"}</span>
+    ${embedConfigured
+      ? `<button class="key-btn" onclick="window._editEmbedKey()">${t("settings.changeKey")}</button>
+         <button class="key-btn del-key" onclick="window._delEmbedKey(this)">✕</button>`
+      : `<button class="key-btn" onclick="window._editEmbedKey()">${t("settings.addKey")}</button>`}
+  </div>
+  <div id="index-status" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>
+  <button id="index-build-btn" class="key-btn">${t("settings.indexBuild") || "Build Index"}</button>`
   html += `</div></section>`
 
+  // ─── Environment card (proxy + shell) ───
+  const px = _proxySettings || {}
+  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.envSection")}</h4><div class="settings-card-body">`
+  html += `<div class="settings-subtitle">${t("settings.proxySection")}</div>`
+  html += `<div class="key-field"><label title="${t("settings.proxyUriHelp")}">${t("settings.proxyUri")}</label><input id="px-uri" placeholder="http://127.0.0.1:7890" value="${escHtml(px.uri || "")}"></div>`
+  html += `<label class="switch" title="${t("settings.proxyWebHelp")}"><input type="checkbox" id="px-web" ${px.web !== false ? "checked" : ""}> ${t("settings.proxyWeb")}</label>`
+  html += `<label class="switch" title="${t("settings.proxyModelHelp")}"><input type="checkbox" id="px-model" ${px.model ? "checked" : ""}> ${t("settings.proxyModel")}</label>`
+  html += `<div> <button id="px-test-btn" class="key-btn">${t("settings.proxyTest")}</button></div>`
+  html += `<div id="px-test-result" style="font-size:12px;opacity:0.7;padding:4px 0">—</div>`
+  html += `<div class="settings-subtitle">${t("settings.shellSection")}</div>`
+  html += `${(() => {
+    const cands = _shellCandidates || []
+    const shellIsCustom = _shellValue !== null && !cands.some((c) => (c.value ?? null) === _shellValue)
+    return `
+    <div class="key-field"><label title="${t("settings.shellHelp")}">${t("settings.shellSelect")}</label><select id="sh-select">
+      ${cands.map((c) => `<option value="${escHtml(c.value || "")}" ${!shellIsCustom && (c.value ?? null) === _shellValue ? "selected" : ""}>${escHtml(c.name)}</option>`).join("")}
+      <option value="__custom__" ${shellIsCustom ? "selected" : ""}>${t("settings.shellCustom")}</option>
+    </select></div>
+    <div class="key-field"><label>${t("settings.shellPath")}</label><input id="sh-custom" placeholder="C:\\path\\to\\shell.exe" value="${shellIsCustom ? escHtml(_shellValue) : ""}"></div>`
+  })()}`
+  html += `</div></section>`
+
+  // ─── MCP card removed (merged into Tools & Services above) ───
   body.innerHTML = html
 
   // Bind Add-provider form controls
@@ -930,15 +961,15 @@ function updateMcpTools({ name, tools, error }) {
 }
 
 function updateProviderStatus(status) {
-  _providerStatus = status
+  _providerStatus = status
 }
 
 function updateAgentSettings(settings) {
-  _agentSettings = { ...(_agentSettings || {}), ...settings }
+  _agentSettings = { ...(_agentSettings || {}), ...settings }
 }
 
 function updateWebsearchSettings(settings) {
-  _websearchSettings = settings || {}
+  _websearchSettings = settings || {}
 }
 
 /** Custom-provider connection probe result: populate the model dropdown or show the error. */
@@ -959,11 +990,11 @@ function updateTestProviderResult(r) {
 
 function updateShellCandidates(payload) {
   _shellCandidates = payload?.candidates || []
-  _shellValue = payload?.current ?? null
+  _shellValue = payload?.current ?? null
 }
 
 function updateProxySettings(settings) {
-  _proxySettings = settings
+  _proxySettings = settings
 }
 
 function updateProxyTestResult(result) {
@@ -976,7 +1007,7 @@ function updateProxyTestResult(result) {
 
 function updateIndexStatus(s) {
   _indexStatus = s
-  renderIndexStatus()
+  renderIndexStatus()
 }
 
 function renderIndexStatus() {

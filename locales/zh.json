@@ -125,15 +125,11 @@
   "settings.shellSelect": "Shell",
   "settings.shellCustom": "自定义路径…",
   "settings.shellPath": "自定义路径",
-  "settings.confirmDelete": "确认?",
   "settings.embeddingLabel": "SiliconFlow Embedding",
   "settings.indexNoKey": "未配置 embedding API key。",
   "settings.indexNotBuilt": "索引未构建，向量搜索未启用。",
   "settings.indexBuilding": "构建中…",
   "settings.indexBuilt": "✓ 索引已构建：${files} 个文件，${chunks} 个块",
-  "settings.mcpStdio": "命令 (stdio)",
-  "settings.mcpHttp": "HTTP",
-  "settings.mcpWs": "WebSocket",
   "settings.proxyTestRunning": "测试中…",
   "settings.maxTurnsHelp": "每条用户消息的 LLM/工具迭代上限。",
   "settings.subagentTurnsHelp": "子代理运行的迭代上限（explore 角色更低）。",
@@ -188,5 +184,8 @@
   "settings.advisorEffortHelp": "Advisor 审查时的思考深度（随模型档位）",
   "settings.mcp.tools": "工具",
   "settings.mcp.loading": "加载中…",
-  "settings.mcp.noTools": "该服务未提供工具"
+  "settings.mcp.noTools": "该服务未提供工具",
+  "settings.consultAdvisorSection": "会诊与审查",
+  "settings.toolsSection": "工具与服务",
+  "settings.envSection": "运行环境"
 }

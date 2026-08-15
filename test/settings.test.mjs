@@ -171,8 +171,9 @@ describe("buildSettings — web search card (Tavily)", () => {
     api.updateWebsearchSettings({ provider: "tavily", hasKey: false })
     openPanel()
     window._editWebsearchKey()
-    document.getElementById("input-websearch").value = "tvly-abc123"
-    window._saveWebsearchKey()
+    const inp = document.getElementById("row-websearch").querySelector("input")
+    inp.value = "tvly-abc123"
+    inp.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter" }))
     const last = env.capturedPosts.at(-1)
     assert.equal(last.type, "saveWebsearchKey")
     assert.equal(last.key, "tvly-abc123")

@@ -125,15 +125,11 @@
   "settings.shellSelect": "Shell",
   "settings.shellCustom": "Custom path…",
   "settings.shellPath": "Custom path",
-  "settings.confirmDelete": "Sure?",
   "settings.embeddingLabel": "SiliconFlow Embedding",
   "settings.indexNoKey": "No embedding API key configured.",
   "settings.indexNotBuilt": "Index not built. Vector search is inactive.",
   "settings.indexBuilding": "Building…",
   "settings.indexBuilt": "✓ Index built: ${files} files, ${chunks} chunks",
-  "settings.mcpStdio": "Command (stdio)",
-  "settings.mcpHttp": "HTTP",
-  "settings.mcpWs": "WebSocket",
   "settings.proxyTestRunning": "Testing…",
   "settings.maxTurnsHelp": "Maximum LLM/tool iterations per user message.",
   "settings.subagentTurnsHelp": "Maximum iterations for subagent runs (explore stays lower).",
@@ -188,5 +184,8 @@
   "settings.advisorEffortHelp": "Thinking depth for advisor reviews (model-specific levels)",
   "settings.mcp.tools": "Tools",
   "settings.mcp.loading": "loading…",
-  "settings.mcp.noTools": "no tools exposed"
+  "settings.mcp.noTools": "no tools exposed",
+  "settings.consultAdvisorSection": "Consultation & Advisor",
+  "settings.toolsSection": "Tools & Services",
+  "settings.envSection": "Environment"
 }
