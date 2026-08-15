@@ -1,6 +1,7 @@
 # Responses API Transport — 设计
 
-> 状态：**设计定稿，待实施**（2026-08-15，用户拍板："不完整收益不明显的就算了，有完整支持的实现一下"）
+> 状态：**已核实、已会诊、决定不做（2026-08-15）**——保留为待触发预案。核实矩阵与消息⇄item 映射已完备，真触发时实施成本不变。
+> 会诊结论（三模型一致）：用户收益约等于零（Qwen 是唯一完整支持者，但服务端状态/内置工具/reasoning 回传三项差异化能力恰好都是我们不用或已有的）；真实成本被原设计低估（截断续跑循环 provider.mjs L106-152 硬编码 chat-completions 语义、Qwen partialMode 续走会掉进不匹配分支、CLI 端内联分派无注册表、×2 仓库永久同步）。
 > 关联：`MODEL-PICKER-UNIFY.md`（provider format 体系）、各厂商官方文档（2026-08-15 核实）
 
 ---
@@ -87,9 +88,22 @@ GLM 的 responses 端点（`open.bigmodel.cn/api/v1`）格式完整但 store/内
 
 CLI 的 webview 无面板改动（CLI 配置走 config.json 手编，无表单）。
 
+## 3.6 会诊结论与触发信号（2026-08-15，三家一致）
+
+**不做的理由**：
+- 收益侧空：设计 §2 映射表自己写死了三项差异化能力全被放弃/已有；"Codex 生态接入"是伪需求（thincoder 不是 Codex CLI，不消费 wire_api）；对自管状态和工具的客户端，chat completions 才是跨厂商最大公约数
+- 成本侧实：续跑循环的 format 耦合（isOpenAI 分支会向 responses transport 发 partial/prefix 消息，Qwen partialMode 模型必踩）、CLI 端内联分派、双仓库同步债
+
+**触发信号（任一出现即重启实施）**：
+1. 主力厂商发布 responses-only 的用户可感知能力（盯 Qwen 百炼 Responses 文档的"独有限制"节）
+2. OpenAI 或目标厂商公布 chat completions 弃用时间表
+3. 真实用户 issue ≥3 点名要求 format:"responses"
+4. thincoder 决定透传服务端内置工具（web_search 是唯一真实功能增益，届时 transport 与它一起做）
+
 ## 4. 关键决策记录
 
 - **只接完整支持者**（用户拍板）：OpenAI 官方 + Qwen 百炼；DeepSeek（无状态残缺）/ Kimi（无端点）明确不接，理由记录在 §1 矩阵
+- **不做（2026-08-15 会诊后用户终裁）**：收益为零成本为实的预案存档，触发信号见 §3.6
 - **放弃服务端状态**：本地双行历史是核心资产（压缩/落档/CLI↔插件共享/会话恢复），服务端状态 7 天过期且锁厂商——transport 保持无状态全量回传
 - **不放弃 reasoning 回传**：明文 reasoning content 进 input（Qwen/GLM 支持），与 DeepSeek chat completions 的 reasoning_content 回传同款语义
 - **preset 不动**：默认稳态 chat completions；responses 是显式 opt-in（format 字段）
