@@ -170,7 +170,7 @@ describe("consult mechanism", () => {
     for (const o of seen) {
       assert.equal(o.role, "consult", "consult role (own overlay, read-only tools, small turn budget)")
       assert.equal(o.depth, 1)
-      assert.equal(o.maxTurns, 15, "consult turn budget")
+      assert.equal(o.maxTurns, 40, "consult turn budget")
       assert.ok(o.extraTools?.some((t) => t.name === "main_history"), "main_history injected")
     }
     await cleanupConsultSessions(agent)

@@ -793,7 +793,6 @@ function buildSettings() {
   try { mountModelMenus(); bindConsultRows() } catch (e) { console.error("[settings] model-menu mount failed:", e) }
 
   // Proxy settings: CHANGE-TO-SAVE (test button stays — it's an action, not a save)
-  const pxCard = document.getElementById("px-save-btn")?.closest(".settings-card") || document
   const autoSaveProxy = () => {
     const uri = document.getElementById("px-uri")?.value?.trim() ?? ""
     const web = document.getElementById("px-web")?.checked ?? false
@@ -801,8 +800,13 @@ function buildSettings() {
     window._vscode.postMessage({ type: "saveProxySettings", settings: { uri, web, model } })
     flashSaved(document.getElementById("px-test-btn"))
   }
-  pxCard.querySelectorAll("input").forEach((el) => el.addEventListener("change", autoSaveProxy))
-  document.getElementById("px-save-btn")?.remove()
+  // Explicit per-control binding — NEVER a card/document-wide query. The old
+  // `closest(".settings-card") || document` fell through to document (px-save-btn does not
+  // exist), binding autoSaveProxy to EVERY input's change in the panel: blurring any field
+  // re-posted proxy with whatever was (or wasn't) in px-uri, silently deleting it.
+  for (const id of ["px-uri", "px-web", "px-model"]) {
+    document.getElementById(id)?.addEventListener("change", autoSaveProxy)
+  }
 
   const pxTest = document.getElementById("px-test-btn")
   if (pxTest) {

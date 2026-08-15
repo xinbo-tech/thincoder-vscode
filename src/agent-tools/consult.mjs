@@ -120,7 +120,7 @@ async function runConsultChild(ctx, session, id, m, problem, consultPrompt, ctrl
       // role "consult": own overlay (consult.md, no explore-persona conflict), read-only tools.
       // Consultations are diagnosis tasks — 15 tool turns is generous (subagentTurns=100 was a cost exposure).
       depth: 1, role: "consult",
-      maxTurns: ctx.agent?.config?.agent?.consultTurns ?? 15,
+      maxTurns: ctx.agent?.config?.agent?.consultTurns ?? 40,
       extraTools: [makeMainHistoryTool(ctx.agent)],
     })
     settleChild(ctx, session, id, label, true, String(result ?? ""))
