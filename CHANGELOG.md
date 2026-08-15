@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.21] — 2026-08-15
+
+### Subagent & consultation visibility (user-requested)
+
+- **Children stream live**: subagents (explore/plan/coder) and consultants forward their tool calls/results to an in-conversation collapsible panel — the user watches WHAT each child reads/runs instead of a status dot
+- Consultation progress counter in the subagent panel header (👥 X/Y answered)
+- Consult cards linger 60s (were 3s — the reply preview is the consultation's output) and the preview is 8KB (was 2KB)
+- Consultation budget on the panel: turn limit + timeout (minutes) in the Consult & Advisor card; both were dead config before (agent.mjs never assembled them — panel edits did nothing)
+
+### Consultation hardening round 2 (live regression findings)
+
+- Consultants run on a lean consult-base.md system prompt (no main-agent persona conflict, budget guidance with concrete numbers)
+- `question` excluded from ALL subagents — a background child must never prompt the user and hang
+- Watchdog timeouts settle as "timed out after Nmin" (was indistinguishable from a provider crash); default raised 5→10 min
+- consult_check description warns against batching with dependent calls
+
+### Fixed
+
+- **Proxy settings silently deleted**: the 0.1.20 "binding fix" never landed (CRLF-missed replace) — `|| document` fallback survived and re-posted proxy from an empty field on ANY input blur. Now bound per-control
+- adv-enabled/adv-guard stopped persisting after the 7→5 card reorg (fell outside the change-to-save binding)
+- Shell card wiring, effort dropdowns missing on open (spec-enum fallback), subagent ✕ wiping the advisor effort dropdown — from the earlier consultation batch
+- bash tool description is platform-aware: cmd.exe semantics for the isolated child, PowerShell 5.1 warning (no &&) for terminal modes — models trained on bash emitted broken commands for both
+- Local time + timezone injected into every system prompt (main, subagents, consultants, advisor) on both extension and CLI
+
 ## [0.1.20] — 2026-08-15
 
 ### Settings panel reorganization (consultation-derived design)
