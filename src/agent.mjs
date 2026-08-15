@@ -74,7 +74,10 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const getAuto = typeof autoApprove === "function" ? autoApprove : () => autoApprove
 
   const agentTools = depth === 0
-    ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool, advisorTool, engTool, consultStartTool, consultCheckTool, consultStopTool]
+    ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool, advisorTool, engTool,
+      // consult tools registered only when configured — an unconfigured model would otherwise
+      // see the tool, call it, and eat an error turn (prompt-system review 2026-08-15).
+      ...(loadRaw().agent?.consultModels?.length ? [consultStartTool, consultCheckTool, consultStopTool] : [])]
     : role === "eng-coder"
       ? [taskTool, recentChangesTool, planTool, timerTool, advisorTool, verifyTool] // eng-coder: design review + verify gates
       : [taskTool, recentChangesTool] // subagents get fewer meta-tools
