@@ -168,10 +168,20 @@ function gitGuardSnapshot(command, cwd) {
 
 // ─── bash tool ───────────────────────────────────────────────────
 
+// Description is platform-aware: the isolated child runs cmd.exe on Windows and /bin/sh
+// elsewhere; the terminal modes run in the USER'S shell (often PowerShell 5.1, which does
+// NOT support &&). Models trained on bash otherwise emit broken commands for both paths.
+const isWin = process.platform === "win32"
+const SHELL_NOTES = isWin
+  ? "The default isolated child process runs Windows cmd.exe: && and || chaining WORK, use cmd built-ins (del, dir, type, findstr, tasklist) and forward-or-backslash paths. Bash-isms (rm -rf, cp -r, head, 2>/dev/null, $(...)) FAIL — use del /s /q, copy -r, node -e, >nul 2>&1 instead. For complex logic prefer node -e over shell gymnastics.\\n" +
+    "- terminal: \"visible\"/\"inject\" run in the USER'S terminal, which may be PowerShell 5.1 — PS 5.1 does NOT support && or || (use ; to sequence, or separate calls) and aliases differ (Remove-Item, Copy-Item). Check the user's shell before assuming cmd semantics."
+  : "The default isolated child process runs /bin/sh (POSIX). \"visible\"/\"inject\" terminal modes run in the user's OWN terminal — it may be a different shell (fish, nushell); prefer portable constructs there."
+
 export const bashTool = {
   name: "bash",
   description:
     "Execute a shell command and return stdout+stderr.\n" +
+    (isWin ? SHELL_NOTES + "\n" : SHELL_NOTES + "\n") +
     "Parameters:\n" +
     "- command (required): Shell command to execute\n" +
     "- timeout: Timeout in milliseconds (default 120000)\n" +
