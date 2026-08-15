@@ -187,7 +187,11 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     const overlay = { explore: _EXPLORE, coder: _CODER, plan: _PLAN, "eng-coder": _ENG_CODER, consult: _CONSULT }[role] || ""
     base = overlay ? `${overlay}\n\n${base}` : base
   }
-  const systemPrompt = `${base}${depth === 0 && !engPromptActive ? `\n\n${MAIN_OVERLAY}` : ""}\n\nOS: ${platform}. Working directory: ${cwd}.`
+  // Local time + timezone: every agent (main, subagent, consult) must know "now" — otherwise
+  // "today"/"just now"/"recent" in user messages and search freshness are ungrounded.
+  const now = new Date()
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local"
+  const systemPrompt = `${base}${depth === 0 && !engPromptActive ? `\n\n${MAIN_OVERLAY}` : ""}\n\nCurrent time: ${now.toLocaleString("sv-SE")} (${timeZone}). OS: ${platform}. Working directory: ${cwd}.`
 
   // Dual-line history. Top-level runs use PERSISTENT lines passed in via opts (survive across calls,
   // written to the session file by chat-panel): history = machine context (compaction shrinks it),

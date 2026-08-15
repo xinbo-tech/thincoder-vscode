@@ -93,6 +93,13 @@ try { ADVISOR_DESIGN = readFileSync(join(__dirname, "..", "prompts", "advisor-de
  * @param {string} [reviewType] — "design" for design review, undefined/"code" for code review
  * @returns {string} the system prompt
  */
+export /** Append local time so the reviewer knows "now" (same grounding as the agent loop). */
+function withTime(prompt) {
+  const now = new Date()
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local"
+  return prompt + `\n\nCurrent time: ${now.toLocaleString("sv-SE")} (${timeZone}).`
+}
+
 export function buildAdvisorSystemPrompt(agent, prior, reviewType) {
   // Round decision is DETERMINISTIC (decision 2026-08-08): _advisorRound > 0
   // with a stored review output means convergence (round 2+); 0 means round 1.
@@ -216,7 +223,7 @@ export function prepareAdvisorMessages(agent, reviewType, designToken = null, do
   // after a failed design review). Fresh session.
   if (reviewType === "design" && (agent._advisorRound || 0) === 0) {
     return [
-      { role: "system", content: buildAdvisorSystemPrompt(agent, prior, reviewType) },
+      { role: "system", content: withTime(buildAdvisorSystemPrompt(agent, prior, reviewType)) },
       { role: "user", content: escapeLiteralEscapes(buildAdvisorUserMessage(agent, prior, reviewType, designToken, documents, paths)) },
     ]
   }
@@ -251,7 +258,7 @@ export function prepareAdvisorMessages(agent, reviewType, designToken = null, do
     // Mutations exist → KEEP the round (cap keeps advancing through retries).
     const user = buildAdvisorUserMessage(agent, prior, reviewType, designToken, documents, paths)
     return [
-      { role: "system", content: buildAdvisorSystemPrompt(agent, prior, reviewType) },
+      { role: "system", content: withTime(buildAdvisorSystemPrompt(agent, prior, reviewType)) },
       {
         role: "user",
         // NOTE (2026-08-06): the leading prefix is a PLAIN "System reminder:",
@@ -279,7 +286,7 @@ export function prepareAdvisorMessages(agent, reviewType, designToken = null, do
   // review surface.
   const scopeFiles = resolveScopeFiles(agent, paths)
   return [
-    { role: "system", content: buildAdvisorSystemPrompt(agent, prior, reviewType) },
+    { role: "system", content: withTime(buildAdvisorSystemPrompt(agent, prior, reviewType)) },
     { role: "user", content: escapeLiteralEscapes(buildAdvisorFollowUp(agent, prior, scopeFiles)) },
   ]
 }
