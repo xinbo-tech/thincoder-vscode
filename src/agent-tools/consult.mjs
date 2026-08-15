@@ -118,7 +118,8 @@ async function runConsultChild(ctx, session, id, m, problem, consultPrompt, ctrl
     const runner = ctx.runAgent ?? (await import("../agent.mjs")).runAgent
     const result = await runner({ ...withEffort, model: m.model }, ctx.cwd, "# Problem\n" + problem, {}, ctrl.signal, true, {
       // role "consult": own overlay (consult.md, no explore-persona conflict), read-only tools.
-      // Consultations are diagnosis tasks — 15 tool turns is generous (subagentTurns=100 was a cost exposure).
+      // Consultations are diagnosis tasks — 40 tool turns is enough to read the relevant files
+      // (15 was too tight: consultants died mid-file-read at "reached max turns").
       depth: 1, role: "consult",
       maxTurns: ctx.agent?.config?.agent?.consultTurns ?? 40,
       extraTools: [makeMainHistoryTool(ctx.agent)],
