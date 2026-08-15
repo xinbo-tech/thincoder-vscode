@@ -133,7 +133,7 @@ export async function executeToolBatches(agent, { response, history, fullHistory
       } else {
         try {
           const raw = await tool.execute(args, {
-            cwd, agent, callbacks, signal,
+            cwd, agent, callbacks, signal, depth,
             // Live output streaming (bash etc.) — mirrors CLI dispatch's onOutput;
             // the id lets the webview route chunks to the right tool card.
             onOutput: (chunk) => callbacks.onToolOutput?.(toolName, chunk, tc.id),

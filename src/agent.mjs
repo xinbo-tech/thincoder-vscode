@@ -12,7 +12,7 @@ import { builtinTools, toOpenAISchema, readImageTool } from "./tools.mjs"
 import {
   taskTool, recentChangesTool, subagentTool,
   planTool, goalTool, skillTool, verifyTool, timerTool,
-  advisorTool, engTool, consultStartTool, consultCheckTool, consultStopTool,
+  advisorTool, engTool, consultStartTool, consultCheckTool, consultStopTool, escalateTool,
 } from "./agent-tools.mjs"
 import { compactHistory, truncateFallback, COMPRESS_FAILURE_LIMIT } from "./compact.mjs"
 import { cleanupConsultSessions } from "./agent-tools/consult.mjs"
@@ -77,7 +77,9 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool, advisorTool, engTool,
       // consult tools registered only when configured — an unconfigured model would otherwise
       // see the tool, call it, and eat an error turn (prompt-system review 2026-08-15).
-      ...(loadRaw().agent?.consultModels?.length ? [consultStartTool, consultCheckTool, consultStopTool] : [])]
+      ...(loadRaw().agent?.consultModels?.length ? [consultStartTool, consultCheckTool, consultStopTool] : []),
+      // escalate (飞刀) registered only when a consult row carries the surgeon hook (ESCALATE.md §2.1)
+      ...(loadRaw().agent?.consultModels?.some?.((m) => m?.surgeon === true) ? [escalateTool] : [])]
     : role === "eng-coder"
       ? [taskTool, recentChangesTool, planTool, timerTool, advisorTool, verifyTool] // eng-coder: design review + verify gates
       : [taskTool, recentChangesTool] // subagents get fewer meta-tools
