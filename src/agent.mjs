@@ -197,9 +197,13 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   }
   // Local time + timezone: every agent (main, subagent, consult) must know "now" — otherwise
   // "today"/"just now"/"recent" in user messages and search freshness are ungrounded.
+  // MINUTE precision, deliberately: system prompts must stay byte-identical across runs
+  // within the same minute or provider prefix caches (DeepSeek cache_hit) never hit.
   const now = new Date()
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local"
-  const systemPrompt = `${base}${depth === 0 && !engPromptActive ? `\n\n${MAIN_OVERLAY}` : ""}\n\nCurrent time: ${now.toLocaleString("sv-SE")} (${timeZone}). OS: ${platform}. Working directory: ${cwd}.`
+  const hm = (d) => String(d).padStart(2, "0")
+  const timeStr = `${now.getFullYear()}-${hm(now.getMonth() + 1)}-${hm(now.getDate())} ${hm(now.getHours())}:${hm(now.getMinutes())}`
+  const systemPrompt = `${base}${depth === 0 && !engPromptActive ? `\n\n${MAIN_OVERLAY}` : ""}\n\nCurrent time: ${timeStr} (${timeZone}). OS: ${platform}. Working directory: ${cwd}.`
 
   // Dual-line history. Top-level runs use PERSISTENT lines passed in via opts (survive across calls,
   // written to the session file by chat-panel): history = machine context (compaction shrinks it),
