@@ -451,7 +451,7 @@ export function initSettings({ onClose, getModels }) {
     }, 2500)
   }
 
-  return { openSettings, closeSettings, renderMcpList, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
+  return { openSettings, closeSettings, renderMcpList, updateMcpTools, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
 }
 
 /** Brief "✓" flash on a save button — the only save feedback the panel has. */
@@ -879,13 +879,25 @@ function renderMcpList() {
       <span class="key-label">${escHtml(s.name)}</span>
       <span style="opacity:0.5;flex:1;margin:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.desc)}${count}</span>
       <span style="font-size:10px;opacity:0.4;margin-right:8px">${type}</span>
+      <button class="key-btn mcp-tools-btn" data-name="${escHtml(s.name)}">${t("settings.mcp.tools")}</button>
       <button class="key-btn mcp-reconnect-btn" data-name="${escHtml(s.name)}">${t("settings.mcp.reconnect")}</button>
       <button class="key-btn del-key mcp-del-btn" data-name="${escHtml(s.name)}">✕</button>
-    </div>`
+    </div>
+    <div class="mcp-tools-detail" id="mcp-tools-${escHtml(s.name)}" style="display:none"></div>`
   }).join("")
   list.querySelectorAll(".mcp-del-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       window._confirmDelete(btn, () => window._vscode.postMessage({ type: "deleteMcpServer", name: btn.dataset.name }))
+    })
+  })
+  list.querySelectorAll(".mcp-tools-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const detail = document.getElementById("mcp-tools-" + btn.dataset.name)
+      if (!detail) return
+      if (detail.style.display !== "none") { detail.style.display = "none"; return }
+      detail.style.display = ""
+      detail.innerHTML = '<div style="opacity:0.5;font-size:11px">' + t("settings.mcp.loading") + "</div>"
+      window._vscode.postMessage({ type: "mcpTools", name: btn.dataset.name })
     })
   })
   list.querySelectorAll(".mcp-reconnect-btn").forEach((btn) => {
@@ -893,6 +905,28 @@ function renderMcpList() {
       window._vscode.postMessage({ type: "reconnectMcp", name: btn.dataset.name })
     })
   })
+}
+
+/** MCP tools expander result: render the tool list (or error) under the server row. */
+function updateMcpTools({ name, tools, error }) {
+  const detail = document.getElementById("mcp-tools-" + name)
+  if (!detail) return
+  if (error) {
+    detail.innerHTML = `<div style="color:#f14c4c;font-size:11px;padding:4px 0">${escHtml(error)}</div>`
+    return
+  }
+  if (!tools || tools.length === 0) {
+    detail.innerHTML = `<div style="opacity:0.5;font-size:11px;padding:4px 0">${t("settings.mcp.noTools")}</div>`
+    return
+  }
+  detail.innerHTML = tools.map((tl) => {
+    const params = tl.inputSchema?.properties ? Object.keys(tl.inputSchema.properties).join(", ") : ""
+    return `<div class="mcp-tool-row">
+      <div class="mcp-tool-name">${escHtml(tl.name)}</div>
+      <div class="mcp-tool-desc">${escHtml(tl.description || "")}</div>
+      ${params ? `<div class="mcp-tool-params">params: ${escHtml(params)}</div>` : ""}
+    </div>`
+  }).join("")
 }
 
 function updateProviderStatus(status) {

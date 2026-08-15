@@ -8,7 +8,7 @@ import { saveModelPrefs, switchToSlot } from "./session-io.mjs"
 import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection, shellCandidates, saveShellSettingsFromPanel, saveWebsearchKeyFromPanel, deleteWebsearchKeyFromPanel, testProviderConnection } from "./settings.mjs"
 import { PRESETS } from "./presets.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
-import { selectProviderModel, loadRaw } from "../config-io.mjs"
+import { selectProviderModel, loadRaw, loadMcpServers } from "../config-io.mjs"
 import { openDiffPreview } from "./diff-preview.mjs"
 import { traceStop } from "./stop-trace.mjs"
 
@@ -160,6 +160,21 @@ export async function handlePanelMessage(panel, msg) {
     }
     case "buildIndex": await panel._buildIndex(); break
     case "getMcpStatus": panel._pushMcpStatus(); break
+    case "mcpTools": {
+      // Probe/expand: connect (idempotent — reuses the live connection) and return the
+      // tool list for the settings panel's per-server expander.
+      try {
+        const { mcpConnect } = await import("../mcp.mjs")
+        const servers = loadMcpServers()
+        const cfg = servers.find((x) => x.name === msg.name)
+        if (!cfg) throw new Error(`no MCP server named "${msg.name}"`)
+        const r = await mcpConnect(cfg)
+        panel._panel?.webview.postMessage({ type: "mcpTools", name: msg.name, tools: r.tools })
+      } catch (e) {
+        panel._panel?.webview.postMessage({ type: "mcpTools", name: msg.name, error: e?.message ?? String(e) })
+      }
+      break
+    }
     case "saveAgentSettings": {
       saveAgentSettingsFromPanel(msg.settings ?? {})
       panel._pushSettingsLight()
