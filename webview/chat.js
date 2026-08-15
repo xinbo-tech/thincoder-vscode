@@ -468,10 +468,15 @@ function renderSubagentPanel() {
       : s.status
     // consult rows show the model so parallel consultants are distinguishable
     const label = s.role === "consult" && s.model ? `consult · ${s.model}` : s.role
+    // answered consults carry a collapsible preview of the reply (review D10)
+    const preview = s.role === "consult" && s.replyPreview
+      ? `<details class="consult-reply"><summary>${t("consult.replyPreview") || "view reply"}</summary><pre>${escHtml(s.replyPreview)}</pre></details>`
+      : ""
     return `<div class="sub-item">
       <span class="sub-role">${escHtml(label)}</span>
       <span class="sub-tool">${s.tool ? escHtml(s.tool) : ""}</span>
       <span class="sub-status ${statusCls}">${statusText}</span>
+      ${preview}
     </div>`
   }).join("")
   panel.style.display = "block"
@@ -1234,7 +1239,7 @@ window.addEventListener("message", (e) => {
         _subagentMap[m.id] = { role: m.role, status: "started", startedAt: m.startedAt || Date.now(), tool: null, model: m.model ?? null }
       } else {
         const s = _subagentMap[m.id]
-        if (s) { s.status = m.status; s.doneAt = Date.now(); if (m.error) s.error = m.error }
+        if (s) { s.status = m.status; s.doneAt = Date.now(); if (m.error) s.error = m.error; if (m.replyPreview) s.replyPreview = m.replyPreview }
       }
       renderSubagentPanel()
       renderStatusBar()

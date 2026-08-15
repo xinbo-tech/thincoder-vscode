@@ -77,7 +77,9 @@ function settleChild(ctx, session, id, label, ok, payload) {
   if (ok) {
     session.received++
     session.replies.push({ model: label, reply: payload })
-    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "answered" })
+    // Panel visibility (review D10): the user sees WHAT each consultant concluded, not just
+    // a status dot — first ~2KB of the reply travels with the answered event.
+    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "answered", replyPreview: String(payload ?? "").slice(0, 2000) })
   } else if (session.stopped) {
     // consult_stop already ran: an aborted child settles as TERMINATED — counted, never
     // enqueued (a "(consultation failed: Aborted)" note after an intentional stop is pure

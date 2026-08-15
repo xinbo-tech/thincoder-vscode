@@ -176,6 +176,21 @@ describe("consult mechanism", () => {
     await cleanupConsultSessions(agent)
   })
 
+  it("watchdog timeout settles as 'timed out', not 'aborted' (a timeout is not a provider crash)", async () => {
+    const agent = makeAgent(MODELS)
+    agent.config.agent.consultTimeoutMs = 50
+    // runner that never resolves on its own — only the watchdog abort can end it
+    const hang = (provider, cwd, task, callbacks, signal) => new Promise((resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true })
+    })
+    const ctx = makeCtx(agent, hang)
+    await consultStartTool.execute({ problem: "stuck" }, ctx)
+    const r = JSON.parse(await consultCheckTool.execute({ id: "1" }, ctx))
+    assert.ok(r.reply.includes("timed out"), `timeout note, got: ${r.reply}`)
+    assert.ok(!r.reply.includes("Aborted"), "must not read as an abort/provider crash")
+    await cleanupConsultSessions(agent)
+  })
+
   it("consultTurns/consultTimeoutMs config values flow through to children (not just defaults)", async () => {
     const agent = makeAgent(MODELS)
     agent.config.agent.consultTurns = 7
