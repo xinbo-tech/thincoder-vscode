@@ -137,7 +137,7 @@ consult_stop
 | `src/agent.mjs` | 扩展：runAgent 支持 `opts.extraTools`（注入 main_history）+ turn 结束清理钩子 |
 | `src/agent-tools/index.mjs` | 注册三个 consult 工具 |
 | `src/prompts/consult-base.md` | 新增：会诊子任务系统 prompt |
-| `src/prompts/main.md` | 主 agent prompt 补一句：遇到反复失败的疑难杂症时主动 consult_start |
+| `src/prompts/main.md` | 主 agent prompt 会诊条款（何时会诊由模型自由裁量，条款只描述适用场景与成本权衡） |
 | `src/config-io.mjs` | consultModels 读取/校验（≤5） |
 | `src/extension/panel-chat.mjs` | onConsult 回调 → webview |
 | `webview/chat.js` + `ui.js` + `chat.css` | 会诊面板渲染（每模型一块） |
@@ -198,7 +198,7 @@ consult_stop
 | 2 成本 | 复用 subagentTurns=100 | consultTurns=15 |
 | 2 成本 | effort 默认回落最高档（max） | 官方默认档优先、回落最低档 |
 | 2 成本 | main_history：base64 炸弹/null 渲染/无上限 | 图片省略、tool_calls 显形、60KB 预算（D5） |
-| 3 引导 | 想不起来用/滥用无边界 | stall/verify 提醒挂钩 + main.md 双向边界（D7） |
+| 3 引导 | 想不起来用 | stall/verify 提醒挂钩 + main.md 引导（D7；边界条款后按用户决定放开为自由裁量——何时会诊是模型的判断，成本权衡写在条款里由模型自己称量） |
 
 | 4 提示词 | 子 agent 背完整主 agent system.md（人格/工具引用冲突） | 精简 consult-base.md 底座（consult.md 删除） |
 | 4 提示词 | question 工具泄漏给子 agent（会挂起提问用户） | depth>0 全排除 |
