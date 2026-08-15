@@ -79,6 +79,8 @@ export function agentSettings() {
     compactThreshold: s.compactThreshold, // null = auto
     verifyGuard: s.verifyGuard,
       engineering: s.engineering,
+    consultTurns: s.consultTurns,
+    consultTimeoutMs: s.consultTimeoutMs,
     advisor: s.advisor ?? { enabled: false },
     consultModels: s.consultModels ?? [],
     // Spec-derived effort enums — offline, always available; the webview's model list

@@ -190,5 +190,10 @@
   "settings.envSection": "运行环境",
   "consult.answered": "已回复",
   "consult.terminated": "已终止",
-  "consult.failed": "失败"
+  "consult.failed": "失败",
+  "settings.consultBudgetSection": "会诊预算",
+  "settings.consultTurns": "轮数上限",
+  "settings.consultTurnsHelp": "每个会诊模型的最大工具轮数（诊断任务通常不需要更多）",
+  "settings.consultTimeout": "超时（分钟）",
+  "settings.consultTimeoutHelp": "每个会诊模型的墙钟上限——轮数只统计 LLM 响应，不统计卡在慢工具里的时间"
 }

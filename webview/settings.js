@@ -651,6 +651,9 @@ function buildSettings() {
     const advEffortEnum = adv.model ? effortEnumFor(adv.model) : null
     if (advEffortEnum && advEffortEnum.length > 0) html += `<div class="key-field"><label title="${t("settings.advisorEffortHelp")}">${t("settings.advisorEffort")}</label><select id="adv-effort">${advEffortEnum.map((e) => `<option value="${escHtml(e)}" ${(adv.effort || defaultEffortFor(adv.model)) === e ? "selected" : ""}>${escHtml(e)}</option>`).join("")}</select></div>`
   }
+  html += `<div class="settings-subtitle">${t("settings.consultBudgetSection")}</div>`
+  html += `<div class="key-field"><label title="${t("settings.consultTurnsHelp")}">${t("settings.consultTurns")}</label><input id="consult-turns" type="number" min="1" value="${as.consultTurns ?? 40}"></div>`
+  html += `<div class="key-field"><label title="${t("settings.consultTimeoutHelp")}">${t("settings.consultTimeout")}</label><input id="consult-timeout" type="number" min="1" value="${Math.round((as.consultTimeoutMs ?? 300000) / 60000)}"></div>`
   html += `</div></section>`
 
   // ─── Tools & Services card (MCP servers + web search key + semantic index) ───
@@ -734,7 +737,7 @@ function buildSettings() {
 
   // Agent/Advisor/Consult settings: CHANGE-TO-SAVE (no submit button).
   // Every control mutates → saveAgentSettings immediately (local config write, no debounce).
-  const agCard = document.querySelector("#ag-maxturns")?.closest(".settings-card") || document
+  const agCard = document.getElementById("ag-maxturns")?.closest(".settings-card")
   const buildAgentPayload = () => {
     const get = (id) => document.getElementById(id)?.value?.trim()
     const chk = (id) => document.getElementById(id)?.checked ?? false
@@ -754,6 +757,8 @@ function buildSettings() {
         subagentModel: document.getElementById("submodel-slot-global")?.dataset.value || null,
         subagentModels: subModels,
         compactThreshold: compactRaw === "" ? "" : (compactRaw || undefined),
+        consultTurns: get("consult-turns") || undefined,
+        consultTimeoutMs: (() => { const m = get("consult-timeout"); return m ? String(Math.round(Number(m) * 60000)) : undefined })(),
         verifyGuard: chk("ag-verifyguard"),
         advisor: {
           enabled: chk("adv-enabled"),
@@ -788,6 +793,13 @@ function buildSettings() {
     } catch (e) { console.error("[settings] agent auto-save failed:", e) }
   }
   agCard.querySelectorAll("input, select").forEach((el) => el.addEventListener("change", autoSaveAgent))
+  // Consult & Advisor is a SEPARATE card since the reorg — its static controls live outside
+  // agCard and must be bound explicitly (adv-enabled/adv-guard were silently unbound after the
+  // split; consult-turns/consult-timeout are new). Consult rows and the advisor model slot
+  // already save via fireAgentSave/consult-rows-changed, so only these four need binding here.
+  for (const id of ["adv-enabled", "adv-guard", "consult-turns", "consult-timeout"]) {
+    document.getElementById(id)?.addEventListener("change", autoSaveAgent)
+  }
   document.getElementById("consult-rows")?.addEventListener("consult-rows-changed", autoSaveAgent)
   // Mount model-menu triggers into their slots + wire consult interactions
   try { mountModelMenus(); bindConsultRows() } catch (e) { console.error("[settings] model-menu mount failed:", e) }

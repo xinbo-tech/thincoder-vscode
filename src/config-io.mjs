@@ -235,6 +235,8 @@ export function loadAgentSettings() {
     compactThreshold: a?.compactThreshold ?? null, // null = auto (from model context)
     verifyGuard: a?.verifyGuard ?? false,
       engineering: a?.engineering ?? false, // engineering mode flag (VS Code: config-level; the eng tool persists here)
+    consultTurns: a?.consultTurns ?? 40, // consultation turn budget (was 100, then 15 was too tight)
+    consultTimeoutMs: a?.consultTimeoutMs ?? 300000, // wall-clock watchdog per consultant (5 min)
     advisor: a?.advisor ?? { enabled: false },
     consultModels: Array.isArray(a?.consultModels) ? a.consultModels : [],
   }
@@ -274,6 +276,8 @@ export function saveAgentSettingsFromPanel(payload) {
   if (payload.compactThreshold !== undefined) patch.compactThreshold = payload.compactThreshold === "" ? undefined : (Number(payload.compactThreshold) || undefined)
   if (payload.verifyGuard !== undefined) patch.verifyGuard = !!payload.verifyGuard
     if (payload.engineering !== undefined) patch.engineering = !!payload.engineering
+  if (payload.consultTurns != null) patch.consultTurns = Number(payload.consultTurns) || undefined
+  if (payload.consultTimeoutMs != null) patch.consultTimeoutMs = Number(payload.consultTimeoutMs) || undefined
   // Consultation models (CONSULTATION.md): array of {provider, model}, ≤5, validated.
   if (payload.consultModels !== undefined) {
     const arr = Array.isArray(payload.consultModels) ? payload.consultModels : []

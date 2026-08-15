@@ -190,5 +190,10 @@
   "settings.envSection": "Environment",
   "consult.answered": "answered",
   "consult.terminated": "terminated",
-  "consult.failed": "failed"
+  "consult.failed": "failed",
+  "settings.consultBudgetSection": "Consultation budget",
+  "settings.consultTurns": "Turn limit",
+  "settings.consultTurnsHelp": "Max tool turns per consultant (diagnosis tasks rarely need more)",
+  "settings.consultTimeout": "Timeout (minutes)",
+  "settings.consultTimeoutHelp": "Wall-clock ceiling per consultant — turn limits count LLM responses, not time stuck in a slow tool"
 }
