@@ -81,6 +81,15 @@ export function agentSettings() {
       engineering: s.engineering,
     advisor: s.advisor ?? { enabled: false },
     consultModels: s.consultModels ?? [],
+    // Spec-derived effort enums — offline, always available; the webview's model list
+    // (network probe) may not have arrived when the panel opens, and the effort dropdown
+    // must not depend on that timing.
+    effortEnums: Object.fromEntries(
+      [...(s.consultModels ?? []).map((m) => m.model), s.advisor?.model]
+        .filter(Boolean)
+        .map((id) => [id, specForModel(id).reasoningEffortEnum || null])
+        .filter(([, v]) => v)
+    ),
   }
 }
 

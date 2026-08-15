@@ -41,8 +41,10 @@ function paTypeChanged() {
 function effortEnumFor(modelId) {
   const entry = (_getModels?.() || []).find((m) => m.id === modelId)
   const levels = entry?.reasoning || []
-  // drop "enabled" (a mode flag, not an effort level) for the effort dropdown
-  return levels.filter((x) => x !== "enabled")
+  if (levels.length > 0) return levels.filter((x) => x !== "enabled")
+  // Fallback: the agentSettings snapshot carries spec-derived enums — available even
+  // before the model-list network probe returns.
+  return _agentSettings?.effortEnums?.[modelId] || []
 }
 /** Model-official default effort: spec reasoningEffortDefault (falls back to the highest level). */
 function defaultEffortFor(modelId) {
