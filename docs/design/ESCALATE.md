@@ -84,17 +84,20 @@ escalate
 - `maxTurns: agent.subagentTurns`（写任务的复杂度对齐 coder 子 agent，不套 consultTurns）
 - `depth: 1` 由 runAgent 强制；execute 层拒绝 depth>0 的 escalate 调用（护栏写进工具 execute 开头）
 
-### 2.3 触发方式（三通道，2026-08-15 确认）
+### 2.3 触发方式（两通道，2026-08-15 定稿：撤掉机制化挂钩）
 
-1. **主 agent 自主判断**——main.md 飞刀条款（边界**不设硬性限制**，模型自由裁量；2026-08-15 用户拍板：不要限制太死）：
+1. **主 agent 自主判断（唯一主通道）**——main.md 飞刀条款（边界不设硬性限制，模型自由裁量；2026-08-15 用户拍板）：
 
    > **Escalate to a stronger model (飞刀)** — when YOU judge the task calls for a stronger model's hands (a complex multi-file refactor, an intractable bug, intricate algorithm work — or simply work you assess as beyond your comfortable ability), hand the implementation to it via `escalate(task)`. It gets WRITE access and does the work itself; you review its report (read the changed files, run the tests). You are free to escalate early or late — your judgment; the cost is one expert model run, comparable to doing it yourself. Contrast with `consult_start` (parallel READ-ONLY opinions for judgment calls).
 
    设计理由：会诊是 N 模型并行（贵，边界要紧）；飞刀是单模型（成本与主 agent 自跑一轮相当），省着用的理由弱——裁量权交给模型（§1.4）。
-2. **机制化挂钩**——verify 耗尽提醒与 stall 检测的追加语扩展：
-   - verify 耗尽："…consider `consult_start` for independent diagnoses or `escalate` to hand the work to a stronger model."（仅候选池非空时追加 escalate 半句）
-   - stall 检测同款
-3. **用户手动**——"飞刀 glm" / "escalate 给 kimi" → 主 agent 带 `model` 参数调用。
+2. **用户手动**——"飞刀 glm" / "escalate 给 kimi" → 主 agent 带 `model` 参数调用。
+
+**为什么不挂 verify 耗尽 / stall 检测**（2026-08-15 用户点破，撤回原设计）：
+
+- 飞刀是**事前能力评估**——接任务时掂量"这活超出我的舒适区"就该直接交出去；verify 耗尽/stall 都是**事后撞墙信号**，此时升级是收拾残局，不是飞刀
+- verify 耗尽的瞬间主 agent 不知道自己缺的是判断（→ 会诊）还是手艺（→ 飞刀）——而两机制的分工恰恰建立在这个区分上；该场景已挂会诊（判断缺口对症），维持不变
+- 飞刀模型在三次失败后接手，继承的是被污染的上下文和可能改乱的工作区——上台时手术区是乱的
 
 ### 2.4 面板
 
@@ -116,7 +119,6 @@ escalate
 | `src/extension/settings.mjs` | 快照透传 surgeon |
 | `webview/settings.js` | 会诊行加钩选框 + 状态行 |
 | `src/prompts/main.md` | 飞刀条款 |
-| `src/agent.mjs` + `src/agent/execute-tools.mjs` | verify 耗尽/stall 提醒追加语（候选非空时） |
 | `locales/en.json` + `zh.json` | surgeon.* 文案 |
 | `test/escalate.test.mjs` | 新增测试 |
 
@@ -139,4 +141,3 @@ escalate
 | 深度护栏 | depth>0 调 escalate → 拒绝并说明（飞刀不能套飞刀） |
 | 配置往返 | 面板勾选 → config.json 落盘 surgeon:true；去钩 → 字段删除 |
 | 活动流 | 子 agent 工具调用以 sub: 前缀流到面板 |
-| 提醒挂钩 | verify 耗尽注入的提醒在候选非空时含 escalate 半句，空池不含 |
