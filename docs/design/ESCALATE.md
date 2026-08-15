@@ -31,7 +31,13 @@
 - **US-F4（指定医生）**：`escalate(task, model)` 可指定候选中的某一位；不带 model 用第一个勾选的
 - **US-F5（安全线）**：写操作走正常权限门（非 AUTO 时弹审批卡）；depth=1 封顶（飞刀不能再飞刀）；改动走 recent-changes/git 追踪，可回滚
 
-### 1.4 不做清单
+### 1.4 边界哲学（用户拍板：不设硬边界）
+
+会诊的边界（首次失败不用、简单错误不用）**不照搬**到飞刀：那是给 N 倍成本机制设的闸。飞刀成本 ≈ 主 agent 自跑一轮，硬边界只会让模型该出手时不出手。条款只描述"什么样的任务适合"和"与会诊的区别"，**何时出手完全交给模型判断**。机制化挂钩（verify 耗尽/stall）保留——那是给撞墙时刻的入口提示，不是限制。
+
+---
+
+## 1.5 不做清单
 
 - ❌ 飞刀再飞刀（深度封顶）
 - ❌ 多模型并行操刀（一个手术台只能站一位主刀）
@@ -80,11 +86,11 @@ escalate
 
 ### 2.3 触发方式（三通道，2026-08-15 确认）
 
-1. **主 agent 自主判断**——main.md 飞刀条款：
+1. **主 agent 自主判断**——main.md 飞刀条款（边界**不设硬性限制**，模型自由裁量；2026-08-15 用户拍板：不要限制太死）：
 
-   > **Escalate to a stronger model (飞刀)** — when the task genuinely exceeds the current model's ability (complex multi-file refactoring, an intractable bug after your own attempts, intricate algorithm work) and a consult-hooked surgeon model exists, hand the implementation to it via `escalate(task)`. It gets WRITE access and does the work itself; you review its report. Do NOT escalate on first failure (try your own fix first), on trivial/syntax tasks, or when a consult (advice) or your own tools suffice — an expert run costs real tokens.
+   > **Escalate to a stronger model (飞刀)** — when YOU judge the task calls for a stronger model's hands (a complex multi-file refactor, an intractable bug, intricate algorithm work — or simply work you assess as beyond your comfortable ability), hand the implementation to it via `escalate(task)`. It gets WRITE access and does the work itself; you review its report (read the changed files, run the tests). You are free to escalate early or late — your judgment; the cost is one expert model run, comparable to doing it yourself. Contrast with `consult_start` (parallel READ-ONLY opinions for judgment calls).
 
-   判定顺序：先自己试 → 反复失败 → 会诊（要判断）/ 飞刀（要人干）分流。
+   设计理由：会诊是 N 模型并行（贵，边界要紧）；飞刀是单模型（成本与主 agent 自跑一轮相当），省着用的理由弱——裁量权交给模型（§1.4）。
 2. **机制化挂钩**——verify 耗尽提醒与 stall 检测的追加语扩展：
    - verify 耗尽："…consider `consult_start` for independent diagnoses or `escalate` to hand the work to a stronger model."（仅候选池非空时追加 escalate 半句）
    - stall 检测同款
