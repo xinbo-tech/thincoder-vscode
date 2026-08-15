@@ -195,15 +195,10 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     const overlay = { explore: _EXPLORE, coder: _CODER, plan: _PLAN, "eng-coder": _ENG_CODER }[role] || ""
     base = overlay ? `${overlay}\n\n${base}` : base
   }
-  // Local time + timezone: every agent (main, subagent, consult) must know "now" — otherwise
-  // "today"/"just now"/"recent" in user messages and search freshness are ungrounded.
-  // MINUTE precision, deliberately: system prompts must stay byte-identical across runs
-  // within the same minute or provider prefix caches (DeepSeek cache_hit) never hit.
-  const now = new Date()
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local"
-  const hm = (d) => String(d).padStart(2, "0")
-  const timeStr = `${now.getFullYear()}-${hm(now.getMonth() + 1)}-${hm(now.getDate())} ${hm(now.getHours())}:${hm(now.getMinutes())}`
-  const systemPrompt = `${base}${depth === 0 && !engPromptActive ? `\n\n${MAIN_OVERLAY}` : ""}\n\nCurrent time: ${timeStr} (${timeZone}). OS: ${platform}. Working directory: ${cwd}.`
+  // Time injection deliberately does NOT live here: system prompts must be byte-identical
+  // across runs (provider prefix caches). The time rides a transient user reminder pushed
+  // at each turn start (below) — variable content belongs in the history, not the cached prefix.
+  const systemPrompt = `${base}${depth === 0 && !engPromptActive ? `\n\n${MAIN_OVERLAY}` : ""}\n\nOS: ${platform}. Working directory: ${cwd}.`
 
   // Dual-line history. Top-level runs use PERSISTENT lines passed in via opts (survive across calls,
   // written to the session file by chat-panel): history = machine context (compaction shrinks it),
@@ -218,6 +213,15 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   // keep those aliases live so the ported modules work unchanged.
   agent.cwd = cwd
   agent.history = history
+
+  // Per-run time grounding (transient — variable content must NOT live in the system
+  // prompt or provider prefix caches break). Fresh local time at every run start, dropped
+  // on persist; subagents get it too (they are short-lived, seconds precision is fine here).
+  history.push({
+    role: "user",
+    content: `[System reminder: current time is ${new Date().toLocaleString("sv-SE")} (local; timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone || "local"}).]`,
+    transient: true,
+  })
 
   // ─── Context injection (top-level only, fresh machine line only) ────
   // These machine-only injections are transient context; a persistent machine line already carries
