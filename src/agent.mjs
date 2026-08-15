@@ -32,13 +32,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const SYSTEM_PROMPT = readFileSync(join(__dirname, "prompts", "system.md"), "utf8")
 const DISCIPLINE_RULES = readFileSync(join(__dirname, "prompts", "discipline.md"), "utf8")
 const MAIN_OVERLAY = readFileSync(join(__dirname, "prompts", "main.md"), "utf8")
-let _EXPLORE, _CODER, _PLAN, _ENG_CODER, _ENG_MAIN, _ENG_SUB, _CONSULT
+let _EXPLORE, _CODER, _PLAN, _ENG_CODER, _ENG_MAIN, _ENG_SUB, _CONSULT_BASE
 try { _EXPLORE = readFileSync(join(__dirname, "prompts", "explore.md"), "utf8") } catch { _EXPLORE = "" }
 try { _CODER = readFileSync(join(__dirname, "prompts", "coder.md"), "utf8") } catch { _CODER = "" }
 try { _PLAN = readFileSync(join(__dirname, "prompts", "plan.md"), "utf8") } catch { _PLAN = "" }
 try { _ENG_CODER = readFileSync(join(__dirname, "prompts", "eng-coder.md"), "utf8") } catch { _ENG_CODER = "" }
 try { _ENG_MAIN = readFileSync(join(__dirname, "prompts", "engineering.md"), "utf8") } catch { _ENG_MAIN = "" }
-try { _CONSULT = readFileSync(join(__dirname, "prompts", "consult.md"), "utf8") } catch { _CONSULT = "" }
+try { _CONSULT_BASE = readFileSync(join(__dirname, "prompts", "consult-base.md"), "utf8") } catch { _CONSULT_BASE = "" }
 try { _ENG_SUB = readFileSync(join(__dirname, "prompts", "engineering-sub.md"), "utf8") } catch { _ENG_SUB = "" }
 
 /** AUTO mode reminder (CLI parity, agent.mjs:48 — same wording, byte-identical). */
@@ -95,10 +95,14 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     } catch { /* expansion failure is non-fatal — the model just lacks MCP tools this turn */ }
   }
 
-  // Subagent role-based tool filtering: explore/plan get read-only tools only
+  // Subagent role-based tool filtering: explore/plan/consult get read-only tools only.
+  // `question` is excluded from ALL subagents (depth > 0) — it's an interactive main-agent
+  // tool; a background subagent (parallel consultants especially) must never prompt the user.
   const isReadOnlyRole = depth > 0 && (role === "explore" || role === "plan" || role === "consult")
+  const baseTools = (isReadOnlyRole ? builtinTools.filter((t) => t.readonly) : builtinTools)
+    .filter((t) => depth === 0 || t.name !== "question")
   const tools = [
-    ...(isReadOnlyRole ? builtinTools.filter((t) => t.readonly) : builtinTools),
+    ...baseTools,
     ...(specForModel(provider.model).multimodal ? [readImageTool] : []),
     ...agentTools,
     ...mcpTools,
@@ -175,16 +179,16 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   // engineering.md (or engineering-sub.md for eng-coder) + project METHODOLOGY.md (CLI parity).
   const engPromptActive = engineering && (depth === 0 || role === "eng-coder")
   const engResult = engPromptActive ? loadEngineeringPrompt(cwd, role) : null
-  // consult children: bare system prompt + consult.md overlay — the coding discipline block
-  // is irrelevant to a read-only diagnosis and explore.md's persona would CONFLICT with the
-  // consultant persona (meta-review D8/D13).
+  // consult children: a lean, purpose-built base prompt (consult-base.md) — NOT the full
+  // main-agent system.md (whose coding-agent persona, checklist/task/verify workflows, and
+  // tool references conflict with a read-only diagnosis and cost tokens every turn).
   let base = role === "consult"
-    ? SYSTEM_PROMPT
+    ? _CONSULT_BASE
     : engPromptActive
       ? (engResult.prompt ? `${SYSTEM_PROMPT}\n\n${engResult.prompt}` : SYSTEM_PROMPT)
       : `${SYSTEM_PROMPT}\n\n${DISCIPLINE_RULES}`
   if (depth > 0 && role) {
-    const overlay = { explore: _EXPLORE, coder: _CODER, plan: _PLAN, "eng-coder": _ENG_CODER, consult: _CONSULT }[role] || ""
+    const overlay = { explore: _EXPLORE, coder: _CODER, plan: _PLAN, "eng-coder": _ENG_CODER }[role] || ""
     base = overlay ? `${overlay}\n\n${base}` : base
   }
   // Local time + timezone: every agent (main, subagent, consult) must know "now" — otherwise

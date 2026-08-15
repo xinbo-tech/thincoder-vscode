@@ -9,16 +9,7 @@
  * fresh agent per turn, so sessions are naturally turn-bound; runAgent's finally
  * aborts leftovers.
  */
-import { readFileSync } from "node:fs"
-import { join, dirname } from "node:path"
-import { fileURLToPath } from "node:url"
 import { buildProvider } from "../extension/presets.mjs"
-
-const PROMPT_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "prompts", "consult.md")
-
-function loadConsultPrompt() {
-  try { return readFileSync(PROMPT_PATH, "utf8").trim() } catch { return "" }
-}
 
 /** Read-only tool injected into consultation children (via runAgent opts.extraTools).
  *  Lets the consultant pull the main agent's conversation history on demand —
@@ -102,7 +93,7 @@ function settleChild(ctx, session, id, label, ok, payload) {
   wakeWaiters(session)
 }
 
-async function runConsultChild(ctx, session, id, m, problem, consultPrompt, ctrl) {
+async function runConsultChild(ctx, session, id, m, problem, ctrl) {
   // Wall-clock ceiling: turn limits count LLM responses, not wall time — a child stuck in
   // a slow tool/provider must not hold consult_check for hours (design review D2).
   const timeoutMs = ctx.agent?.config?.agent?.consultTimeoutMs ?? 300_000
@@ -117,7 +108,7 @@ async function runConsultChild(ctx, session, id, m, problem, consultPrompt, ctrl
     const withEffort = m.effort ? { ...provider, reasoningEffort: m.effort } : provider
     const runner = ctx.runAgent ?? (await import("../agent.mjs")).runAgent
     const result = await runner({ ...withEffort, model: m.model }, ctx.cwd, "# Problem\n" + problem, {}, ctrl.signal, true, {
-      // role "consult": own overlay (consult.md, no explore-persona conflict), read-only tools.
+      // role "consult": lean consult-base.md system prompt, read-only tools, small turn budget.
       // Consultations are diagnosis tasks — 40 tool turns is enough to read the relevant files
       // (15 was too tight: consultants died mid-file-read at "reached max turns").
       depth: 1, role: "consult",
@@ -177,7 +168,6 @@ export const consultStartTool = {
     }
     agent._consultSessions.set(id, session)
 
-    const consultPrompt = loadConsultPrompt() // kept for backward-compat arg; overlay now carries it
     for (const m of models) {
       session.pending++
       const ctrl = new AbortController()
@@ -189,7 +179,7 @@ export const consultStartTool = {
       const label = consultLabel(m)
       ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "started", startedAt: Date.now() })
       // Fire and forget — each child settles itself into the session queue.
-      runConsultChild(ctx, session, id, m, problem, consultPrompt, ctrl)
+      runConsultChild(ctx, session, id, m, problem, ctrl)
     }
     return JSON.stringify({ id, models: session.models })
   },
@@ -202,6 +192,7 @@ export const consultCheckTool = {
     "Read the NEXT consultation reply (whichever model answered first). Blocks until a reply arrives or all models " +
     "have settled. The reply is raw and unjudged — verify/adopt it with your own tools. When done is true, no more " +
     "replies are coming.\n" +
+    "Call it ALONE in a turn — do NOT batch it with calls that depend on its reply (readonly tools run in parallel).\n" +
     "Parameters:\n" +
     "- id (required): the consult id from consult_start",
   parameters: {
