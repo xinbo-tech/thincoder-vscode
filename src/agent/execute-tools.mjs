@@ -240,9 +240,12 @@ export async function executeToolBatches(agent, { response, history, fullHistory
         if (recentSigs.length >= STALL_THRESHOLD) {
           const tail = recentSigs.slice(-STALL_THRESHOLD)
           if (tail[0] === tail[1] && tail[1] === tail[2]) {
+            const consultHint = agent?.config?.agent?.consultModels?.length
+              ? " Consider consult_start for independent parallel diagnoses."
+              : ""
             history.push({
               role: "user",
-              content: `[System reminder: identical call (${sig.slice(0, 100)}) 3× in a row — you may be stuck. Change approach.]`,
+              content: `[System reminder: identical call (${sig.slice(0, 100)}) 3× in a row — you may be stuck. Change approach.${consultHint}]`,
             })
             recentSigs.length = 0
           }

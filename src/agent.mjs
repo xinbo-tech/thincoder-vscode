@@ -446,9 +446,12 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           if (!agent._honestReminderInjected) {
             agent._honestReminderInjected = true
             pushReal(history, fullHistory, { role: "assistant", content: response.content })
+            const consultHint = agent?.config?.agent?.consultModels?.length
+              ? " If you suspect the root-cause hypothesis itself may be wrong, consider consult_start for independent diagnoses before more retries."
+              : ""
             history.push({
               role: "user",
-              content: `[System reminder: ${MAX_VERIFY_RETRIES} verify attempts exhausted and tests are still failing. In your response to the user, you MUST state explicitly: (1) what tests are still failing, (2) what you tried, (3) what you believe the root cause is. Do not present this as complete — the user needs to know the work is unfinished.]`,
+              content: `[System reminder: ${MAX_VERIFY_RETRIES} verify attempts exhausted and tests are still failing. In your response to the user, you MUST state explicitly: (1) what tests are still failing, (2) what you tried, (3) what you believe the root cause is. Do not present this as complete — the user needs to know the work is unfinished.${consultHint}]`,
             })
             continue
           }
