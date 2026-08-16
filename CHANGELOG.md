@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.29] — 2026-08-16
+
+### Fixed
+
+- **Stop 卡顿（渲染积压）** — 思考中长按 Stop 停不下来：reasoning/token 每来一个 chunk 就全文 markdown 重渲染 + DOM 重建 + 强制布局，O(n²) 累积淹没 webview 主线程，Stop 点击事件排在积压渲染后。改为 rAF 节流——token 到达只做 O(1) 字符串追加，每帧最多渲染一次，主线程始终留有空闲响应 Stop；finish 时同步 flush 最后一帧不丢
+- **advisor/subagent 滚动也纳入节流** — 活动流内容本就是增量追加，但每 chunk 的 scrollTop=scrollHeight 强制布局一并折入 rAF
+- **consult/escalate effort 枚举钳制** — 越界 effort 改为丢弃（而非保留 preset 默认残留），对齐 CLI 0.12.32+；qwen3.8-max 等越界候选不再"起飞即死"
+
 ## [0.1.28] — 2026-08-16
 
 ### Fixed
