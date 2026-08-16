@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.27] — 2026-08-16
+
+### New
+
+- **Plan-mode toolbar toggle (PLAN button)** — parity with AUTO/ADVISOR/ENG quick switches. Plan mode is now session-level persistent (stored in the slot like autoApprove), not turn-scoped; the button and the model's own plan tool stay in sync across turns
+
+### Prompt system
+
+- **Attention optimization + cross-end consistency**: split over-long sentences in main.md / discipline.md / advisor-round1/2/3; fixed an escalate-timing contradiction (up-front ability judgment, not post-failure); unified Review discipline + advisor rounds across both ends — all 15 prompt files now byte-identical with the CLI
+- consult_start + main.md carry the 会诊 Chinese alias (parity with the 飞刀 alias)
+
 ## [0.1.26] — 2026-08-16
 
 ### Fixed
