@@ -2,8 +2,5 @@ node_modules/
 *.vsix
 
 .thincoder/tmp/
-# Agent-runtime working files (checklist archives) — project memory/skills stay tracked
-.thincoder/checklist.md
-.thincoder/checklist-done.md
 # Temporary icon candidate assets
 assets/candidates/
