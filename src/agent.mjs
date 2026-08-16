@@ -53,6 +53,23 @@ export const ENG_ON_REMINDER =
   "subagents only. Advisor calls are NOT per-turn-mandatory — call only at " +
   "flow nodes or when the user asks.]"
 
+/**
+ * Decorate a consult-related tool's description with the CURRENT configured candidate
+ * pool (provider:model list). Without this the model cannot know which models a consult
+ * or escalate call can pick from — it would hallucinate provider:model names or never
+ * pass `model`. The tool table is assembled per-run from loadRaw(), so the list stays
+ * fresh. Description-only: the tool object is cloned shallowly, execute untouched.
+ */
+function withPool(tool) {
+  const models = loadRaw().agent?.consultModels ?? []
+  const list = models.map((m) => `${m.provider}:${m.model}${m.effort ? ` (${m.effort})` : ""}`).join(", ")
+  if (!list) return tool
+  return {
+    ...tool,
+    description: tool.description + `\nCurrently configured consultants (this tool's pool): ${list}`,
+  }
+}
+
 /** Typed error for turn-limit exhaustion — consumers can detect and offer "Continue?" prompt */
 export class ContinueError extends Error {
   constructor(turns) { super(`Agent reached max turns (${turns}).`); this.turns = turns }
@@ -77,10 +94,9 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool, advisorTool, engTool,
       // consult tools registered only when configured — an unconfigured model would otherwise
       // see the tool, call it, and eat an error turn (prompt-system review 2026-08-15).
-      ...(loadRaw().agent?.consultModels?.length ? [consultStartTool, consultCheckTool, consultStopTool] : []),
-      // escalate (飞刀) registered whenever consultations are — every consult model is a
-      // surgeon candidate (hook removed 2026-08-16, fewer knobs)
-      ...(loadRaw().agent?.consultModels?.length ? [escalateTool] : [])]
+      ...(loadRaw().agent?.consultModels?.length
+        ? [withPool(consultStartTool), consultCheckTool, consultStopTool, withPool(escalateTool)]
+        : [])]
     : role === "eng-coder"
       ? [taskTool, recentChangesTool, planTool, timerTool, advisorTool, verifyTool] // eng-coder: design review + verify gates
       : [taskTool, recentChangesTool] // subagents get fewer meta-tools
