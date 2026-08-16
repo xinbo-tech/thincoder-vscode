@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.25] — 2026-08-16
+
+### Terminology unification (user decision: one word for one thing)
+
+- **"surgeon" removed — everything is "escalate"**: the tool name and the spawned sub-agent's role were two words for one thing (escalate / 飞刀 / surgeon), and models confused them — kimi's first real run looked for a "surgeon" tool (it was a role, not a tool) and fell back to ad-hoc code; a main agent imported the escalate module instead of calling it. Now: role "surgeon" → "escalate", report/panel labels unified, ESCALATE.md glossary rewritten (escalate = the only technical name; 飞刀 = Chinese alias)
+
+### Fixed
+
+- **Coder sub-agents (subagent + escalate) get verify + advisor** — their system prompt names both tools but the tool table only gave them to depth-0 and eng-coder; the escalate surgeon hit "unknown tool verify" and self-verified via bash node --check/npm test. Diagnosed by a real deepseek escalate run
+- **Consult cards showed FAILED (red) after user Stop** — read as "stop didn't work". cleanupConsultSessions now marks stopped before aborting so children settle as TERMINATED (clean grey), not FAILED
+- Escalate description + main.md: direct-call guard (call the tool, never script the module)
+
 ## [0.1.24] — 2026-08-16
 
 ### Cache-hit-rate fixes (user-reported low hit rate, both reports diagnosed via consultation)
