@@ -1,6 +1,6 @@
 # 会诊机制（Consultation）— 需求与设计
 
-> 状态：设计草案 v4（08-14 按二轮 advisor 评审整改 🔴 活性缺口：pending 计数 + done 判定 + 超时边界 + 边界语义 + 只读隔离/全失败测试）。
+> 状态：**已实施并实战验证**（08-15 元会诊三批整改 + 真实三模型会诊回归通过；面板完整过程显示/自动折叠已随 0.1.23 发布）。历史修订见 §4 整改表。
 > 一句话：可配置多模型并行会诊，主 agent 逐个读回复、自行判断与验证，觉得够了就早停其余。
 
 ---
@@ -124,7 +124,7 @@ consult_stop
 - **terminated 语义**（2026-08-15 元会诊 D1 修正）：`session.stopped` 为真后被 abort 的子任务计 `terminated++`、**不入 replies 队列**——主 agent 早停后无需 drain 假失败 note（原实现把 abort 当 failed 入队，曾由测试固化该错误行为）。
 - `done = 回复队列空 AND pending == 0`——**不依赖"所有模型都回复"**，失败的模型也 settle，所以全失败时 `done` 仍能成立，`consult_check` 不会挂死（🔴 评审整改）。
 - `consult_check(id)`：回复队列非空 → 弹下一个；否则 `pending == 0` → 返回 `{ done:true }`；否则挂起在 waiter 上等下一个 settle。同时监听 turn signal——用户 Stop 时 abort 全部子任务并返回 `{ done:true, stopped:true }`。**停滞检测豁免**：execute-tools 的 3× 同签名 stall 检测跳过 consult_check（连续 check 是设计用法，不是卡死）。
-- **超时边界**（2026-08-15 元会诊 D2 修正）：双保险——①turn 上限 `agent.consultTurns`（默认 15，诊断任务足够；原复用 subagentTurns=100 是成本敞口）；②**墙钟看门狗** `agent.consultTimeoutMs`（默认 300_000 = 5 分钟）——turn 上限只数 LLM 响应次数，不管卡在慢工具/慢 provider 里的墙钟时间。
+- **超时边界**（2026-08-15 元会诊 D2 修正，数值后经实测再调）：双保险——①turn 上限 `agent.consultTurns`（默认 **40**——初设 15 导致会诊子 agent 读文件途中撞墙，实测后调 40，§4 记录）；②**墙钟看门狗** `agent.consultTimeoutMs`（默认 **600_000 = 10 分钟**——初设 5 分钟对 high-effort 模型偏紧，用户拍板调 10 分钟）——turn 上限只数 LLM 响应次数，不管卡在慢工具/慢 provider 里的墙钟时间。
 - turn 结束（runAgent finally）→ 遍历 `agent._consultSessions`，abort 所有未完成的 controller、唤醒 waiters、清空 Map。已知边界：Ctrl+I 中断恢复会终止进行中的会诊（新 turn 新 agent 对象）——元会诊 D3，修复方案（跨 resume 的 consultSlot）记录在案未实施。
 
 **面板状态回调**：`onConsult({ id, model, status })`，`status ∈ started | answered | terminated | failed`（复用 subagent 面板通道）。
@@ -191,11 +191,11 @@ consult_stop
 | 批次 | 缺陷 | 修复 |
 |---|---|---|
 | 1 契约 | consult_stop 后 abort 当 failed 入队（假失败回复） | terminated 计数、不入队（D1） |
-| 1 契约 | 无墙钟超时（100 turn × 10min 可拖数小时） | 子任务看门狗 consultTimeoutMs=5min（D2） |
+| 1 契约 | 无墙钟超时（100 turn × 10min 可拖数小时） | 子任务看门狗 consultTimeoutMs=5min（D2；后按用户要求调 10min） |
 | 1 契约 | 连续 consult_check 触发停滞误报 | stall 检测豁免 consult_check（D4） |
 | 1 面板 | 模型名丢失、answered 显示红色、终态不清理 | 存 model、三态颜色+i18n、autoClean 纳入终态（D9） |
 | 2 成本 | explore.md + consult.md 双人格冲突 | 独立 role "consult"，consult.md 作 overlay（D8） |
-| 2 成本 | 复用 subagentTurns=100 | consultTurns=15 |
+| 2 成本 | 复用 subagentTurns=100 | consultTurns=15（后实测撞墙，调 40） |
 | 2 成本 | effort 默认回落最高档（max） | 官方默认档优先、回落最低档 |
 | 2 成本 | main_history：base64 炸弹/null 渲染/无上限 | 图片省略、tool_calls 显形、60KB 预算（D5） |
 | 3 引导 | 想不起来用 | stall/verify 提醒挂钩 + main.md 引导（D7；边界条款后按用户决定放开为自由裁量——何时会诊是模型的判断，成本权衡写在条款里由模型自己称量） |

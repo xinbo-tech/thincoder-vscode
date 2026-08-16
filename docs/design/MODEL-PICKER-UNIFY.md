@@ -1,6 +1,6 @@
 # 模型选择统一 + 会诊/Advisor 思考强度 — 设计
 
-> 状态：**设计定稿，待实施**（2026-08-14 用户拍板：悬停菜单复用、不加搜索、会诊与 Advisor 必须有强度档）。
+> 状态：**已实施**（0.1.19 统一模型 picker overlay 重构；会诊/Advisor effort 档、会诊读写链随 0.1.19 发布；effort 默认档 0.1.22 起按官方默认或最低档）。
 > 关联：CONSULTATION.md（会诊）、SETTINGS-PANEL-2.md §3（Agent 设置卡）。
 
 ---

@@ -1,6 +1,6 @@
 # 配置界面重组 — 设计（会诊产物）
 
-> 状态：**设计定稿，待实施**。来源：2026-08-15 三模型会诊（DeepSeek V4 Pro + Kimi K3 到场；GLM 因端点余额 429 缺席）。
+> 状态：**已实施**（2026-08-15，commit 8c87fdf；0.1.20 随版发布）。来源：2026-08-15 三模型会诊（DeepSeek V4 Pro + Kimi K3 到场；GLM 因端点余额 429 缺席）。
 > 前置：五个活性 bug 已修（b0d3a57：Shell 死卡、proxy 全局绑定、light push 洗 shell、✕ 误伤 Advisor、proxy 勾选回退）。
 
 ---
