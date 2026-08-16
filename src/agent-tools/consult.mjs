@@ -163,6 +163,7 @@ export const consultStartTool = {
   sideEffectExempt: true,
   description:
     "Start a parallel multi-model consultation (会诊) for a hard problem you are stuck on (repeated failures, no headway). " +
+    "Call it directly when the user asks for 会诊 / consult — an explicit user request applies even if you are not 'stuck'. " +
     "Several configured models (agent.consultModels) analyze the same problem INDEPENDENTLY and in parallel. " +
     "Non-blocking: returns immediately with a consult id. Then call consult_check(id) to read each reply as it " +
     "arrives, judge/verify it yourself with your own tools, and call consult_stop(id) once a reply is good enough.\n" +
