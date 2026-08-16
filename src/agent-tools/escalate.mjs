@@ -12,6 +12,7 @@
 import { isAbsolute, relative } from "node:path"
 import { buildProvider } from "../extension/presets.mjs"
 import { mergeChildMutations } from "./subagent.mjs"
+import { specForModel } from "../specs.mjs"
 
 const label = (m) => `${m.provider}:${m.model}`
 
@@ -84,7 +85,19 @@ export const escalateTool = {
     if (!provider.apiKey?.trim()) {
       return `Error: provider "${pick.provider}" has no API key — set it in Settings (or THINCODER_API_KEY) before flying it in`
     }
-    const withEffort = pick.effort ? { ...provider, reasoningEffort: pick.effort } : provider
+    let effortNote = ""
+    const withEffort = pick.effort
+      ? (() => {
+          // Clamp the pool's effort to the model's reasoningEffortEnum — an out-of-enum
+          // value makes provider/core throw on EVERY chat call (candidate dies on takeoff).
+          const enumList = specForModel(pick.model).reasoningEffortEnum
+          if (enumList && !enumList.includes(pick.effort)) {
+            effortNote = ` (effort "${pick.effort}" unsupported by ${pick.model}, using preset default)`
+            return provider
+          }
+          return { ...provider, reasoningEffort: pick.effort }
+        })()
+      : provider
     const agentMod = await import("../agent.mjs")
     const runner = ctx.runAgent ?? agentMod.runAgent
 
@@ -93,65 +106,69 @@ export const escalateTool = {
     const tag = label(pick)
     ctx.callbacks?.onSubagent?.({ id: subId, role: "escalate", status: "started", startedAt: Date.now(), model: tag })
 
-    // Wall-clock ceiling (consult.mjs runConsultChild parity): turn limits count LLM
-    // responses, not wall time — an escalate stuck in a slow tool/provider must not
-    // hold the parent forever. Independent controller cascaded with the user's Stop.
-    const timeoutMs = parent?.config?.agent?.consultTimeoutMs ?? 600_000
-    let timedOut = false // watchdog kills settle as TIMEOUT, not a provider failure
-    const ctrl = new AbortController()
-    const watchdog = setTimeout(() => {
-      timedOut = true
-      try { ctrl.abort() } catch { /* already settled */ }
-    }, timeoutMs)
-    if (ctx.signal) {
-      if (ctx.signal.aborted) ctrl.abort()
-      else ctx.signal.addEventListener("abort", () => ctrl.abort(), { once: true })
-    }
-
     let output = ""
     const sink = {}
     const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:escalate ${tag}`, chunk)
-    try {
-      const report = await runner({ ...withEffort, model: pick.model }, ctx.cwd, task, {
-        // Full reasoning + output stream (consult-UI parity): a long surgery is silent
-        // without it — the panel shows WHAT the expert is thinking, not just tool calls.
-        onToken: (t) => { output += t; panel({ kind: "text", text: String(t ?? "") }) },
-        onReasoning: (r) => panel({ kind: "think", text: String(r ?? "") }),
-        onToolCall: (name, args) => panel({ kind: "tool", text: name + " " + (JSON.stringify(args) || "").slice(0, 120) }),
-        onToolResult: (name, text) => panel({ kind: "tool", text: "→ " + String(text ?? "").slice(0, 80).replace(/\n/g, " ") }),
-        onComplete: () => {},
-        onQuestion: ctx.callbacks?.onQuestion ?? null,
-      }, ctrl.signal, true, {
-        depth: 1, role: "coder", // full write path: permission gate, recent-changes tracking
-        streamOutput: true, // exempt from the agent.mjs onToken depth gate (consult role parity)
-        maxTurns: parent.config?.agent?.subagentTurns ?? 100,
-        stateSink: sink,
-      })
-      // Escalate mutations are the parent's mutations: verify/advisor guards must see them
-      mergeChildMutations(parent, sink)
-      ctx.callbacks?.onSubagent?.({ id: subId, role: "escalate", status: "done", model: tag })
-      return `escalate (${tag}) post-op report:\n${report || output.slice(0, 4000)}${touchedFilesNote(sink, ctx.cwd)}`
-    } catch (e) {
-      // Even a failed surgery may have written files — merge whatever the child touched.
-      mergeChildMutations(parent, sink)
-      const msg = e?.message ?? String(e)
-      ctx.callbacks?.onSubagent?.({ id: subId, role: "escalate", status: "error", error: msg, model: tag })
-      // User Stop must propagate (execute-tools.mjs rethrows AbortError — swallowing
-      // it keeps the parent running after the user asked to stop). The watchdog's own
-      // abort is NOT a user stop: it settles below as a timeout report.
-      if (ctx.signal?.aborted || (!timedOut && e?.name === "AbortError")) throw e
-      // Turn-cap exhaustion is not a crash: the escalate may be nearly done — the
-      // parent must review what landed instead of blind-retrying.
-      if (e instanceof agentMod.ContinueError) {
-        return `escalate (${tag}) stopped: turn cap reached (${e.turns} turns) — work may be partial; review recent_changes before deciding next steps.\nPartial output: ${output.slice(0, 2000)}${touchedFilesNote(sink, ctx.cwd)}`
+
+    // No wall-clock watchdog — turn cap only (CLI parity, 2026-08-16): a fixed wall-clock
+    // aborts NORMAL-but-slow surgery (two max-effort consultants hit a 10min wall just
+    // READING files). Hang protection = FETCH_TIMEOUT (per LLM call) + user Stop (signal
+    // propagates directly). Turn-cap continue reuses the panel's onQuestion channel —
+    // the SAME y/n card the main agent's question tool uses; MAX_RESUMES caps continues.
+    const MAX_RESUMES = 2
+    const runOpts = (resume) => ({
+      depth: 1, role: "coder", // full write path: permission gate, recent-changes tracking
+      streamOutput: true, // exempt from the agent.mjs onToken depth gate (consult role parity)
+      maxTurns: parent.config?.agent?.subagentTurns ?? 100,
+      stateSink: sink,
+      resume,
+      // Resume hands the child its own conversation back — subagent history is otherwise
+      // throwaway per runAgent call (agent.mjs). sink.history is the LIVE array reference.
+      ...(resume ? { history: sink.history } : {}),
+    })
+    for (let resumes = 0; ; resumes++) {
+      try {
+        const report = await runner({ ...withEffort, model: pick.model }, ctx.cwd, task, {
+          // Full reasoning + output stream (consult-UI parity): a long surgery is silent
+          // without it — the panel shows WHAT the expert is thinking, not just tool calls.
+          onToken: (t) => { output += t; panel({ kind: "text", text: String(t ?? "") }) },
+          onReasoning: (r) => panel({ kind: "think", text: String(r ?? "") }),
+          onToolCall: (name, args) => panel({ kind: "tool", text: name + " " + (JSON.stringify(args) || "").slice(0, 120) }),
+          onToolResult: (name, text) => panel({ kind: "tool", text: "→ " + String(text ?? "").slice(0, 80).replace(/\n/g, " ") }),
+          onComplete: () => {},
+          onQuestion: ctx.callbacks?.onQuestion ?? null,
+        }, ctx.signal ?? null, true, runOpts(resumes > 0))
+        // Escalate mutations are the parent's mutations: verify/advisor guards must see them
+        mergeChildMutations(parent, sink)
+        ctx.callbacks?.onSubagent?.({ id: subId, role: "escalate", status: "done", model: tag })
+        return `escalate (${tag})${effortNote} post-op report:\n${report || output.slice(0, 4000)}${touchedFilesNote(sink, ctx.cwd)}`
+      } catch (e) {
+        // Even a failed surgery may have written files — merge whatever the child touched.
+        mergeChildMutations(parent, sink)
+        const msg = e?.message ?? String(e)
+        // User Stop must propagate (execute-tools.mjs rethrows AbortError — swallowing
+        // it keeps the parent running after the user asked to stop).
+        if (ctx.signal?.aborted || e?.name === "AbortError") {
+          ctx.callbacks?.onSubagent?.({ id: subId, role: "escalate", status: "error", error: msg, model: tag })
+          throw e
+        }
+        // Turn-cap exhaustion is not a crash: offer to continue from the current context
+        // (main-agent panel-chat parity — "reached N turns. Continue?"), resuming with
+        // resume:true + the child's own history. No onQuestion (headless) or declined →
+        // partial-work return; MAX_RESUMES caps continues so a stuck child cannot loop.
+        if (e instanceof agentMod.ContinueError) {
+          if (resumes < MAX_RESUMES && ctx.callbacks?.onQuestion) {
+            const go = await ctx.callbacks.onQuestion(
+              `飞刀 ${tag} reached ${e.turns} turns (limit). Continue from here?`,
+              ["Continue", "Stop"],
+            )
+            if (go === "Continue") continue
+          }
+          return `escalate (${tag}) stopped: turn cap reached (${e.turns} turns) — work may be partial; review recent_changes before deciding next steps.\nPartial output: ${output.slice(0, 2000)}${touchedFilesNote(sink, ctx.cwd)}`
+        }
+        ctx.callbacks?.onSubagent?.({ id: subId, role: "escalate", status: "error", error: msg, model: tag })
+        return `escalate (${tag}) error: ${msg}\nPartial output: ${output.slice(0, 2000)}${touchedFilesNote(sink, ctx.cwd)}`
       }
-      // Timeout reads as timeout — "error: Aborted" would read as a provider crash.
-      const note = timedOut
-        ? `timed out after ${Math.round(timeoutMs / 60000)}min (agent.consultTimeoutMs)`
-        : msg
-      return `escalate (${tag}) error: ${note}\nPartial output: ${output.slice(0, 2000)}${touchedFilesNote(sink, ctx.cwd)}`
-    } finally {
-      clearTimeout(watchdog)
     }
   },
 }

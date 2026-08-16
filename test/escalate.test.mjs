@@ -162,15 +162,77 @@ describe("escalate (飞刀)", () => {
       assert.ok(r.includes("kimi"), "names the provider")
     })
 
-    it("wall-clock watchdog: a stuck escalate settles as a timeout, not a hang or a crash", async () => {
+    it("no wall-clock watchdog: parent signal passes through directly (CLI parity)", async () => {
       const agent = makeAgent(CONSULTS)
-      agent.config.agent.consultTimeoutMs = 50
+      const ctrl = new AbortController()
+      let seenSignal = null
       const runner = (provider, cwd, task, callbacks, signal) => new Promise((_, reject) => {
-        signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
+        seenSignal = signal
+        signal?.addEventListener?.("abort", () => reject(new DOMException("Aborted", "AbortError")))
       })
-      const r = String(await escalateTool.execute({ task: "x" }, makeCtx(agent, runner)))
-      assert.ok(r.includes("timed out"), "timeout wording, got: " + r.slice(0, 120))
-      assert.ok(!r.includes("error: Aborted"), "the watchdog abort is not misreported as a provider crash")
+      const ctx = { ...makeCtx(agent, runner), signal: ctrl.signal }
+      const pending = escalateTool.execute({ task: "x" }, ctx)
+      await new Promise((r) => setTimeout(r, 20))
+      assert.equal(seenSignal, ctrl.signal, "child receives the parent signal directly (no intermediate controller)")
+      ctrl.abort()
+      await assert.rejects(pending, (e) => e.name === "AbortError", "user Stop propagates as AbortError")
+    })
+
+    it("turn-cap continue: user picks Continue → child resumes with its own history", async () => {
+      const agent = makeAgent(CONSULTS)
+      const { ContinueError } = await import("../src/agent.mjs")
+      let calls = 0
+      let asked = null
+      let firstHistory = null
+      const runner = async (provider, cwd, task, callbacks, signal, autoApprove, opts) => {
+        calls++
+        // Fake runAgent parity: runAgent sets opts.stateSink.history to the live child
+        // history array (agent.mjs) — the fake must do the same or resume has nothing.
+        opts.stateSink.history = [{ role: "user", content: "task was pushed here" }]
+        if (calls === 1) { firstHistory = opts.stateSink.history; throw new ContinueError(100) }
+        assert.ok(opts?.resume, "second run is a resume")
+        assert.equal(opts?.history, firstHistory, "the SAME child history array is handed back")
+        return "done after resume"
+      }
+      const ctx = makeCtx(agent, runner)
+      ctx.callbacks = { onQuestion: async (q, options) => { asked = { q, options }; return "Continue" } }
+      const r = String(await escalateTool.execute({ task: "x" }, ctx))
+      assert.equal(calls, 2, "two runs")
+      assert.ok(asked.q.includes("100 turns"), "question names the turn count")
+      assert.deepEqual(asked.options, ["Continue", "Stop"], "y/n options")
+      assert.ok(r.includes("done after resume"), "post-op report after resume")
+    })
+
+    it("turn-cap continue: user picks Stop (or no onQuestion) → partial work return", async () => {
+      const agent = makeAgent(CONSULTS)
+      const { ContinueError } = await import("../src/agent.mjs")
+      let calls = 0
+      const runner = async () => { calls++; throw new ContinueError(100) }
+      // Stop:
+      const ctxStop = makeCtx(agent, runner)
+      ctxStop.callbacks = { onQuestion: async () => "Stop" }
+      const r1 = String(await escalateTool.execute({ task: "x" }, ctxStop))
+      assert.ok(r1.includes("stopped: turn cap reached"), "Stop → partial work")
+      assert.equal(calls, 1, "no resume after Stop")
+      // Headless (no onQuestion):
+      const ctxHeadless = makeCtx(agent, runner)
+      const r2 = String(await escalateTool.execute({ task: "x" }, ctxHeadless))
+      assert.ok(r2.includes("stopped: turn cap reached"), "headless → partial work")
+      assert.equal(calls, 2, "no resume without a question channel")
+    })
+
+    it("turn-cap continue: MAX_RESUMES caps continues at 2 (a third wall forces partial)", async () => {
+      const agent = makeAgent(CONSULTS)
+      const { ContinueError } = await import("../src/agent.mjs")
+      let calls = 0
+      let asks = 0
+      const runner = async () => { calls++; throw new ContinueError(100) }
+      const ctx = makeCtx(agent, runner)
+      ctx.callbacks = { onQuestion: async () => { asks++; return "Continue" } }
+      const r = String(await escalateTool.execute({ task: "x" }, ctx))
+      assert.equal(calls, 3, "three runs (2 resumes)")
+      assert.equal(asks, 2, "asked twice, then forced partial")
+      assert.ok(r.includes("stopped: turn cap reached"), "third wall → partial work")
     })
 
     it("escalate reasoning + output text stream into the panel (consult-UI parity)", async () => {

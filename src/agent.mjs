@@ -233,12 +233,20 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const fullHistory = depth === 0 ? (opts.fullHistory ?? (opts.fullHistory = [])) : []
   const history = depth === 0
     ? (opts.history ?? (opts.history = [...fullHistory]))
-    : []
+    // Subagents default to throwaway local history, but a caller that wants to
+    // CONTINUE a turn-cap-limited child (escalate resume) passes the previous run's
+    // history back in — the conversation survives across runAgent calls.
+    : (opts.history ?? [])
 
   // The advisor helpers (ported from the CLI) reach for agent.cwd and agent.history —
   // keep those aliases live so the ported modules work unchanged.
   agent.cwd = cwd
   agent.history = history
+
+  // Live history reference for the parent: same array the loop appends to — a caller
+  // that catches ContinueError can hand it back via opts.history to resume the child
+  // conversation (escalate turn-cap continue).
+  if (opts.stateSink) opts.stateSink.history = history
 
   // ─── Context injection (top-level only, fresh machine line only) ────
   // These machine-only injections are transient context; a persistent machine line already carries
