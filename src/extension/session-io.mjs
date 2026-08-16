@@ -230,6 +230,15 @@ export function setSlotAutoApprove(cwd, slot, value) {
   return true
 }
 
+/** Set the active slot's plan-mode flag (session-level, like autoApprove). */
+export function setSlotPlanMode(cwd, slot, value) {
+  const data = loadSlot(cwd, slot)
+  if (!data) return false
+  data.planMode = value
+  saveSessionToSlot(cwd, slot, data)
+  return true
+}
+
 
 /** Page size for lazy history loading (initial paint + scroll-back pages). */
 export const HISTORY_PAGE_SIZE = 50

@@ -200,6 +200,10 @@ export async function handlePanelMessage(panel, msg) {
       panel._pushSettingsLight()
       break
     }
+    case "setPlanMode": {
+      await panel._setPlanMode(!!msg.value)
+      break
+    }
     case "getShellCandidates": panel._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates(), current: loadRaw().shell ?? null }); break
     case "saveShellSettings": {
       saveShellSettingsFromPanel(msg.value)

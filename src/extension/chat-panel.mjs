@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { closeAllMcp, mcpConnectedToolCounts, mcpConnect, mcpDisconnectByName } from "../mcp.mjs"
-import { listSlots, loadSlot, saveSessionToSlot, setSlotAutoApprove, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, historyWindow } from "./session-io.mjs"
+import { listSlots, loadSlot, saveSessionToSlot, setSlotAutoApprove, setSlotPlanMode, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs, historyWindow } from "./session-io.mjs"
 import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, agentSettings, proxySettings, shellCandidates, websearchSettings } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { generateTitle } from "./generate-title.mjs"
@@ -204,6 +204,8 @@ export class ChatPanel {
     // toolbar button to the slot's autoApprove field on every session load/switch.
     this._autoApprove = this._activeData()?.autoApprove ?? false
     this._panel?.webview.postMessage({ type: "autoApprove", value: this._autoApprove })
+    // Plan mode is also session-level — sync the toolbar button + status badge on load/switch.
+    this._panel?.webview.postMessage({ type: "planMode", active: this._activeData()?.planMode ?? false })
     this._panel?.webview.postMessage({ type: "clearMessages" })
     // Lazy history: only the LAST page is sent on load; older pages arrive via
     // loadOlder (webview scroll-back). idx values are global history indexes.
@@ -329,6 +331,15 @@ export class ChatPanel {
     try {
       setSlotAutoApprove(_cwd(), this._ensureSlot(), value)
     } catch { /* slot unwritable — the live flag still governs this turn */ }
+  }
+
+  /** Toggle plan mode (session-level, like autoApprove). Persists to the slot so the
+   *  toolbar button and the model's own plan tool stay in sync across turns. */
+  async _setPlanMode(value) {
+    try {
+      setSlotPlanMode(_cwd(), this._ensureSlot(), value)
+    } catch { /* slot unwritable — the flag still governs this turn */ }
+    this._panel?.webview.postMessage({ type: "planMode", active: value })
   }
 
   _pushStatus() {

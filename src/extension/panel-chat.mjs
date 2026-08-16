@@ -113,7 +113,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       const pending = tasks.filter((t) => t.status === "pending").length
       panel._panel?.webview.postMessage({ type: "taskProgress", done, inProgress, pending, total: tasks.length, items: tasks })
     },
-    onPlanMode: (active) => panel._panel?.webview.postMessage({ type: "planMode", active }),
+    onPlanMode: (active) => { panel._panel?.webview.postMessage({ type: "planMode", active }); panel._setPlanMode(active).catch(() => {}) },
     onSubagent: (info) => panel._panel?.webview.postMessage({ type: "subagent", ...info }),
     onGoal: (info) => panel._panel?.webview.postMessage({ type: "goal", ...info }),
     onUsage: (u) => {
@@ -164,7 +164,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       else panel._abortController?.signal.addEventListener("abort", onAbort, { once: true })
     }),
   })
-  const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume })
+  const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume, planMode: panel._activeData()?.planMode ?? false })
   try {
     traceStop("runAgent: turn starting (no pending click)", panel._stopClickTs)
     await runAgent(p, cwd, text, buildCallbacks(), panel._abortController.signal, () => panel._autoApprove, runOpts(false))

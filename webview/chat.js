@@ -647,19 +647,22 @@ ctx.welcomeKey.addEventListener("keydown", (e) => {
   if (e.key === "Enter") ctx.welcomeSaveBtn.click()
 })
 
-// Advisor / Engineering mode toggles (session-bar quick switches; the settings
+// Advisor / Engineering / Plan mode toggles (session-bar quick switches; the settings
 // panel has the full advisor configuration — these mirror config.json fields).
 let _advisorOn = false
 let _engOn = false
 
 const advisorBtn = document.getElementById("advisor-btn")
 const engBtn = document.getElementById("eng-btn")
+const planBtn = document.getElementById("plan-btn")
 
 function applyModeButtons() {
   advisorBtn.classList.toggle("active", _advisorOn)
   advisorBtn.classList.toggle("warning", _advisorOn)
   engBtn.classList.toggle("active", _engOn)
   engBtn.classList.toggle("warning", _engOn)
+  planBtn.classList.toggle("active", _planActive)
+  planBtn.classList.toggle("warning", _planActive)
 }
 
 advisorBtn.addEventListener("click", () => {
@@ -671,6 +674,11 @@ engBtn.addEventListener("click", () => {
   _engOn = !_engOn
   applyModeButtons()
   vscode.postMessage({ type: "setEngineeringEnabled", value: _engOn })
+})
+planBtn.addEventListener("click", () => {
+  _planActive = !_planActive
+  applyModeButtons()
+  vscode.postMessage({ type: "setPlanMode", value: _planActive })
 })
 
 const autoBtn = document.getElementById("auto-btn")
@@ -1244,6 +1252,7 @@ window.addEventListener("message", (e) => {
     case "planMode":
       _planActive = m.active
       document.getElementById("input-row").classList.toggle("plan-active", _planActive)
+      applyModeButtons()
       renderStatusBar()
       break
     case "subagent":

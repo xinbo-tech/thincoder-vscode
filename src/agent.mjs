@@ -82,7 +82,7 @@ export { builtinTools } from "./tools.mjs"
  * @param {object} opts - { depth, role, maxTurns } for subagent context
  */
 export async function runAgent(provider, cwd, input, callbacks = {}, signal, autoApprove = true, opts = {}) {
-  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills, engState, engDesignReviewed, resume = false } = opts
+  const { depth = 0, role = null, maxTurns: overrideTurns, mcpServers, skills, engState, engDesignReviewed, resume = false, planMode = false } = opts
 
   // Live autoApprove read (CLI parity: agent.autoApprove is a live field, not a snapshot).
   // The panel passes a getter because approve-all / the AUTO toolbar button flip the flag
@@ -175,7 +175,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const engineering = engState?.enabled ?? cfgEngineering
 
   const agent = {
-    _tasks: [], _touchedFiles: [], _planMode: false,
+    _tasks: [], _touchedFiles: [], _planMode: planMode,
     _goal: null, _provider: provider,
     _verifiedThisRun: false, _pendingTimers: [],
     // Compaction bookkeeping (CLI parity): measured baseline + failure counter + empty-response budget.
