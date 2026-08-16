@@ -137,9 +137,11 @@ describe("needsSetup error re-opens the welcome panel", () => {
 })
 
 describe("reasoning renders markdown (not plain text)", () => {
-  it("reasoning chunks with headers/code render as HTML elements in the block", () => {
+  it("reasoning chunks with headers/code render as HTML elements in the block", async () => {
     postToWebview({ type: "reasoning", text: "## Plan\nLook at code: " })
     postToWebview({ type: "reasoning", text: "**bold idea** and `inline`" })
+    // Rendering is rAF-throttled (2026-08-16 Stop-latency fix): flush one frame before asserting.
+    await new Promise((r) => requestAnimationFrame(() => r()))
     const block = document.querySelector(".reasoning-block")
     assert.ok(block, "reasoning block exists")
     const content = block.querySelector(".reasoning-content")

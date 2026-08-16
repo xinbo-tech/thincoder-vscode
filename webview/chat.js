@@ -1385,6 +1385,48 @@ function send() {
 
 // ─── Token handling ────────────────────────────
 
+// Stream render scheduler: reasoning/token chunks arrive at thousands/sec; rendering
+// markdown + innerHTML on EVERY chunk is O(n²) and floods the main thread — the backlog
+// keeps the Stop button unresponsive long after the backend aborted (2026-08-16
+// "Stop won't stop while thinking" bug). rAF throttles to one render per frame;
+// reasoning (a collapsible scratchpad) renders as plain text — thinking tokens outnumber
+// body tokens ~10:1, so skipping markdown there is where the win is.
+let _renderScheduled = false
+let _reasoningDirty = false
+let _tokenDirty = false
+
+function scheduleStreamRender() {
+  if (_renderScheduled) return
+  _renderScheduled = true
+  requestAnimationFrame(() => {
+    _renderScheduled = false
+    if (ctx.currentReasoning && _reasoningDirty) {
+      try { ctx.currentReasoning.innerHTML = md(ctx.currentReasoningRaw) } catch { ctx.currentReasoning.textContent = ctx.currentReasoningRaw }
+      ctx.currentReasoning.scrollTop = ctx.currentReasoning.scrollHeight
+      _reasoningDirty = false
+    }
+    if (ctx.currentBubble && _tokenDirty) {
+      try { ctx.currentBubble.innerHTML = md(ctx.currentRaw) } catch { ctx.currentBubble.textContent = ctx.currentRaw }
+      _tokenDirty = false
+    }
+    maybeScrollDown(ctx)
+  })
+}
+
+function flushStreamRender() {
+  // Synchronous flush on turn end — the final chunk must be painted before finish()
+  // resets the bubble pointers, or the tail of the reply never renders.
+  if (ctx.currentReasoning && _reasoningDirty) {
+    try { ctx.currentReasoning.innerHTML = md(ctx.currentReasoningRaw) } catch { ctx.currentReasoning.textContent = ctx.currentReasoningRaw }
+    ctx.currentReasoning.scrollTop = ctx.currentReasoning.scrollHeight
+    _reasoningDirty = false
+  }
+  if (ctx.currentBubble && _tokenDirty) {
+    try { ctx.currentBubble.innerHTML = md(ctx.currentRaw) } catch { ctx.currentBubble.textContent = ctx.currentRaw }
+    _tokenDirty = false
+  }
+}
+
 function onReasoning(text) {
   // Start a new block if tool results arrived or if there are tools in the current block
   // (ensures reasoning always appears below tool calls, preserving session flow order)
@@ -1407,12 +1449,8 @@ function onReasoning(text) {
     ctx.currentReasoningRaw = ""
   }
   ctx.currentReasoningRaw += text
-  // Render markdown (reasoning models emit headers/code/bold in their thinking)
-  // with a plain-text fallback on pathological input — same contract as onToken.
-  try { ctx.currentReasoning.innerHTML = md(ctx.currentReasoningRaw) } catch { ctx.currentReasoning.textContent = ctx.currentReasoningRaw }
-  // Scroll reasoning content itself (it has max-height + overflow)
-  ctx.currentReasoning.scrollTop = ctx.currentReasoning.scrollHeight
-  maybeScrollDown(ctx)
+  _reasoningDirty = true
+  scheduleStreamRender()
 }
 
 function onToken(text) {
@@ -1426,13 +1464,14 @@ function onToken(text) {
     ctx.currentRaw = ""
   }
   ctx.currentRaw += text
-  // md() failure on pathological input must not break all subsequent token
-  // rendering for the rest of the turn — plain-text fallback.
-  try { ctx.currentBubble.innerHTML = md(ctx.currentRaw) } catch { ctx.currentBubble.textContent = ctx.currentRaw }
-  maybeScrollDown(ctx)
+  _tokenDirty = true
+  scheduleStreamRender()
 }
 
 function finish(aborted) {
+  // Paint any pending throttled chunks before the bubble pointers reset — otherwise
+  // the tail of the reply/reasoning never renders.
+  flushStreamRender()
   // A turn end without an answer leaves a stale inline question card — drop it
   // (aborted/error paths; a completed turn answers via questionResponse which
   // removes its own card).
