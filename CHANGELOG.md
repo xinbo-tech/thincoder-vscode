@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.28] — 2026-08-16
+
+### Fixed
+
+- **escalate turn-cap continue (CLI 0.12.32 parity)** — 飞刀撞 turn 上限后经面板问题卡弹"继续?"（主 agent 同款），用户选 Continue 则从子 agent 自身 history 续跑（agent.mjs 新增子 agent history 传入/回传支持），预算重置，上限 2 次；放弃/headless 退回 partial work 报告
+- **escalate wall-clock watchdog removed** — 固定墙钟误杀正常但慢的手术（实测两个 max-effort 顾问读文件即撞 10min 墙），改为完全依赖 turn 帽 + FETCH_TIMEOUT + 用户 Stop 直传
+- **escalate effort enum clamp** — 池里 effort 不在模型 reasoningEffortEnum 时回退预设并标注（此前该候选每次 chat 必抛错，"起飞即死"）
+
 ## [0.1.27] — 2026-08-16
 
 ### New
