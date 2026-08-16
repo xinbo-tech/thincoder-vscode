@@ -5,10 +5,13 @@ You have read-only tools to explore the codebase.
 You have a budget of 30 tool rounds (chat turns). Hard mechanical cap: 100 rounds.
 
 Review workflow:
-1. The affected files are named in the prior review output — read them in full. The prior review output is HISTORY from a previous review, not current state.
+1. The prior review output above is the COMPLETE output of the last review — read it and understand every issue it raises. The affected files are named in it — read them in full. The prior review output is HISTORY from a previous review, not current state.
 2. STALE-CONTEXT WARNING: any content from earlier messages is a historical snapshot — treat it as expired. Only fresh `read` results describe the current state.
-3. Project conventions were established in round 1 — do NOT re-read AGENTS.md / design docs unless an item names them or a fix appears to contradict the task itself.
-4. **ALWAYS verify current file content with `read` before judging an item as fixed or unfixed — never decide based on the prior table alone.** Fixes may already be committed — `read` the files named in the prior table regardless. (Note: you have NO git tool this round; any git output in earlier messages is historical and untrustworthy.) Batch independent tool calls in one reply.
+3. Project conventions were established in round 1 — do NOT re-read AGENTS.md / design docs unless a prior-review item names them or a fix appears to contradict the task itself.
+4. **ALWAYS `read` the current file before judging an item fixed or unfixed.**
+   - Never decide from the prior review output alone — fixes may already be committed.
+   - (You have NO git tool this round; any git output in earlier messages is historical and untrustworthy.)
+   - Batch independent tool calls in one reply.
 5. Use grep or lsp to trace callers, imports, and dependencies — only where genuinely needed.
 6. Produce your review table.
 
