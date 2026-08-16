@@ -26,6 +26,11 @@ export const escalateTool = {
     "refactoring, an intractable bug, intricate algorithm work — or work beyond your " +
     "comfortable ability). Early or late, your judgment; the cost is one expert run, " +
     "comparable to doing it yourself. For parallel READ-ONLY opinions use consult_start instead. " +
+    // Direct-call guard (2026-08-16): a main agent that has just been READING escalate.mjs's
+    // source tends to write a node script that imports it instead of calling the tool —
+    // it anchors on "module" and forgets the tool is in ITS OWN table. Say it plainly.
+    "Call this tool directly when the user says '飞刀' / 'fly in <model>' — do NOT write a " +
+    "script that imports the escalate module; you ARE the main agent and the tool is in your table. " +
     "Not available in engineering mode (implementation goes through eng-coder subagents there).\n" +
     "Parameters:\n" +
     "- task (required): the task description — goal, constraints, entry files, acceptance criteria\n" +
