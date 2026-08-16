@@ -288,8 +288,6 @@ export function saveAgentSettingsFromPanel(payload) {
         provider: m.provider.trim(),
         model: m.model.trim(),
         ...(typeof m.effort === "string" && m.effort.trim() ? { effort: m.effort.trim() } : { effort: null }),
-        // 飞刀钩 (ESCALATE.md §2.1): consult rows double as the escalate candidate pool
-        ...(m.surgeon === true ? { surgeon: true } : {}),
       }))
     patch.consultModels = clean.length > 0 ? clean : undefined
   }

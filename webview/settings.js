@@ -121,7 +121,6 @@ function readConsultRowsFromDom() {
       provider: row.dataset.provider || "",
       model: row.dataset.model || "",
       effort: row.querySelector(".consult-effort")?.value ?? null,
-      surgeon: row.querySelector(".consult-surgeon-chk")?.checked === true,
     })
   })
   return rows
@@ -305,7 +304,7 @@ function bindConsultRows() {
       if (rows.querySelectorAll(".consult-row").length >= 5) return
       const div = document.createElement("div")
       div.className = "key-field consult-row"
-      div.innerHTML = '<span class="consult-model-slot"></span><label class="consult-surgeon" title="' + t("settings.surgeonHelp") + '"><input type="checkbox" class="consult-surgeon-chk"><span>' + t("settings.surgeonHook") + '</span></label><button class="consult-del" title="' + t("settings.consultRemove") + '">✕</button>'
+      div.innerHTML = '<span class="consult-model-slot"></span><button class="consult-del" title="' + t("settings.consultRemove") + '">✕</button>'
       rows.appendChild(div)
       mountSlot(div.querySelector(".consult-model-slot"), { provider: "", model: "", onPick: ({ provider, model }) => setRowModel(div, provider, model) })
       rows.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true }))
@@ -315,8 +314,7 @@ function bindConsultRows() {
   }
   for (const row of rows.querySelectorAll(".consult-row")) {
     row.querySelector(".consult-del")?.addEventListener("click", () => { row.remove(); rows.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true })) })
-    // 飞刀钩 change-to-save (ESCALATE.md §2.4)
-    row.querySelector(".consult-surgeon-chk")?.addEventListener("change", () => rows.dispatchEvent(new window.Event("consult-rows-changed", { bubbles: true })))
+
   }
 }
 
@@ -639,11 +637,10 @@ function buildSettings() {
     html += `<div class="key-field consult-row" data-provider="${escHtml(cm?.provider || "")}" data-model="${escHtml(cm?.model || "")}">`
     html += `<span class="consult-model-slot"></span>`
     html += effortEnum && effortEnum.length > 0 ? `<select class="consult-effort">${effortEnum.map((e) => `<option value="${escHtml(e)}" ${(cm?.effort || defaultEffortFor(cm?.model)) === e ? "selected" : ""}>${escHtml(e)}</option>`).join("")}</select>` : ""
-    html += `<label class="consult-surgeon" title="${t("settings.surgeonHelp")}"><input type="checkbox" class="consult-surgeon-chk" ${cm?.surgeon === true ? "checked" : ""}><span>${t("settings.surgeonHook")}</span></label>`
     html += `<button class="consult-del" title="${t("settings.consultRemove")}">✕</button></div>`
   }
   html += `</div>`
-  html += `<div id="consult-status" class="consult-status">${Array.isArray(as.consultModels) && as.consultModels.length > 0 ? t("settings.consultActive", { n: as.consultModels.length }) + (as.consultModels.some((m) => m?.surgeon) ? ` · ${t("settings.surgeonActive", { n: as.consultModels.filter((m) => m?.surgeon).length })}` : "") : t("settings.consultInactive")}</div>`
+  html += `<div id="consult-status" class="consult-status">${Array.isArray(as.consultModels) && as.consultModels.length > 0 ? t("settings.consultActive", { n: as.consultModels.length }) : t("settings.consultInactive")}</div>`
   html += `<div id="agent-saved-badge" class="agent-saved-badge"></div>`
   html += `<button id="consult-add" class="key-btn" style="margin-top:4px">${t("settings.consultAdd")}</button>`
   html += `<div class="settings-subtitle">${t("settings.advisorSection")}</div>`
@@ -790,10 +787,7 @@ function buildSettings() {
       const status = document.getElementById("consult-status")
       if (status) {
         const n = settings.consultModels?.length ?? 0
-        const sn = settings.consultModels?.filter((m) => m?.surgeon).length ?? 0
-        status.textContent = n > 0
-          ? t("settings.consultActive", { n }) + (sn > 0 ? ` · ${t("settings.surgeonActive", { n: sn })}` : "")
-          : t("settings.consultInactive")
+        status.textContent = n > 0 ? t("settings.consultActive", { n }) : t("settings.consultInactive")
       }
       const badge = document.getElementById("agent-saved-badge")
       if (badge) { badge.textContent = t("settings.autoSaved"); badge.classList.add("visible"); setTimeout(() => badge.classList.remove("visible"), 1200) }

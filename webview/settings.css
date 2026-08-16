@@ -362,7 +362,3 @@
 /* effort selects: content-width everywhere (consult rows + advisor) */
 #adv-effort { width: auto; max-width: 140px; }
 .consult-effort { max-width: 120px; }
-
-/* 飞刀 hook on consult rows (ESCALATE.md §2.4) — compact checkbox between effort and delete */
-.consult-surgeon { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; opacity: 0.85; cursor: pointer; user-select: none; white-space: nowrap; }
-.consult-surgeon input { margin: 0; }

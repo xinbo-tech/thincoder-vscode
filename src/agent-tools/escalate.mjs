@@ -26,12 +26,12 @@ export const escalateTool = {
     "comparable to doing it yourself. For parallel READ-ONLY opinions use consult_start instead.\n" +
     "Parameters:\n" +
     "- task (required): the task description — goal, constraints, entry files, acceptance criteria\n" +
-    "- model (optional): pick a specific candidate as 'provider:model'; default = the first hooked candidate",
+    "- model (optional): pick a specific consultant as 'provider:model'; default = the first consult model",
   parameters: {
     type: "object",
     properties: {
       task: { type: "string", description: "Task description with acceptance criteria" },
-      model: { type: "string", description: "Candidate 'provider:model' from the hooked pool (optional)" },
+      model: { type: "string", description: "Candidate 'provider:model' from the consult models (optional)" },
     },
     required: ["task"],
   },
@@ -39,14 +39,16 @@ export const escalateTool = {
     const parent = ctx.agent
     // Depth guard: a surgeon must not fly in another surgeon (ESCALATE.md §1.3 US-F5)
     if ((ctx.depth ?? 0) > 0) return "Error: escalate is only available at depth 0 (the surgeon's work cannot be delegated again)"
-    const pool = (parent?.config?.agent?.consultModels ?? []).filter((m) => m?.surgeon === true)
-    if (pool.length === 0) return "Error: no surgeon candidates — hook at least one consult model (the 飞刀 checkbox in settings)"
+    // All consult models are surgeon candidates (decision 2026-08-16: the 飞刀 hook checkbox
+    // was removed — every configured consultant can fly in; fewer knobs, less mental load).
+    const pool = parent?.config?.agent?.consultModels ?? []
+    if (pool.length === 0) return "Error: no surgeon candidates — configure at least one consult model (agent.consultModels)"
 
     const pick = model
       ? pool.find((m) => label(m) === model)
       : pool[0]
     if (!pick) {
-      return `Error: "${model}" is not a hooked surgeon candidate. Available: ${pool.map(label).join(", ")}`
+      return `Error: "${model}" is not a consult candidate. Available: ${pool.map(label).join(", ")}`
     }
 
     const build = ctx.buildProvider ?? buildProvider // test-injectable (consult.mjs parity)

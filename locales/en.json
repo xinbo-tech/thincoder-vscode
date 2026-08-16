@@ -196,8 +196,5 @@
   "settings.consultTurnsHelp": "Max tool turns per consultant (diagnosis tasks rarely need more)",
   "settings.consultTimeout": "Timeout (minutes)",
   "settings.consultTimeoutHelp": "Wall-clock ceiling per consultant — turn limits count LLM responses, not time stuck in a slow tool",
-  "consult.replyPreview": "view reply",
-  "settings.surgeonHook": "Surgeon",
-  "settings.surgeonHelp": "Hook this model as an escalate (飞刀) candidate — callable via the escalate tool to hand implementation work to a stronger model",
-  "settings.surgeonActive": "Surgeon {n}"
+  "consult.replyPreview": "view reply"
 }

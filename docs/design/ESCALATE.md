@@ -1,6 +1,6 @@
 # 飞刀（Escalate）— 需求与设计
 
-> 状态：**已实施**（2026-08-15，commit 9ac8322；0.1.22 随版发布）。候选池=会诊行飞刀钩，空池不注册，depth 封顶。
+> 状态：**已实施**（2026-08-15，commit 9ac8322；0.1.22 随版发布）。**2026-08-16 简化**：飞刀钩勾选机制删除——所有会诊模型都是飞刀候选（用户拍板：减少心智负担），条件注册改为与会诊同条件（consultModels 非空即注册）。
 > 关联：`CONSULTATION.md`（会诊——飞刀的候选池来源与互补机制）、`MODEL-PICKER-UNIFY.md` §3.3（effort 配置语义）
 
 ---
@@ -48,23 +48,22 @@
 
 ## 2. 设计
 
-### 2.1 配置
+### 2.1 配置（2026-08-16 简化：无钩选）
 
-`agent.consultModels` 增加可选字段 `surgeon`（就是"钩"）：
+`agent.consultModels` 全部条目都是飞刀候选，**无 `surgeon` 字段**：
 
 ```jsonc
 "agent": {
   "consultModels": [
-    { "provider": "kimi", "model": "kimi-k3", "effort": "max", "surgeon": true },   // ← 带钩
-    { "provider": "deepseek", "model": "deepseek-v4-pro", "effort": "high" },        // 无钩 = 仅会诊
-    { "provider": "zhipu-plan", "model": "glm-5.2", "effort": "high", "surgeon": true }
+    { "provider": "kimi", "model": "kimi-k3", "effort": "max" },
+    { "provider": "deepseek", "model": "deepseek-v4-pro", "effort": "high" },
+    { "provider": "zhipu-plan", "model": "glm-5.2", "effort": "high" }
   ]
 }
 ```
 
-- 校验规则（config-io）：`surgeon` 可选 boolean，缺省 false；其余校验不变（≤5 等）
-- 候选池 = `consultModels.filter(m => m.surgeon)`
-- 工具注册（agent.mjs）：候选池非空才注册 `escalateTool`（与会诊未配置不注册同款——空池模型根本看不到工具）
+- 候选池 = 全部 `consultModels`（无字段、无勾选）
+- 工具注册（agent.mjs）：`consultModels` 非空即注册 `escalateTool`（与会诊同条件——未配置会诊时模型根本看不到工具）
 
 ### 2.2 工具契约
 
@@ -101,12 +100,7 @@ escalate
 
 ### 2.4 面板
 
-会诊行（Consult & Advisor 卡）每行加一个"飞刀"勾选框（checkbox，change-to-save）：
-
-- 勾选状态读写 `consultModels[i].surgeon`
-- i18n：`settings.surgeonHook` = "飞刀" / "Surgeon"
-- 勾选框放在 effort 下拉之后、✕ 删除之前
-- 状态行同步显示："会诊 3 · 飞刀 2"
+**无飞刀勾选框**（2026-08-16 删除——所有会诊模型自动成为飞刀候选，面板零新增控件）。会诊行保持：模型选择 + effort 下拉 + ✕ 删除。
 
 ### 2.5 受影响文件
 

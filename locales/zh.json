@@ -196,8 +196,5 @@
   "settings.consultTurnsHelp": "每个会诊模型的最大工具轮数（诊断任务通常不需要更多）",
   "settings.consultTimeout": "超时（分钟）",
   "settings.consultTimeoutHelp": "每个会诊模型的墙钟上限——轮数只统计 LLM 响应，不统计卡在慢工具里的时间",
-  "consult.replyPreview": "查看回复",
-  "settings.surgeonHook": "飞刀",
-  "settings.surgeonHelp": "将该模型钩为飞刀候选——主 agent 可通过 escalate 工具把实现任务交给更强的模型亲自操刀",
-  "settings.surgeonActive": "飞刀 {n}"
+  "consult.replyPreview": "查看回复"
 }

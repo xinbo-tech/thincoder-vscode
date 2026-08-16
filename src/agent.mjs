@@ -78,8 +78,9 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       // consult tools registered only when configured — an unconfigured model would otherwise
       // see the tool, call it, and eat an error turn (prompt-system review 2026-08-15).
       ...(loadRaw().agent?.consultModels?.length ? [consultStartTool, consultCheckTool, consultStopTool] : []),
-      // escalate (飞刀) registered only when a consult row carries the surgeon hook (ESCALATE.md §2.1)
-      ...(loadRaw().agent?.consultModels?.some?.((m) => m?.surgeon === true) ? [escalateTool] : [])]
+      // escalate (飞刀) registered whenever consultations are — every consult model is a
+      // surgeon candidate (hook removed 2026-08-16, fewer knobs)
+      ...(loadRaw().agent?.consultModels?.length ? [escalateTool] : [])]
     : role === "eng-coder"
       ? [taskTool, recentChangesTool, planTool, timerTool, advisorTool, verifyTool] // eng-coder: design review + verify gates
       : [taskTool, recentChangesTool] // subagents get fewer meta-tools
