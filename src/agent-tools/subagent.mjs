@@ -118,13 +118,13 @@ export const subagentTool = {
         stateSink: sink,
       })
 
-      mergeEngCoderMutations(parent, sink)
+      mergeChildMutations(parent, sink)
 
       ctx.callbacks?.onSubagent?.({ id: subId, role, status: "done" })
       return `Subagent (${role}) completed:\n${result || output.slice(0, 4000)}`
     } catch (e) {
       // Max-turns exhaustion may still have written files — merge whatever the child touched
-      if (role === "eng-coder") mergeEngCoderMutations(parent, sink)
+      if (role === "eng-coder") mergeChildMutations(parent, sink)
       ctx.callbacks?.onSubagent?.({ id: subId, role, status: "error", error: e.message })
       return `Subagent (${role}) error: ${e.message}\nPartial output: ${output.slice(0, 2000)}`
     }
@@ -132,11 +132,15 @@ export const subagentTool = {
 }
 
 /**
- * Merge an eng-coder child's mutations into the parent's bookkeeping
+ * Merge a child's mutations into the parent's bookkeeping
  * (CLI mergeChildMutations parity): the parent's advisor/verify guards must see
- * delegated file changes. Fresh code → fresh convergence budget.
+ * delegated file changes. Fresh code → fresh convergence budget: a verify/advisor
+ * pass earned on the pre-delegation code is stale the moment the child writes.
+ * Shared by subagent (eng-coder) and escalate (surgeon) — three-way review
+ * 2026-08-16: escalate's local copy skipped the resets, letting surgery bypass
+ * the parent's verify/advisor gates.
  */
-function mergeEngCoderMutations(parent, sink) {
+export function mergeChildMutations(parent, sink) {
   const touched = sink?.touchedFiles ?? []
   if (touched.length === 0) return
   parent._mutatedThisRun = true

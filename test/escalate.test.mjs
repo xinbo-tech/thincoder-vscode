@@ -92,6 +92,102 @@ describe("escalate (飞刀)", () => {
     })
   })
 
+  // Three-way review fixes (2026-08-16): security/mechanism/UX gaps found by the panel.
+  describe("review fixes", () => {
+    it("(a) surgeon mutations reset the parent's verify/advisor convergence budget", async () => {
+      const agent = makeAgent(CONSULTS)
+      agent._verifiedThisRun = true
+      agent._verifyPassed = true
+      agent._calledAdvisorThisRun = true
+      agent._advisorRound = 2
+      agent._advisorSession = "sess-1"
+      const runner = async (provider, cwd, task, callbacks, signal, auto, opts) => {
+        opts.stateSink.touchedFiles = [join(process.cwd(), "src", "x.mjs")] // fresh code lands mid-run
+        return "post-op report"
+      }
+      const r = await escalateTool.execute({ task: "x" }, makeCtx(agent, runner))
+      assert.equal(agent._verifiedThisRun, false, "fresh code invalidates the parent's prior verify — the surgery must not bypass the parent's gates")
+      assert.equal(agent._verifyPassed, undefined)
+      assert.equal(agent._calledAdvisorThisRun, false)
+      assert.equal(agent._advisorRound, 0)
+      assert.equal(agent._advisorSession, null)
+      assert.equal(agent._mutatedThisRun, true)
+      assert.equal(agent._touchedFiles.length, 1, "child's touched files merged into the parent")
+      assert.ok(String(r).includes("Touched files:"), "post-op report lists touched files")
+    })
+
+    it("(b) user Stop propagates — AbortError is rethrown, not swallowed into a report", async () => {
+      const runner = async () => { throw new DOMException("Aborted", "AbortError") }
+      await assert.rejects(
+        escalateTool.execute({ task: "x" }, makeCtx(makeAgent(CONSULTS), runner)),
+        (e) => e?.name === "AbortError",
+      )
+    })
+
+    it("(c) turn cap (ContinueError) reads as partial work with touched files, not a crash", async () => {
+      const { ContinueError } = await import("../src/agent.mjs")
+      const runner = async (provider, cwd, task, callbacks, signal, auto, opts) => {
+        opts.stateSink.touchedFiles = [join(process.cwd(), "src", "partial.mjs")]
+        throw new ContinueError(100)
+      }
+      const r = String(await escalateTool.execute({ task: "x" }, makeCtx(makeAgent(CONSULTS), runner)))
+      assert.ok(r.includes("turn cap"), "turn-cap wording")
+      assert.ok(r.includes("recent_changes"), "points at recent_changes review")
+      assert.ok(r.includes("Touched files:") && r.includes("partial.mjs"), "touched files listed")
+      assert.ok(!r.includes("error:"), "not framed as a crash")
+    })
+
+    it("engineering mode: escalate fails closed and points at eng-coder (subagent parity)", async () => {
+      const agent = makeAgent(CONSULTS)
+      agent.config.agent.engineering = true
+      let called = false
+      const r = String(await escalateTool.execute({ task: "x" }, makeCtx(agent, async () => { called = true; return "never" })))
+      assert.ok(r.includes("engineering mode"), "names the mode")
+      assert.ok(r.includes("eng-coder"), "points at the engineering implementation path")
+      assert.equal(called, false, "surgeon never spawned")
+    })
+
+    it("model pick tolerates the effort suffix copied from the pool listing", async () => {
+      const seen = []
+      const runner = async (provider) => { seen.push(provider.name); return "ok" }
+      await escalateTool.execute({ task: "x", model: "zhipu-plan:glm-5.2 (high)" }, makeCtx(makeAgent(CONSULTS), runner))
+      assert.equal(seen[0], "zhipu-plan", "stripped the ' (high)' suffix and matched")
+    })
+
+    it("key precheck: a provider without an API key fails before the child spawns", async () => {
+      const ctx = makeCtx(makeAgent(CONSULTS), async () => "never")
+      ctx.buildProvider = async (name) => ({ name, model: "x" }) // no apiKey
+      const r = String(await escalateTool.execute({ task: "x" }, ctx))
+      assert.ok(r.includes("no API key"), "names the problem")
+      assert.ok(r.includes("kimi"), "names the provider")
+    })
+
+    it("wall-clock watchdog: a stuck surgeon settles as a timeout, not a hang or a crash", async () => {
+      const agent = makeAgent(CONSULTS)
+      agent.config.agent.consultTimeoutMs = 50
+      const runner = (provider, cwd, task, callbacks, signal) => new Promise((_, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
+      })
+      const r = String(await escalateTool.execute({ task: "x" }, makeCtx(agent, runner)))
+      assert.ok(r.includes("timed out"), "timeout wording, got: " + r.slice(0, 120))
+      assert.ok(!r.includes("error: Aborted"), "the watchdog abort is not misreported as a provider crash")
+    })
+
+    it("surgeon reasoning + output text stream into the panel (consult-UI parity)", async () => {
+      const panels = []
+      const runner = async (provider, cwd, task, callbacks) => {
+        callbacks.onReasoning?.("thinking hard")
+        callbacks.onToken?.("final answer")
+        return "report"
+      }
+      const ctx = makeCtx(makeAgent(CONSULTS), runner)
+      ctx.callbacks = { onToolPanel: (name, chunk) => panels.push({ name, chunk }) }
+      await escalateTool.execute({ task: "x" }, ctx)
+      assert.ok(panels.some((p) => p.chunk.kind === "think" && p.chunk.text.includes("thinking")), "reasoning streams as think chunks")
+      assert.ok(panels.some((p) => p.chunk.kind === "text" && p.chunk.text.includes("final answer")), "output streams as text chunks")
+    })
+  })
+
   describe("config round-trip", () => {
     it("plain consult rows persist unchanged (no surgeon field involved)", () => {
       saveAgentSettingsFromPanel({ consultModels: [

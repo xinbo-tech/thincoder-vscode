@@ -396,9 +396,10 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       messages,
       tools: toolSchemas,
       // onToken gate: depth 0 always; consult children are exempt so their OUTPUT streams
-      // into the consultation panel (consult-UI review 2026-08-15). Other subagents never
-      // pass onToken, so their behavior is unchanged.
-      onToken: depth === 0 || role === "consult" ? callbacks.onToken : null,
+      // into the consultation panel (consult-UI review 2026-08-15). Escalate surgeons opt
+      // in via opts.streamOutput (three-way review 2026-08-16 — a long surgery is silent
+      // without it). Other subagents never pass onToken, so their behavior is unchanged.
+      onToken: depth === 0 || role === "consult" || opts.streamOutput === true ? callbacks.onToken : null,
       onReasoning: callbacks.onReasoning,
       onWait: callbacks.onWait,
       signal,

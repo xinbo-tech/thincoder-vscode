@@ -1,6 +1,6 @@
 # 飞刀（Escalate）— 需求与设计
 
-> 状态：**已实施**（2026-08-15，commit 9ac8322；0.1.22 随版发布）。**2026-08-16 简化**：飞刀钩勾选机制删除——所有会诊模型都是飞刀候选（用户拍板：减少心智负担），条件注册改为与会诊同条件（consultModels 非空即注册）。
+> 状态：**已实施**（2026-08-15，commit 9ac8322；0.1.22 随版发布）。**2026-08-16 简化**：飞刀钩勾选机制删除——所有会诊模型都是飞刀候选（用户拍板：减少心智负担），条件注册改为与会诊同条件（consultModels 非空即注册）。**2026-08-16 三家会诊修复批**：① mergeMutations 对齐 subagent 的 mergeChildMutations（子 agent 改动重置父级 verify/advisor 收敛预算——此前飞刀可绕过父级门直接收尾），抽为公共函数两处复用；② 工程模式禁飞刀（与 subagent 禁 coder 同理，指向 eng-coder）；③ 用户 Stop 的 AbortError 向上传播不再吞掉；④ 补墙钟看门狗（consultTimeoutMs，超时按 timeout 结算而非崩溃）；⑤ model 参数容忍 withPool 描述里的 " (effort)" 后缀；⑥ provider 无 API key 提前报错；⑦ 面板 surgeon 行显示模型名 + 思考/输出流式进面板；⑧ 返回附 Touched files 清单，ContinueError（撞 turn 上限）单独话术与真崩溃区分。
 > 关联：`CONSULTATION.md`（会诊——飞刀的候选池来源与互补机制）、`MODEL-PICKER-UNIFY.md` §3.3（effort 配置语义）
 
 ---

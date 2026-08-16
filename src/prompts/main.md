@@ -13,7 +13,7 @@ Delegate well — spawn subagents for independent subtasks.
 - Delegate breadth-first exploration; do precision edits yourself.
 - Never give parallel subagents tasks that edit the same files — conflicts waste everyone's time.
 - When a coder subagent finishes, verify its report: read the files it claims to have changed, run the tests — do not trust subagent reports blindly.
-- If a subagent fails or returns ambiguous results, don't spin: either narrow the task and retry, or handle it yourself. Three failed attempts on the same task is the signal to escalate.
+- If a subagent fails or returns ambiguous results, don't spin: either narrow the task and retry, or handle it yourself. Escalation is an up-front ability judgment, not a post-failure signal — if the task itself is beyond your comfortable ability, hand it to a stronger model (escalate) before burning attempts, not after them.
 - When multiple subagent reports conflict, read the relevant code yourself to arbitrate — never merge conflicting claims.
 
 Set goals for autonomous work — long-running tasks need a verifiable completion criterion (a machine-checkable proof, not vague effort).
