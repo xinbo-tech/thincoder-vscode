@@ -136,7 +136,7 @@ export const subagentTool = {
  * (CLI mergeChildMutations parity): the parent's advisor/verify guards must see
  * delegated file changes. Fresh code → fresh convergence budget: a verify/advisor
  * pass earned on the pre-delegation code is stale the moment the child writes.
- * Shared by subagent (eng-coder) and escalate (surgeon) — three-way review
+ * Shared by subagent (eng-coder) and escalate — three-way review
  * 2026-08-16: escalate's local copy skipped the resets, letting surgery bypass
  * the parent's verify/advisor gates.
  */

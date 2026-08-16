@@ -6,15 +6,16 @@
 ---
 
 
-## 0. 术语表（三个名字，一件事）
+## 0. 术语表（归并后：两个名字）
 
-| 名字 | 是什么 | 出现在哪 |
-|---|---|---|
-| **`escalate`** | **唯一可调用的工具名** | 工具表、模型 tool_calls |
-| **飞刀** | escalate 的中文别名（用户面向） | 对话、文档标题、设置面板 |
-| **`surgeon`** | escalate 召唤的专家子 agent 的**角色**（role: "surgeon"） | onSubagent 事件、面板卡、术后报告标签 |
+> **2026-08-16 归并**：surgeon 已从代码中移除——工具名与角色名统一为 **escalate**。历史上 surgeon 曾作为子 agent 的角色名（role: "surgeon"）与工具名 escalate 并存，导致模型混淆（找 "surgeon 工具" 落空、把 escalate 当模块写脚本）。用词越少越一致，模型出错越少（用户拍板）。
 
-**红线**：surgeon 是角色不是工具——模型想找 "surgeon 工具" 会落空（2026-08-16 kimi 首次实操即踩此坑，退而写临时代码）。同理，看到 escalate.mjs 的源码不等于"要写脚本调它"——escalate 是主 agent 工具表里的工具，直接调用。
+| 名字 | 是什么 |
+|---|---|
+| **`escalate`** | **唯一的技术名**——工具名 = 它召唤的子 agent 角色名（role: "escalate"） |
+| **飞刀** | escalate 的中文别名（用户面向） |
+
+红线：看到 escalate.mjs 的源码不等于"要写脚本调它"——escalate 是主 agent 工具表里的工具，直接调用。本文档历史章节里的 "surgeon" 均指今天的 escalate 角色（不再逐行改写历史叙述）。
 
 ## 1. 需求
 

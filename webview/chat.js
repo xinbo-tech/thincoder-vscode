@@ -472,8 +472,8 @@ function renderSubagentPanel() {
       : s.status === "terminated" ? t("consult.terminated")
       : s.status === "failed" ? t("consult.failed")
       : s.status
-    // Rows with a model tag (consult, surgeon) show it so parallel consultants and
-    // the flown-in surgeon are distinguishable (three-way review 2026-08-16 — surgeon
+    // Rows with a model tag (consult, escalate) show it so parallel consultants and
+    // the flown-in escalate are distinguishable (three-way review 2026-08-16 — surgeon
     // rows rendered as a bare "surgeon" even though the event carries the model).
     const label = s.model ? `${s.role} · ${s.model}` : s.role
     // answered consults carry a collapsible preview of the reply (review D10)

@@ -99,10 +99,10 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         : [])]
     : role === "eng-coder"
       ? [taskTool, recentChangesTool, planTool, timerTool, advisorTool, verifyTool] // eng-coder: design review + verify gates
-    // Write-permission coder sub-agents (subagentTool + escalate surgeon): their system
+    // Write-permission coder sub-agents (subagentTool + escalate): their system
     // prompt names verify (system.md) and advisor (discipline.md) — without them the
-    // surgeon hit "unknown tool" and fell back to bash node --check / npm test to
-    // self-verify (2026-08-16 deepseek surgeon diagnosis). eng-coder already had both;
+    // escalate hit "unknown tool" and fell back to bash node --check / npm test to
+    // self-verify (2026-08-16 deepseek escalate diagnosis). eng-coder already had both;
     // plain coder was the missed branch.
     : role === "coder"
       ? [taskTool, recentChangesTool, verifyTool, advisorTool]
@@ -405,7 +405,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       messages,
       tools: toolSchemas,
       // onToken gate: depth 0 always; consult children are exempt so their OUTPUT streams
-      // into the consultation panel (consult-UI review 2026-08-15). Escalate surgeons opt
+      // into the consultation panel (consult-UI review 2026-08-15). Escalates opt
       // in via opts.streamOutput (three-way review 2026-08-16 — a long surgery is silent
       // without it). Other subagents never pass onToken, so their behavior is unchanged.
       onToken: depth === 0 || role === "consult" || opts.streamOutput === true ? callbacks.onToken : null,

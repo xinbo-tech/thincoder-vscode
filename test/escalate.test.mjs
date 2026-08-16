@@ -12,7 +12,7 @@ import { escalateTool } from "../src/agent-tools/escalate.mjs"
 import { saveAgentSettingsFromPanel, loadAgentSettings } from "../src/config-io.mjs"
 import { _setConfigPathForTest } from "../src/config-io.mjs"
 
-// Every consult model is a surgeon candidate (hook removed 2026-08-16 — fewer knobs).
+// Every consult model is an escalate candidate (hook removed 2026-08-16 — fewer knobs).
 const CONSULTS = [
   { provider: "kimi", model: "kimi-k3", effort: "max" },
   { provider: "zhipu-plan", model: "glm-5.2", effort: "high" },
@@ -39,7 +39,7 @@ describe("escalate (飞刀)", () => {
   describe("tool contract", () => {
     it("no consult models → error explaining the prerequisite", async () => {
       const r = await escalateTool.execute({ task: "x" }, makeCtx(makeAgent([])))
-      assert.ok(String(r).includes("no surgeon candidates"))
+      assert.ok(String(r).includes("no escalate candidates"))
       assert.ok(String(r).includes("agent.consultModels"), "points at the right config")
     })
 
@@ -67,12 +67,12 @@ describe("escalate (飞刀)", () => {
       assert.ok(String(bad).includes("kimi:kimi-k3"), "pool listed in the error")
     })
 
-    it("depth guard: a surgeon cannot fly in another surgeon", async () => {
+    it("depth guard: an escalate cannot fly in another escalate", async () => {
       const r = await escalateTool.execute({ task: "x" }, makeCtx(makeAgent(CONSULTS), async () => "never", 1))
       assert.ok(String(r).includes("only available at depth 0"))
     })
 
-    it("activity stream flows under sub:surgeon <label>", async () => {
+    it("activity stream flows under sub:escalate <label>", async () => {
       const panels = []
       const runner = async (provider, cwd, task, callbacks) => {
         callbacks.onToolCall?.("read", { path: "src/a.mjs" })
@@ -82,7 +82,7 @@ describe("escalate (飞刀)", () => {
       const ctx = makeCtx(makeAgent(CONSULTS), runner)
       ctx.callbacks = { onToolPanel: (name, chunk) => panels.push({ name, chunk }) }
       await escalateTool.execute({ task: "x" }, ctx)
-      assert.ok(panels.every((p) => p.name === "sub:surgeon kimi:kimi-k3"))
+      assert.ok(panels.every((p) => p.name === "sub:escalate kimi:kimi-k3"))
       assert.ok(panels.some((p) => p.chunk.text.includes("read")))
     })
 
@@ -94,7 +94,7 @@ describe("escalate (飞刀)", () => {
 
   // Three-way review fixes (2026-08-16): security/mechanism/UX gaps found by the panel.
   describe("review fixes", () => {
-    it("(a) surgeon mutations reset the parent's verify/advisor convergence budget", async () => {
+    it("(a) escalate mutations reset the parent's verify/advisor convergence budget", async () => {
       const agent = makeAgent(CONSULTS)
       agent._verifiedThisRun = true
       agent._verifyPassed = true
@@ -144,7 +144,7 @@ describe("escalate (飞刀)", () => {
       const r = String(await escalateTool.execute({ task: "x" }, makeCtx(agent, async () => { called = true; return "never" })))
       assert.ok(r.includes("engineering mode"), "names the mode")
       assert.ok(r.includes("eng-coder"), "points at the engineering implementation path")
-      assert.equal(called, false, "surgeon never spawned")
+      assert.equal(called, false, "escalate never spawned")
     })
 
     it("model pick tolerates the effort suffix copied from the pool listing", async () => {
@@ -162,7 +162,7 @@ describe("escalate (飞刀)", () => {
       assert.ok(r.includes("kimi"), "names the provider")
     })
 
-    it("wall-clock watchdog: a stuck surgeon settles as a timeout, not a hang or a crash", async () => {
+    it("wall-clock watchdog: a stuck escalate settles as a timeout, not a hang or a crash", async () => {
       const agent = makeAgent(CONSULTS)
       agent.config.agent.consultTimeoutMs = 50
       const runner = (provider, cwd, task, callbacks, signal) => new Promise((_, reject) => {
@@ -173,7 +173,7 @@ describe("escalate (飞刀)", () => {
       assert.ok(!r.includes("error: Aborted"), "the watchdog abort is not misreported as a provider crash")
     })
 
-    it("surgeon reasoning + output text stream into the panel (consult-UI parity)", async () => {
+    it("escalate reasoning + output text stream into the panel (consult-UI parity)", async () => {
       const panels = []
       const runner = async (provider, cwd, task, callbacks) => {
         callbacks.onReasoning?.("thinking hard")
@@ -189,7 +189,7 @@ describe("escalate (飞刀)", () => {
   })
 
   describe("config round-trip", () => {
-    it("plain consult rows persist unchanged (no surgeon field involved)", () => {
+    it("plain consult rows persist unchanged (no surgeon key involved (removed))", () => {
       saveAgentSettingsFromPanel({ consultModels: [
         { provider: "kimi", model: "kimi-k3", effort: "max" },
         { provider: "deepseek", model: "deepseek-v4-pro", effort: "high" },
@@ -198,7 +198,7 @@ describe("escalate (飞刀)", () => {
       assert.equal(s.consultModels.length, 2)
       assert.equal(s.consultModels[0].provider, "kimi")
       assert.equal(s.consultModels[0].effort, "max")
-      assert.equal(s.consultModels[0].surgeon, undefined, "no surgeon key ever")
+      assert.equal(s.consultModels[0].surgeon, undefined, "the removed surgeon config key never returns")
       rmSync(tmp, { recursive: true, force: true })
     })
   })

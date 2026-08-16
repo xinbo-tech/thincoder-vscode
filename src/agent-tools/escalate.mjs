@@ -2,7 +2,7 @@
  * escalate.mjs — 飞刀 (the "flying knife", docs/design/ESCALATE.md)
  *
  * Hand an implementation task to a STRONGER model — like a hospital flying in an
- * outside expert surgeon: the expert arrives, operates personally (WRITE access),
+ * outside expert (飞刀): the expert arrives, operates personally (WRITE access),
  * hands back the post-op report, leaves. Complementary to consult (parallel
  * READ-ONLY opinions for judgment calls).
  *
@@ -20,13 +20,13 @@ export const escalateTool = {
   sideEffectExempt: true, // the child's mutations are tracked and reviewed, like subagent
   description:
     // Terminology map FIRST (2026-08-16): three words for one thing confused models into
-    // looking for a "surgeon" TOOL (it is a role, not a tool) or importing the escalate
+    // two names for one thing (escalate vs surgeon, now unified to escalate) confused models
     // MODULE instead of calling it. Pin the mapping before anything else.
-    "TERMINOLOGY: 'escalate' is THIS tool's only callable name; 飞刀 is its Chinese alias; " +
-    "'surgeon' is the ROLE of the expert sub-agent it spawns (a role, never a tool — there " +
-    "is no tool named 'surgeon'). When the user says 飞刀 / surgeon / 'fly in <model>', call " +
-    "escalate — directly, never via a script importing this module. " +
-    "Hand an implementation task to a stronger model (飞刀 — a flown-in expert surgeon). " +
+    "TERMINOLOGY (one word for one thing): 'escalate' is the ONLY name — the tool, and the " +
+    "role of the expert sub-agent it spawns, are both called 'escalate'; 飞刀 is the Chinese " +
+    "alias. When the user says 飞刀 / escalate / 'fly in <model>', call THIS tool directly — " +
+    "never via a script importing this module. " +
+    "Hand an implementation task to a stronger model (飞刀 — a flown-in expert). " +
     "It gets WRITE access and does the work itself — reads, edits, runs tests — then returns " +
     "a post-op report (what changed, why, verification). You review the report and report to " +
     "the user. Use it when YOU judge the task calls for stronger hands (complex multi-file " +
@@ -52,19 +52,19 @@ export const escalateTool = {
   },
   async execute({ task, model }, ctx) {
     const parent = ctx.agent
-    // Depth guard: a surgeon must not fly in another surgeon (ESCALATE.md §1.3 US-F5)
-    if ((ctx.depth ?? 0) > 0) return "Error: escalate is only available at depth 0 (the surgeon's work cannot be delegated again)"
-    // Engineering-mode backdoor guard (three-way review 2026-08-16): a surgeon IS a
+    // Depth guard: an escalate must not fly in another escalate (ESCALATE.md §1.3 US-F5)
+    if ((ctx.depth ?? 0) > 0) return "Error: escalate is only available at depth 0 (an escalate's work cannot be delegated again)"
+    // Engineering-mode backdoor guard (three-way review 2026-08-16): an escalate IS a
     // coder sub-agent — subagent.mjs forbids role='coder' in engineering mode, and an
-    // unconditional coder surgeon would bypass the design-token discipline. Fail closed
+    // unconditional coder escalate would bypass the design-token discipline. Fail closed
     // and point at the engineering path, same as subagent does.
     if (parent?.config?.agent?.engineering) {
-      return "Error: engineering mode is ON — escalate is unavailable (the surgeon spawns a coder sub-agent, which engineering mode forbids). Use subagent with role='eng-coder' and a designToken from advisor(type='design') instead."
+      return "Error: engineering mode is ON — escalate is unavailable (it spawns a coder sub-agent, which engineering mode forbids). Use subagent with role='eng-coder' and a designToken from advisor(type='design') instead."
     }
-    // All consult models are surgeon candidates (decision 2026-08-16: the 飞刀 hook checkbox
+    // All consult models are escalate candidates (decision 2026-08-16: the 飞刀 hook checkbox
     // was removed — every configured consultant can fly in; fewer knobs, less mental load).
     const pool = parent?.config?.agent?.consultModels ?? []
-    if (pool.length === 0) return "Error: no surgeon candidates — configure at least one consult model (agent.consultModels)"
+    if (pool.length === 0) return "Error: no escalate candidates — configure at least one consult model (agent.consultModels)"
 
     // Model-pick tolerance: withPool lists candidates as "provider:model (effort)" —
     // a model that copies the listing verbatim must still match (strip the suffix).
@@ -80,7 +80,7 @@ export const escalateTool = {
     const provider = await build(pick.provider)
     if (!provider) return `Error: provider "${pick.provider}" not configured`
     // Key precheck: fail BEFORE the child spawns, not at its first chat call — an
-    // auth failure there would surface as a surgeon crash, misdiagnosing the cause.
+    // auth failure there would surface as an escalate crash, misdiagnosing the cause.
     if (!provider.apiKey?.trim()) {
       return `Error: provider "${pick.provider}" has no API key — set it in Settings (or THINCODER_API_KEY) before flying it in`
     }
@@ -91,10 +91,10 @@ export const escalateTool = {
     parent._subIdCounter = (parent._subIdCounter ?? 0) + 1
     const subId = parent._subIdCounter
     const tag = label(pick)
-    ctx.callbacks?.onSubagent?.({ id: subId, role: "surgeon", status: "started", startedAt: Date.now(), model: tag })
+    ctx.callbacks?.onSubagent?.({ id: subId, role: "escalate", status: "started", startedAt: Date.now(), model: tag })
 
     // Wall-clock ceiling (consult.mjs runConsultChild parity): turn limits count LLM
-    // responses, not wall time — a surgeon stuck in a slow tool/provider must not
+    // responses, not wall time — an escalate stuck in a slow tool/provider must not
     // hold the parent forever. Independent controller cascaded with the user's Stop.
     const timeoutMs = parent?.config?.agent?.consultTimeoutMs ?? 600_000
     let timedOut = false // watchdog kills settle as TIMEOUT, not a provider failure
@@ -110,7 +110,7 @@ export const escalateTool = {
 
     let output = ""
     const sink = {}
-    const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:surgeon ${tag}`, chunk)
+    const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:escalate ${tag}`, chunk)
     try {
       const report = await runner({ ...withEffort, model: pick.model }, ctx.cwd, task, {
         // Full reasoning + output stream (consult-UI parity): a long surgery is silent
@@ -127,29 +127,29 @@ export const escalateTool = {
         maxTurns: parent.config?.agent?.subagentTurns ?? 100,
         stateSink: sink,
       })
-      // Surgeon mutations are the parent's mutations: verify/advisor guards must see them
+      // Escalate mutations are the parent's mutations: verify/advisor guards must see them
       mergeChildMutations(parent, sink)
-      ctx.callbacks?.onSubagent?.({ id: subId, role: "surgeon", status: "done", model: tag })
-      return `Surgeon (${tag}) post-op report:\n${report || output.slice(0, 4000)}${touchedFilesNote(sink, ctx.cwd)}`
+      ctx.callbacks?.onSubagent?.({ id: subId, role: "escalate", status: "done", model: tag })
+      return `escalate (${tag}) post-op report:\n${report || output.slice(0, 4000)}${touchedFilesNote(sink, ctx.cwd)}`
     } catch (e) {
       // Even a failed surgery may have written files — merge whatever the child touched.
       mergeChildMutations(parent, sink)
       const msg = e?.message ?? String(e)
-      ctx.callbacks?.onSubagent?.({ id: subId, role: "surgeon", status: "error", error: msg, model: tag })
+      ctx.callbacks?.onSubagent?.({ id: subId, role: "escalate", status: "error", error: msg, model: tag })
       // User Stop must propagate (execute-tools.mjs rethrows AbortError — swallowing
       // it keeps the parent running after the user asked to stop). The watchdog's own
       // abort is NOT a user stop: it settles below as a timeout report.
       if (ctx.signal?.aborted || (!timedOut && e?.name === "AbortError")) throw e
-      // Turn-cap exhaustion is not a crash: the surgeon may be nearly done — the
+      // Turn-cap exhaustion is not a crash: the escalate may be nearly done — the
       // parent must review what landed instead of blind-retrying.
       if (e instanceof agentMod.ContinueError) {
-        return `Surgeon (${tag}) stopped: turn cap reached (${e.turns} turns) — work may be partial; review recent_changes before deciding next steps.\nPartial output: ${output.slice(0, 2000)}${touchedFilesNote(sink, ctx.cwd)}`
+        return `escalate (${tag}) stopped: turn cap reached (${e.turns} turns) — work may be partial; review recent_changes before deciding next steps.\nPartial output: ${output.slice(0, 2000)}${touchedFilesNote(sink, ctx.cwd)}`
       }
       // Timeout reads as timeout — "error: Aborted" would read as a provider crash.
       const note = timedOut
         ? `timed out after ${Math.round(timeoutMs / 60000)}min (agent.consultTimeoutMs)`
         : msg
-      return `Surgeon (${tag}) error: ${note}\nPartial output: ${output.slice(0, 2000)}${touchedFilesNote(sink, ctx.cwd)}`
+      return `escalate (${tag}) error: ${note}\nPartial output: ${output.slice(0, 2000)}${touchedFilesNote(sink, ctx.cwd)}`
     } finally {
       clearTimeout(watchdog)
     }
