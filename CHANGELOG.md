@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.26] — 2026-08-16
+
+### Fixed
+
+- **Turn-cap exhaustion now offers Continue, not retry-only** — at the 100-turn limit the panel showed a generic error (retry from scratch) instead of the CLI's "Continue?" (resume from the current context). panel-chat now catches ContinueError and shows a native Continue / Stop prompt; Continue re-runs with resume=true from the same history with a fresh turn budget. CLI parity (2026-08-16 user report).
+
 ## [0.1.25] — 2026-08-16
 
 ### Terminology unification (user decision: one word for one thing)
