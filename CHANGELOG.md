@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.23] — 2026-08-15
+
+### Consultation panel shows the FULL process (consult-UI review)
+
+- Reasoning streams live into each consultant's block as dimmed thinking text; output text streams as merged chunks — no more "tool calls only, where's the thinking?"
+- Blocks auto-collapse when that consultant settles (answered / terminated / failed): the box folds to its title line, stays reopenable, content preserved
+- Sub-blocks capped at 180px content height (advisor reviews stay 320px) with dimmer titles
+- `onToken`'s depth gate now exempts `role === "consult"` (other subagents unchanged); a stale garbled comment from a bad merge cleaned
+
+### Not done (consultation verdict, archived)
+
+- Responses API transport: verified support matrix first-hand (OpenAI official + Qwen bailian complete; DeepSeek stateless stub; Kimi no endpoint) and consulted — decided NOT to implement: zero user benefit (the three differentiating capabilities are exactly the ones we don't use or already have) against real dual-repo continuation-loop coupling. Archived as a ready-to-trigger contingency with restart signals.
+
 ## [0.1.22] — 2026-08-15
 
 ### Escalate (飞刀) — hand intractable work to a stronger model
