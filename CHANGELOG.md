@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.24] — 2026-08-16
+
+### Cache-hit-rate fixes (user-reported low hit rate, both reports diagnosed via consultation)
+
+- **Time reminder moved to the END of the message sequence** (after the user input) — it was pushed before the input, and since the plugin reloads the machine line from disk each run (transient dropped on persist), its position drifted run-to-run → every run's first request had a different prefix → provider prefix caches never hit. Tail position can never disturb a prefix
+- **Machine line keeps transient messages on persist** — reloading a slot / window reload / session switch must rebuild a byte-identical machine line or the whole prefix misses (same mechanism as the CLI report)
+- The misplaced time push had also silently disabled the fresh-machine-line injections (context docs, MCP list, skills, AUTO/permission reminders) — restored
+
+### Tool-call pairing 400 on strict providers (hit live during the first escalate run)
+
+- Ported normalizeToolPairing: tool results reinserted right after their assistant, missing results filled with a placeholder, orphan tool messages dropped; compact gained reverse tail protection (assistant whose tool results were cut now pulls them back into the tail)
+
+### Escalate (飞刀) gap batch (three-way review, flown to kimi-k3)
+
+- Fresh code from a surgeon resets the parent's verify/advisor convergence budget (no more bypassing the gates); engineering mode fails closed pointing at eng-coder
+- AbortError propagates (user Stop not swallowed); wall-clock watchdog; model-pick tolerates the " (effort)" suffix; no-API-key precheck
+- Surgeon rows show the model name; reasoning + output stream into the panel; returns carry Touched files; ContinueError reads as partial work
+- 飞刀 hook checkbox removed — every consult model is a surgeon candidate (fewer knobs); tool descriptions now list the current candidate pool so the model knows who it can pick
+
+### Fixed
+
+- Markdown tables: escaped pipe \| no longer splits the cell
+- Design docs synced with implementation (status + current values)
+
 ## [0.1.23] — 2026-08-15
 
 ### Consultation panel shows the FULL process (consult-UI review)
