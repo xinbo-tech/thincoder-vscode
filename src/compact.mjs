@@ -156,6 +156,23 @@ export async function compactHistory(history, systemPrompt, provider, explicitTh
   while (tailStart > headEnd && history[tailStart].role === "tool") {
     tailStart++
   }
+    // REVERSE protection (2026-08-16): if the tail opens with an assistant declaring
+    // tool_calls whose tool results were cut just before tailStart, extend tailStart
+    // back over them — dangling tool_calls in the sent history 400 on strict providers.
+    if (history[tailStart]?.role === "assistant" && history[tailStart].tool_calls?.length) {
+      const needIds = new Set(history[tailStart].tool_calls.map((tc) => tc.id))
+      const haveIds = new Set()
+      for (let i = tailStart + 1; i < history.length && history[i].role === "tool"; i++) {
+        haveIds.add(history[i].tool_call_id)
+      }
+      if (needIds.size > 0 && [...needIds].some((id) => !haveIds.has(id))) {
+        let back = tailStart - 1
+        while (back >= headEnd && history[back]?.role === "tool") back--
+        // include the missing tool results (they sit contiguously before the assistant)
+        tailStart = back + 1
+      }
+    }
+  
   if (tailStart <= headEnd) return null
 
   const oldMessages = history.slice(headEnd, tailStart)
@@ -229,6 +246,23 @@ export function truncateFallback(history, provider) {
     }
   }
   while (tailStart > headEnd && history[tailStart].role === "tool") tailStart++
+    // REVERSE protection (2026-08-16): if the tail opens with an assistant declaring
+    // tool_calls whose tool results were cut just before tailStart, extend tailStart
+    // back over them — dangling tool_calls in the sent history 400 on strict providers.
+    if (history[tailStart]?.role === "assistant" && history[tailStart].tool_calls?.length) {
+      const needIds = new Set(history[tailStart].tool_calls.map((tc) => tc.id))
+      const haveIds = new Set()
+      for (let i = tailStart + 1; i < history.length && history[i].role === "tool"; i++) {
+        haveIds.add(history[i].tool_call_id)
+      }
+      if (needIds.size > 0 && [...needIds].some((id) => !haveIds.has(id))) {
+        let back = tailStart - 1
+        while (back >= headEnd && history[back]?.role === "tool") back--
+        // include the missing tool results (they sit contiguously before the assistant)
+        tailStart = back + 1
+      }
+    }
+  
   if (tailStart <= headEnd) return null
   return [
     ...history.slice(0, headEnd),
