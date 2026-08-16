@@ -119,6 +119,12 @@ async function runConsultChild(ctx, session, id, m, problem, ctrl) {
     const result = await runner({ ...withEffort, model: m.model }, ctx.cwd, "# Problem\n" + problem, {
       onToolCall: (name, args) => panel({ kind: "tool", text: name + " " + (JSON.stringify(args) || "").slice(0, 120) }),
       onToolResult: (name, text) => panel({ kind: "tool", text: "→ " + String(text ?? "").slice(0, 80).replace(/\n/g, " ") }),
+      // 完整思考过程 + 输出文本流 (consult-UI review 2026-08-15): onReasoning has no depth
+      // gate; onToken needs the consult exemption in agent.mjs — both stream as advisor-kind
+      // chunks (think = dimmed, text = merged) so the panel shows the FULL reasoning, not
+      // just tool calls.
+      onReasoning: (r) => panel({ kind: "think", text: String(r ?? "") }),
+      onToken: (t) => panel({ kind: "text", text: String(t ?? "") }),
     }, ctrl.signal, true, {
       // role "consult": lean consult-base.md system prompt, read-only tools, small turn budget.
       // Consultations are diagnosis tasks — 40 tool turns is enough to read the relevant files

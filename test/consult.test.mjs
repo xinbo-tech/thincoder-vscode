@@ -197,6 +197,23 @@ describe("consult mechanism", () => {
     await cleanupConsultSessions(agent)
   })
 
+  it("consultant reasoning + output text stream into the panel (consult-UI review)", async () => {
+    const agent = makeAgent(MODELS)
+    const panels = []
+    const runner = async (provider, cwd, task, callbacks) => {
+      callbacks.onReasoning?.("deep thinking...") // onReasoning: no depth gate, must flow
+      callbacks.onToken?.("final answer text")    // onToken: consult exempted in agent.mjs
+      return "diagnosis"
+    }
+    const ctx = makeCtx(agent, runner)
+    ctx.callbacks = { onToolPanel: (name, chunk) => panels.push({ name, chunk }) }
+    await consultStartTool.execute({ problem: "stuck" }, ctx)
+    await sleep(50)
+    assert.ok(panels.some((p) => p.chunk.kind === "think" && p.chunk.text === "deep thinking..."), "reasoning streams as think chunk")
+    assert.ok(panels.some((p) => p.chunk.kind === "text" && p.chunk.text === "final answer text"), "output streams as text chunk")
+    await cleanupConsultSessions(agent)
+  })
+
   it("watchdog timeout settles as 'timed out', not 'aborted' (a timeout is not a provider crash)", async () => {
     const agent = makeAgent(MODELS)
     agent.config.agent.consultTimeoutMs = 50

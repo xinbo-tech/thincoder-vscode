@@ -378,7 +378,10 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     const response = await chat(provider, {
       messages,
       tools: toolSchemas,
-      onToken: depth === 0 ? callbacks.onToken : null,
+      // onToken gate: depth 0 always; consult children are exempt so their OUTPUT streams
+      // into the consultation panel (consult-UI review 2026-08-15). Other subagents never
+      // pass onToken, so their behavior is unchanged.
+      onToken: depth === 0 || role === "consult" ? callbacks.onToken : null,
       onReasoning: callbacks.onReasoning,
       onWait: callbacks.onWait,
       signal,

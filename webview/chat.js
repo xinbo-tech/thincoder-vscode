@@ -1250,6 +1250,12 @@ window.addEventListener("message", (e) => {
       } else {
         const s = _subagentMap[m.id]
         if (s) { s.status = m.status; s.doneAt = Date.now(); if (m.error) s.error = m.error; if (m.replyPreview) s.replyPreview = m.replyPreview }
+        // Consult terminal state → collapse its activity block (consult-UI review 2026-08-15;
+        // the "collapses when done" comment was a promise the code never kept).
+        if (m.role === "consult" && m.model && m.status !== "started") {
+          const block = _subBlocks.get(`sub:consult ${m.model}`)
+          if (block) block.open = false
+        }
       }
       renderSubagentPanel()
       renderStatusBar()
@@ -1298,6 +1304,7 @@ function subagentChunk(m) {
   let block = _subBlocks.get(m.name)
   if (!block) {
     block = buildAdvisorBlock(m.name.slice(4)) // strip "sub:" — the label IS the header
+    block.classList.add("sub-block") // shorter content height + dimmer title (consult-UI review)
     block.open = true
     if (ctx.currentBlock) ctx.currentBlock.appendChild(block)
     else ctx.messagesEl.appendChild(block)
@@ -1440,7 +1447,7 @@ function finish(aborted) {
   ctx._toolRefs = {}
   _currentTool = null
   _turnStart = null
-  _advisorBlock = null; _subBlocks.clear() // turn over — blocks reset with the turnrn over — blocks reset with the turnens a fresh round block
+  _advisorBlock = null; _subBlocks.clear() // turn over — blocks reset with the turn
   setLoading(ctx, false)
   renderStatusBar()
 }
