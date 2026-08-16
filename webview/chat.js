@@ -1302,9 +1302,8 @@ function advisorChunk(m) {
   }
   if (!_advisorBlock) return
   appendAdvisorChunk(_advisorBlock, m.kind ?? "text", m.text)
-  const content = _advisorBlock.querySelector(".advisor-content")
-  if (content) content.scrollTop = content.scrollHeight
-  maybeScrollDown(ctx)
+  _advisorScrollDirty = true
+  scheduleStreamRender()
 }
 
 
@@ -1322,9 +1321,8 @@ function subagentChunk(m) {
     _subBlocks.set(m.name, block)
   }
   appendAdvisorChunk(block, m.kind ?? "tool", m.text)
-  const content = block.querySelector(".advisor-content")
-  if (content) content.scrollTop = content.scrollHeight
-  maybeScrollDown(ctx)
+  _advisorScrollDirty = true
+  scheduleStreamRender()
 }
 
 // ─── Send ──────────────────────────────────────
@@ -1388,12 +1386,13 @@ function send() {
 // Stream render scheduler: reasoning/token chunks arrive at thousands/sec; rendering
 // markdown + innerHTML on EVERY chunk is O(n²) and floods the main thread — the backlog
 // keeps the Stop button unresponsive long after the backend aborted (2026-08-16
-// "Stop won't stop while thinking" bug). rAF throttles to one render per frame;
-// reasoning (a collapsible scratchpad) renders as plain text — thinking tokens outnumber
-// body tokens ~10:1, so skipping markdown there is where the win is.
+// "Stop won't stop while thinking" bug). rAF throttles to one render per frame.
+// Advisor/subagent content appends incrementally (appendAdvisorChunk), but their
+// per-chunk scrollTop=scrollHeight forces a sync layout — that's folded in here too.
 let _renderScheduled = false
 let _reasoningDirty = false
 let _tokenDirty = false
+let _advisorScrollDirty = false
 
 function scheduleStreamRender() {
   if (_renderScheduled) return
@@ -1408,6 +1407,13 @@ function scheduleStreamRender() {
     if (ctx.currentBubble && _tokenDirty) {
       try { ctx.currentBubble.innerHTML = md(ctx.currentRaw) } catch { ctx.currentBubble.textContent = ctx.currentRaw }
       _tokenDirty = false
+    }
+    if (_advisorScrollDirty) {
+      for (const block of [_advisorBlock, ..._subBlocks.values()]) {
+        const c = block?.querySelector(".advisor-content")
+        if (c) c.scrollTop = c.scrollHeight
+      }
+      _advisorScrollDirty = false
     }
     maybeScrollDown(ctx)
   })
