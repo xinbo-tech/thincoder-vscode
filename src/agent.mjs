@@ -99,7 +99,14 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         : [])]
     : role === "eng-coder"
       ? [taskTool, recentChangesTool, planTool, timerTool, advisorTool, verifyTool] // eng-coder: design review + verify gates
-      : [taskTool, recentChangesTool] // subagents get fewer meta-tools
+    // Write-permission coder sub-agents (subagentTool + escalate surgeon): their system
+    // prompt names verify (system.md) and advisor (discipline.md) — without them the
+    // surgeon hit "unknown tool" and fell back to bash node --check / npm test to
+    // self-verify (2026-08-16 deepseek surgeon diagnosis). eng-coder already had both;
+    // plain coder was the missed branch.
+    : role === "coder"
+      ? [taskTool, recentChangesTool, verifyTool, advisorTool]
+      : [taskTool, recentChangesTool] // read-only subagents get fewer meta-tools
 
   // MCP tools: idempotent connect + expand into NATIVE tools (CLI parity, MCP.md D1/D2).
   // Top level only; failures never block — each warning is injected as a reminder.
