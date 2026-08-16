@@ -9,7 +9,7 @@ import { ctxPercentForModel } from "../config.mjs"
 import { providerNames, getKey, buildProvider } from "./presets.mjs"
 import { saveModelPrefs } from "./session-io.mjs"
 import { specForModel } from "../specs.mjs"
-import { runAgent } from "../agent.mjs"
+import { runAgent, ContinueError } from "../agent.mjs"
 import { getMcpServers } from "./settings.mjs"
 import { loadSkills } from "./skills.mjs"
 import { collectEditorInjection } from "./editor-context.mjs"
@@ -177,6 +177,22 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     if (e?.name === "AbortError" && e.reason?.interrupt) {
       panel._abortController = new AbortController()
       await runAgent(p, cwd, text, buildCallbacks(), panel._abortController.signal, () => panel._autoApprove, runOpts(true))
+    } else if (e instanceof ContinueError) {
+      // Turn-cap exhaustion: offer to continue from the current context, NOT error
+      // (CLI agent-turn.mjs parity — "Ran N turns. Continue?"). Rebuilding the
+      // controller + resume re-runs the loop from the SAME history (the user message
+      // is already pushed; resume=true skips re-pushing it).
+      const willContinue = await vscode.window.showInformationMessage(
+        `Agent reached ${e.turns} turns (limit). Continue from here?`,
+        "Continue",
+        "Stop",
+      )
+      if (willContinue === "Continue") {
+        panel._abortController = new AbortController()
+        await runAgent(p, cwd, text, buildCallbacks(), panel._abortController.signal, () => panel._autoApprove, runOpts(true))
+      } else {
+        panel._panel.webview.postMessage({ type: "aborted" })
+      }
     } else {
       // Persist the interrupted/errored turn: the user message and any partial output
       // were already pushed into both lines by runAgent (pushReal). Without this save,
