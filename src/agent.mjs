@@ -233,15 +233,6 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   agent.cwd = cwd
   agent.history = history
 
-  // Per-run time grounding (transient — variable content must NOT live in the system
-  // prompt or provider prefix caches break). Fresh local time at every run start, dropped
-  // on persist; subagents get it too (they are short-lived, seconds precision is fine here).
-  history.push({
-    role: "user",
-    content: `[System reminder: current time is ${new Date().toLocaleString("sv-SE")} (local; timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone || "local"}).]`,
-    transient: true,
-  })
-
   // ─── Context injection (top-level only, fresh machine line only) ────
   // These machine-only injections are transient context; a persistent machine line already carries
   // them from prior turns, so only inject when starting a brand-new (empty) machine line.
@@ -293,6 +284,17 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   // resume (interrupt continuation): the input is already in history — pushing it
   // again would duplicate the user message (CLI setup.mjs resume parity).
   if (!resume) pushReal(history, fullHistory, { role: "user", content: input })
+
+  // Per-run time grounding, pushed LAST (after the user input): the reminder is transient
+  // (dropped on persist, fresh each run) and must live at the END of the sequence so its
+  // second-precision content never shifts a prefix. Interleaving it BEFORE the user input
+  // made it drift run-to-run (disk reload loses the old transient) → provider prefix
+  // caches never hit (2026-08-16 cache-hit regression).
+  history.push({
+    role: "user",
+    content: `[System reminder: current time is ${new Date().toLocaleString("sv-SE")} (local; timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone || "local"}).]`,
+    transient: true,
+  })
 
   // Machine-only injections (editor context, etc.) — pushed to the MACHINE line ONLY,
   // never into fullHistory (CLI parity: automatic context must not pollute the
