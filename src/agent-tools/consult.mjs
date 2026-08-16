@@ -147,6 +147,10 @@ async function runConsultChild(ctx, session, id, m, problem, ctrl) {
  *  consultation controller, wake parked waiters, clear the session map. */
 export function cleanupConsultSessions(agent) {
   for (const s of agent._consultSessions?.values() ?? []) {
+    // User Stop (panel abort) is an INTENTIONAL stop, not a child failure — mark stopped
+    // BEFORE aborting so the children settle as TERMINATED (clean grey card) instead of
+    // FAILED (red error). Without this the user reads "failed" as "it didn't stop".
+    s.stopped = true
     for (const c of s.controllers ?? []) { try { c.abort() } catch { /* already settled */ } }
     for (const w of s.waiters?.splice(0) ?? []) { try { w() } catch { /* noop */ } }
   }
