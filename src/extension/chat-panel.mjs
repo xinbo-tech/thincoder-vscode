@@ -168,15 +168,17 @@ export class ChatPanel {
     // writes, so any field we drop here is lost permanently. Spread ...existing so fields the
     // extension doesn't know about (activeModel, engineering, engDesignToken, ...) round-trip
     // intact, then override only what the extension actually owns.
-    // Transient machine-only messages (editor-context injections) are dropped on persist
-    // (CLI saveSession parity) — they are re-injected fresh on the next turn.
+    // Human line drops transient machine-only injections (editor context, time reminder);
+    // the MACHINE line keeps them — reloading the slot must rebuild a byte-identical
+    // machine line or provider prefix caches miss (CLI parity, 2026-08-16 cache-hit fix).
     const keepReal = (m) => !m.transient
+    const keepMachine = () => true
     saveSessionToSlot(cwd, slot, {
       ...existing,
       version: 2, cwd, updatedAt: Date.now(),
       title: existing.title ?? "",
       activeProvider: extra.activeProvider ?? existing.activeProvider ?? "",
-      history: fullHistory.filter(keepReal), contextHistory: contextHistory.filter(keepReal),
+      history: fullHistory.filter(keepReal), contextHistory: contextHistory.filter(keepMachine),
       // display (the CLI's old WYSIWYG render snapshot) is DEPRECATED — the CLI no
       // longer reads or writes it (restore always rebuilds from history, lazily).
       // Clear it defensively so OLD CLI builds still fall back to history instead
