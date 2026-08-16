@@ -90,10 +90,13 @@ export const escalateTool = {
       ? (() => {
           // Clamp the pool's effort to the model's reasoningEffortEnum — an out-of-enum
           // value makes provider/core throw on EVERY chat call (candidate dies on takeoff).
+          // Out-of-enum: DROP the effort entirely (the preset default may ALSO be out-of-enum
+          // for this override model).
           const enumList = specForModel(pick.model).reasoningEffortEnum
           if (enumList && !enumList.includes(pick.effort)) {
-            effortNote = ` (effort "${pick.effort}" unsupported by ${pick.model}, using preset default)`
-            return provider
+            effortNote = ` (effort "${pick.effort}" unsupported by ${pick.model}, dropped)`
+            const { reasoningEffort: _drop, ...rest } = provider
+            return rest
           }
           return { ...provider, reasoningEffort: pick.effort }
         })()

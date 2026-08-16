@@ -10,6 +10,7 @@
  * aborts leftovers.
  */
 import { buildProvider } from "../extension/presets.mjs"
+import { specForModel } from "../specs.mjs"
 
 /** Read-only tool injected into consultation children (via runAgent opts.extraTools).
  *  Lets the consultant pull the main agent's conversation history on demand —
@@ -111,7 +112,19 @@ async function runConsultChild(ctx, session, id, m, problem, ctrl) {
     if (!provider) throw new Error(`provider "${m.provider}" not configured`)
     // Effort level from the consult entry (MODEL-PICKER-UNIFY §3.3): explicit, model-official
     // default filled by the panel at pick time. Non-thinking models carry effort:null.
-    const withEffort = m.effort ? { ...provider, reasoningEffort: m.effort } : provider
+    // Clamp to reasoningEffortEnum — out-of-enum makes provider/core throw on EVERY chat
+    // call (candidate dies on takeoff). Out-of-enum: DROP the effort entirely (the preset
+    // default may ALSO be out-of-enum for this override model).
+    const withEffort = m.effort
+      ? (() => {
+          const enumList = specForModel(m.model).reasoningEffortEnum
+          if (enumList && !enumList.includes(m.effort)) {
+            const { reasoningEffort: _drop, ...rest } = provider
+            return rest
+          }
+          return { ...provider, reasoningEffort: m.effort }
+        })()
+      : provider
     const runner = ctx.runAgent ?? (await import("../agent.mjs")).runAgent
     // Activity stream: the consultant's tool calls stream to the panel under its own
     // label (subagent visibility — same channel the subagent tool uses).
