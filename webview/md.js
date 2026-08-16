@@ -92,7 +92,12 @@ function renderTable(raw) {
   if (lines.length < 2) return esc(raw)
 
   const parseRow = (line) =>
-    line.replace(/^\||\|$/g, "").split("|").map((c) => c.trim())
+    line
+      .replace(/^\||\|$/g, "")
+      // Escaped pipe (\| = literal |) must not split the cell — placeholder before splitting
+      .replace(/\\\|/g, "\x00P\x00")
+      .split("|")
+      .map((c) => c.replace(/\x00P\x00/g, "|").trim())
 
   const header = parseRow(lines[0])
   const body = lines.slice(2).map(parseRow)
