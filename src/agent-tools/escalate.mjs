@@ -19,6 +19,13 @@ export const escalateTool = {
   name: "escalate",
   sideEffectExempt: true, // the child's mutations are tracked and reviewed, like subagent
   description:
+    // Terminology map FIRST (2026-08-16): three words for one thing confused models into
+    // looking for a "surgeon" TOOL (it is a role, not a tool) or importing the escalate
+    // MODULE instead of calling it. Pin the mapping before anything else.
+    "TERMINOLOGY: 'escalate' is THIS tool's only callable name; 飞刀 is its Chinese alias; " +
+    "'surgeon' is the ROLE of the expert sub-agent it spawns (a role, never a tool — there " +
+    "is no tool named 'surgeon'). When the user says 飞刀 / surgeon / 'fly in <model>', call " +
+    "escalate — directly, never via a script importing this module. " +
     "Hand an implementation task to a stronger model (飞刀 — a flown-in expert surgeon). " +
     "It gets WRITE access and does the work itself — reads, edits, runs tests — then returns " +
     "a post-op report (what changed, why, verification). You review the report and report to " +
