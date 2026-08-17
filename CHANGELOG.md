@@ -1,4 +1,10 @@
 # Changelog
+## [0.1.35] — 2026-08-18
+
+### Fixed
+
+- **question 工具 options 防御** — LLM 误传对象（{label,description}）时取 label/text/title 字段兜底，不再渲染成 [object Object]（panel 内联卡 + QuickPick 回退两处）
+
 
 ## [0.1.33] — 2026-08-17
 
