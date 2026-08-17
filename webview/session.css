@@ -149,6 +149,36 @@
   opacity: 1;
 }
 
+/* Current-project button (multi-root switcher) — left edge of the session bar */
+#project-btn {
+  flex-shrink: 0;
+  max-width: 200px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+#project-btn:hover {
+  background: var(--hover-bg-strong);
+  color: var(--accent);
+  opacity: 1;
+}
+
 .dropdown-section {
   padding: 4px 12px 2px;
   font-size: 10px;

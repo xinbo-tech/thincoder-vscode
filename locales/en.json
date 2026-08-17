@@ -196,5 +196,9 @@
   "settings.consultTurnsHelp": "Max tool turns per consultant (diagnosis tasks rarely need more)",
   "settings.consultTimeout": "Timeout (minutes)",
   "settings.consultTimeoutHelp": "Wall-clock ceiling per consultant — turn limits count LLM responses, not time stuck in a slow tool",
-  "consult.replyPreview": "view reply"
+  "consult.replyPreview": "view reply",
+  "project.followActive": "Follow active file",
+  "project.followActiveHint": "auto-switch to the active editor's folder",
+  "project.pickPlaceholder": "Switch current project",
+  "project.followActiveOn": "follow-active-file on"
 }

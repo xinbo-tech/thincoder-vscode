@@ -57,6 +57,8 @@ const ctx = {
   welcomeSaveBtn: document.getElementById("welcome-save-btn"),
   welcomeSkipBtn: document.getElementById("welcome-skip-btn"),
   welcomeSettingsBtn: document.getElementById("welcome-settings-btn"),
+  // Current-project button (multi-root switcher, session bar)
+  projectBtn: document.getElementById("project-btn"),
 }
 
 // ─── Shared mutable state (must be declared before setInterval / event handlers)
@@ -595,6 +597,9 @@ function renderStatusBar(m) {
 
 document.getElementById("settings-btn").addEventListener("click", openSettings)
 
+// Current-project button (multi-root): native picker on the extension side.
+ctx.projectBtn?.addEventListener("click", () => vscode.postMessage({ type: "setProject" }))
+
 // ─── First-run onboarding panel ─────────────────
 
 /** Show the onboarding panel, pre-filled with the unadded provider presets. */
@@ -1113,6 +1118,22 @@ window.addEventListener("message", (e) => {
       ctx.activeSession = m.active || 0
       updateSessionTitle()
       break
+    case "project": {
+      const btn = ctx.projectBtn
+      if (!btn) break
+      if (m.multi) {
+        btn.style.display = ""
+        const name = (m.folders || []).find((f) => f.path === m.current)?.name
+          || String(m.current || "").split(/[\\/]/).pop()
+        btn.textContent = "📁 " + name
+        btn.title = m.followActive
+          ? `${m.current} · ${t("project.followActiveOn")}`
+          : m.current
+      } else {
+        btn.style.display = "none"
+      }
+      break
+    }
     case "models":
       ctx._models = m.models || []
       if (ctx._models.length > 0) {

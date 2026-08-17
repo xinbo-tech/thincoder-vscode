@@ -11,9 +11,9 @@ import { listSlots, loadSlot, saveSessionToSlot, setSlotAutoApprove, setSlotPlan
 import { providerStatus, saveProviderKey, saveCustomProvider, deleteProviderKey, pushStatus, fullStatus, getMcpServers, saveMcpServer, deleteMcpServer, connectedMcpServers, agentSettings, proxySettings, shellCandidates, websearchSettings } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { generateTitle } from "./generate-title.mjs"
-import { loadLocaleStrings } from "../i18n.mjs"
+import { loadLocaleStrings, t } from "../i18n.mjs"
 import { getEmbedder, setVSCodeEmbedder, resetEmbedder } from "../embed-config.mjs"
-import { handlePanelMessage, _cwd } from "./panel-messages.mjs"
+import { handlePanelMessage, _cwd, setProjectFolder, clearProjectOverride } from "./panel-messages.mjs"
 import { runPanelChat } from "./panel-chat.mjs"
 import { stripEditorInjection } from "./editor-context.mjs"
 import { loadEmbeddingConfig, saveEmbeddingConfig, loadRaw } from "../config-io.mjs"
@@ -41,6 +41,33 @@ export class ChatPanel {
     // then used for ALL reads and writes — we never re-read the shared manifest's active
     // pointer mid-conversation (it can be changed by a concurrently running CLI).
     this._slot = null
+
+    // Follow-active-file project switching (multi-root): when the setting is on and the
+    // active editor's folder differs from the current project, switch automatically.
+    // Guarded by _turnActive — never yank the cwd out from under a running turn.
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (!editor) return
+      try {
+        const follow = vscode.workspace.getConfiguration("thincoder.project").get("followActiveEditor", false)
+        if (!follow) return
+        const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri)
+        if (!folder || folder.uri.fsPath === _cwd() || this._turnActive) return
+        const r = setProjectFolder(folder.uri.fsPath)
+        if (r.ok) this._onProjectChanged().catch((e) => console.error("[chat-panel] project switch failed:", e.message))
+      } catch (e) {
+        console.error("[chat-panel] follow-active-file switch failed:", e.message)
+      }
+    }))
+
+    // If the overridden project folder is removed from the workspace, fall back to
+    // workspaceFolders[0] (a stale cwd would point agent runs at a dead directory).
+    context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      const folders = vscode.workspace.workspaceFolders ?? []
+      const cwd = _cwd()
+      if (!cwd || folders.some((f) => f.uri.fsPath === cwd)) return
+      clearProjectOverride()
+      this._onProjectChanged().catch((e) => console.error("[chat-panel] project fallback failed:", e.message))
+    }))
   }
 
   /**
@@ -248,6 +275,82 @@ export class ChatPanel {
     this._loadSession()
   }
 
+  // ─── Project (multi-root current-project switcher) ───
+
+  /** Snapshot for the webview's project button: { folders, current, multi, followActive }. */
+  _projectInfo() {
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => ({
+      name: f.name, path: f.uri.fsPath,
+    }))
+    const follow = vscode.workspace.getConfiguration("thincoder.project").get("followActiveEditor", false)
+    return { folders, current: _cwd(), multi: folders.length > 1, followActive: !!follow }
+  }
+
+  _pushProject() {
+    this._panel?.webview.postMessage({ type: "project", ...this._projectInfo() })
+  }
+
+  /** Apply a project switch (validated): rebind the slot and reload everything per-cwd. */
+  async _applyProjectSwitch(fsPath) {
+    if (this._turnActive) {
+      vscode.window.showWarningMessage("ThinCoder: a task is running — stop it before switching projects.")
+      return
+    }
+    const r = setProjectFolder(fsPath)
+    if (!r.ok) {
+      vscode.window.showErrorMessage(`ThinCoder: ${r.error}`)
+      return
+    }
+    await this._onProjectChanged()
+  }
+
+  /** After the cwd changed: rebind to the new project's session and refresh per-cwd UI. */
+  async _onProjectChanged() {
+    this._slot = null
+    const cwd = _cwd()
+    const slots = listSlots(cwd)
+    this._slot = slots.length === 0 ? newSlot(cwd) : activeSlot(cwd)
+    this._pushProject()
+    this._loadSession()   // clearMessages + new project's history + sessions + autoApprove/planMode
+    this._pushIndexStatus()
+    this._maybePromptIndex()
+  }
+
+  /** Native picker over the workspace roots (fixed options) + the follow-active toggle. */
+  async _pickProject() {
+    const folders = vscode.workspace.workspaceFolders ?? []
+    if (folders.length < 2) {
+      vscode.window.showInformationMessage("Only one workspace folder is open.")
+      return
+    }
+    const cfg = vscode.workspace.getConfiguration("thincoder.project")
+    for (;;) {
+      const followActive = !!cfg.get("followActiveEditor", false)
+      const items = folders.map((f) => ({
+        label: f.uri.fsPath === _cwd() ? `$(check) ${f.name}` : `$(folder) ${f.name}`,
+        description: f.uri.fsPath,
+        folder: f,
+      }))
+      items.push({
+        label: (followActive ? "$(check) " : "") + t("project.followActive"),
+        description: t("project.followActiveHint"),
+        toggle: true,
+      })
+      const sel = await vscode.window.showQuickPick(items, {
+        placeHolder: t("project.pickPlaceholder"),
+        matchOnDescription: true,
+      })
+      if (!sel) return
+      if (sel.toggle) {
+        await cfg.update?.("followActiveEditor", !followActive, vscode.ConfigurationTarget?.Global)
+        continue  // re-open the picker so the new toggle state is visible
+      }
+      if (sel.folder.uri.fsPath === _cwd()) return
+      await this._applyProjectSwitch(sel.folder.uri.fsPath)
+      return
+    }
+  }
+
   async _generateTitle() {
     try {
       const cwd = _cwd()
@@ -371,7 +474,7 @@ export class ChatPanel {
   }
 
   _pushIndexStatus() {
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath
+    const cwd = _cwd()
     if (!cwd) return
     const embedder = this._getEmbedder()
     let status = null
@@ -392,8 +495,7 @@ export class ChatPanel {
 
   async _atComplete(query, cwd) {
     try {
-      const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath
-      const base = cwd || wsFolder || process.cwd()
+      const base = cwd || _cwd() || process.cwd()
       const pattern = query.startsWith("@") ? query.slice(1) : query
       const uris = await vscode.workspace.findFiles(
         `**/${pattern}*`,
@@ -419,6 +521,7 @@ export class ChatPanel {
     const slots = listSlots(cwd)
     // Resolve this panel's slot once: reuse the persisted active session, or create the first one.
     this._slot = slots.length === 0 ? newSlot(cwd) : activeSlot(cwd)
+    this._pushProject()
     this._pushSessions()
     this._loadSession()
     // One-time migration of legacy key stores (SecretStorage + thincoder.providers settings)
@@ -468,7 +571,7 @@ export class ChatPanel {
   }
 
   async _maybePromptIndex() {
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath
+    const cwd = _cwd()
     if (!cwd) return
     const embedder = this._getEmbedder()
     if (!embedder) return
@@ -486,7 +589,7 @@ export class ChatPanel {
   }
 
   async _buildIndex() {
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath
+    const cwd = _cwd()
     if (!cwd) {
       vscode.window.showErrorMessage("No workspace folder open.")
       return

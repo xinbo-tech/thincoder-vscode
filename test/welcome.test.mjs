@@ -35,6 +35,12 @@ describe("welcome panel — DOM structure", () => {
     }
   })
 
+  it("index.html contains the current-project button (hidden until multi-root project push)", () => {
+    const btn = document.getElementById("project-btn")
+    assert.ok(btn, "missing #project-btn")
+    assert.equal(btn.style.display, "none")
+  })
+
   it("the panel is hidden by default (opts in on first providerStatus without a configured key)", () => {
     const panel = document.getElementById("welcome-panel")
     assert.equal(panel.getAttribute("aria-hidden"), "true")

@@ -20,6 +20,7 @@ import { extractFileLinks } from "./file-links.mjs"
 import { traceStop } from "./stop-trace.mjs"
 import { resolveReasoningMode } from "./reasoning-mode.mjs"
 import { t } from "../i18n.mjs"
+import { _cwd } from "./panel-messages.mjs"
 
 /**
  * Run one chat turn: resolve provider → build callbacks → runAgent →
@@ -61,7 +62,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   // e.g. the Zhipu coding plan — will still emit reasoning regardless.)
   if (reasoning) p = { ...p, ...resolveReasoningMode(reasoning, p.model, specForModel) }
 
-  const cwd = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
+  const cwd = _cwd() || process.cwd()
 
   // Sync the live mid-turn flag from the session slot (CLI parity — autoApprove is a
   // session-level slot field, not a VS Code setting). runAgent receives a GETTER: the

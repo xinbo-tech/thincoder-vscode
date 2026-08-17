@@ -13,7 +13,27 @@ import { openDiffPreview } from "./diff-preview.mjs"
 import { traceStop } from "./stop-trace.mjs"
 
 /** Current workspace folder (or process cwd) — shared with chat-panel. */
-export const _cwd = () => vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd()
+let _cwdOverride = null
+export const _cwd = () => _cwdOverride ?? (vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd())
+
+/**
+ * Switch the "current project" (agent cwd) in a multi-root workspace.
+ * fsPath must be one of workspaceFolders — anything else is rejected.
+ * Returns { ok } or { ok:false, error }.
+ */
+export function setProjectFolder(fsPath) {
+  const folders = vscode.workspace.workspaceFolders ?? []
+  if (!folders.some((f) => f.uri.fsPath === fsPath)) {
+    return { ok: false, error: `Not a workspace folder: ${fsPath}` }
+  }
+  _cwdOverride = fsPath
+  return { ok: true }
+}
+
+/** Drop the override — _cwd() falls back to workspaceFolders[0] again. */
+export function clearProjectOverride() {
+  _cwdOverride = null
+}
 
 /**
  * Handle one webview message. `panel` is the ChatPanel instance — its methods
@@ -53,6 +73,13 @@ export async function handlePanelMessage(panel, msg) {
       break
     }
     case "deleteSession": await panel._deleteSession(msg.slot); break
+    case "setProject": {
+      // Current-project switcher (multi-root): with fsPath → switch directly;
+      // without → show the native folder picker.
+      if (msg.fsPath) await panel._applyProjectSwitch(msg.fsPath)
+      else await panel._pickProject()
+      break
+    }
     case "retry": {
       const history = panel._activeHistory()
       const lastUser = [...history].reverse().find((m) => (m.type ?? m.role) === "user")
