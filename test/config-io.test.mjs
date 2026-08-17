@@ -134,11 +134,11 @@ describe("resolveProviders", () => {
     assert.equal(providers[0].baseURL, "https://x.test/v1")
   })
 
-  it("honors THINCODER_ACTIVE_PROVIDER", () => {
+  it("ignores THINCODER_ACTIVE_PROVIDER env (config.json is the only source)", () => {
     writeCfg({ providers: [{ name: "a" }, { name: "b" }], activeProvider: "a" })
     process.env.THINCODER_ACTIVE_PROVIDER = "b"
     try {
-      assert.equal(resolveProviders().activeProvider, "b")
+      assert.equal(resolveProviders().activeProvider, "a")
     } finally {
       delete process.env.THINCODER_ACTIVE_PROVIDER
     }
@@ -175,19 +175,16 @@ describe("resolveKey — config-only (env vars are not a key source)", () => {
   })
 })
 
-describe("resolveModel precedence", () => {
+describe("resolveModel — config-only (env vars are ignored)", () => {
   it("config activeModel overrides provider.model", () => {
     assert.equal(resolveModel({ model: "m0" }, "m1"), "m1")
   })
-  it("CLI loadConfig order: ACTIVE_MODEL env > config activeModel > THINCODER_MODEL env > provider.model", () => {
+  it("falls back to provider.model and ignores THINCODER_MODEL / THINCODER_ACTIVE_MODEL", () => {
     process.env.THINCODER_MODEL = "env-model"
+    process.env.THINCODER_ACTIVE_MODEL = "env-active"
     try {
-      // config activeModel beats THINCODER_MODEL (CLI applies activeModel after THINCODER_MODEL)
-      assert.equal(resolveModel({ model: "m0" }, "m1"), "m1")
-      // without config activeModel, THINCODER_MODEL applies
-      assert.equal(resolveModel({ model: "m0" }, null), "env-model")
-      process.env.THINCODER_ACTIVE_MODEL = "env-active"
-      assert.equal(resolveModel({ model: "m0" }, "m1"), "env-active")
+      assert.equal(resolveModel({ model: "m0" }, null), "m0")
+      assert.equal(resolveModel({ model: "m0" }, "m1"), "m1", "config activeModel still wins")
     } finally {
       delete process.env.THINCODER_ACTIVE_MODEL
       delete process.env.THINCODER_MODEL
@@ -203,7 +200,7 @@ describe("providerFromConfig", () => {
     assert.equal(providerFromConfig("a"), null)
   })
 
-  it("builds the runtime provider (key + model + env overrides)", () => {
+  it("builds the runtime provider (key + model, config-only; THINCODER_BASE_URL ignored)", () => {
     writeCfg({ providers: [{ name: "a", baseURL: "https://x.test/v1/", model: "m0", apiKey: "k" }], activeProvider: "a" })
     const p = providerFromConfig("a")
     assert.equal(p.apiKey, "k")
@@ -211,7 +208,7 @@ describe("providerFromConfig", () => {
     assert.equal(p.baseURL, "https://x.test/v1") // trailing slash normalized
     process.env.THINCODER_BASE_URL = "https://override.test/v1/"
     try {
-      assert.equal(providerFromConfig("a").baseURL, "https://override.test/v1")
+      assert.equal(providerFromConfig("a").baseURL, "https://x.test/v1")
     } finally {
       delete process.env.THINCODER_BASE_URL
     }

@@ -111,10 +111,10 @@ export function normalizeProxy(proxy) {
 
 /**
  * Resolve providers list + active name from disk. BaseURL trailing slashes normalized.
- * Env overrides: THINCODER_ACTIVE_PROVIDER (active pointer) — resolved here so every
- * read path sees them. Returns { providers, activeProvider }.
- * An empty/missing providers[] resolves to an EMPTY list (no synthetic preset entries):
- * the onboarding UI (welcome panel) is the path from "nothing configured" to a setup.
+ * Returns { providers, activeProvider }. No env-var overrides — config.json is the
+ * single source of truth. An empty/missing providers[] resolves to an EMPTY list
+ * (no synthetic preset entries): the onboarding UI (welcome panel) is the path from
+ * "nothing configured" to a setup.
  */
 export function resolveProviders() {
   const raw = loadRaw()
@@ -124,7 +124,7 @@ export function resolveProviders() {
   for (const p of providers) {
     if (typeof p.baseURL === "string") p.baseURL = p.baseURL.replace(/\/+$/, "")
   }
-  const activeProvider = process.env.THINCODER_ACTIVE_PROVIDER || raw.activeProvider || providers[0]?.name
+  const activeProvider = raw.activeProvider || providers[0]?.name
   return { providers, activeProvider }
 }
 
@@ -137,13 +137,11 @@ export function resolveKey(entry) {
 }
 
 /**
- * Runtime model — CLI loadConfig: activeModel = THINCODER_ACTIVE_MODEL || config.activeModel,
- * applied AFTER THINCODER_MODEL overrides provider.model. Effective priority:
- * THINCODER_ACTIVE_MODEL > config activeModel > THINCODER_MODEL > provider.model.
+ * Runtime model — config only: config.activeModel overrides provider.model.
+ * (No env-var overrides — configuration comes exclusively from config.json.)
  */
 export function resolveModel(entry, rawActiveModel) {
-  const activeModel = process.env.THINCODER_ACTIVE_MODEL || rawActiveModel
-  return activeModel || process.env.THINCODER_MODEL || entry.model
+  return rawActiveModel || entry.model
 }
 
 /**
@@ -162,8 +160,6 @@ export function providerFromConfig(name) {
     apiKey,
     model: resolveModel(target, raw.activeModel),
   }
-  // Env overrides for the resolved provider (CLI loadConfig runtime overrides)
-  if (process.env.THINCODER_BASE_URL) provider.baseURL = process.env.THINCODER_BASE_URL.replace(/\/+$/, "")
   if (provider.baseURL) provider.baseURL = provider.baseURL.replace(/\/+$/, "")
 
   // Proxy: per-provider `proxy: true` AND global config.proxy.model === true (CLI injectProxy parity).
