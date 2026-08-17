@@ -166,35 +166,43 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     }),
   })
   const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume, planMode: panel._activeData()?.planMode ?? false })
+  // Turn-cap continue loop (CLI agent-turn.mjs parity): each ContinueError offers
+  // "Continue" — unlimited, resume:true keeps history, fresh budget per run. The loop
+  // also folds in the Ctrl+I interrupt resume (same rebuild-controller semantics).
   try {
-    traceStop("runAgent: turn starting (no pending click)", panel._stopClickTs)
-    await runAgent(p, cwd, text, buildCallbacks(), panel._abortController.signal, () => panel._autoApprove, runOpts(false))
-    traceStop("runAgent: turn ended normally", panel._stopClickTs)
-  } catch (e) {
-    traceStop(`runAgent: threw ${e?.name} — unwinding`, panel._stopClickTs)
-    // Ctrl+I interrupt: the abort carries reason.interrupt — rebuild the
-    // controller and RESUME the same turn (the interrupt message is already in
-    // history; the model continues from there). CLI agent-turn.mjs parity.
-    if (e?.name === "AbortError" && e.reason?.interrupt) {
-      panel._abortController = new AbortController()
-      await runAgent(p, cwd, text, buildCallbacks(), panel._abortController.signal, () => panel._autoApprove, runOpts(true))
-    } else if (e instanceof ContinueError) {
-      // Turn-cap exhaustion: offer to continue from the current context, NOT error
-      // (CLI agent-turn.mjs parity — "Ran N turns. Continue?"). Rebuilding the
-      // controller + resume re-runs the loop from the SAME history (the user message
-      // is already pushed; resume=true skips re-pushing it).
-      const willContinue = await vscode.window.showInformationMessage(
-        `Agent reached ${e.turns} turns (limit). Continue from here?`,
-        "Continue",
-        "Stop",
-      )
-      if (willContinue === "Continue") {
+  for (let resume = false; ; resume = true) {
+    try {
+      traceStop("runAgent: turn starting (no pending click)", panel._stopClickTs)
+      await runAgent(p, cwd, text, buildCallbacks(), panel._abortController.signal, () => panel._autoApprove, runOpts(resume))
+      traceStop("runAgent: turn ended normally", panel._stopClickTs)
+      break
+    } catch (e) {
+      traceStop(`runAgent: threw ${e?.name} — unwinding`, panel._stopClickTs)
+      // Ctrl+I interrupt: the abort carries reason.interrupt — rebuild the
+      // controller and RESUME the same turn (the interrupt message is already in
+      // history; the model continues from there). CLI agent-turn.mjs parity.
+      if (e?.name === "AbortError" && e.reason?.interrupt) {
         panel._abortController = new AbortController()
-        await runAgent(p, cwd, text, buildCallbacks(), panel._abortController.signal, () => panel._autoApprove, runOpts(true))
-      } else {
-        panel._panel.webview.postMessage({ type: "aborted" })
+        continue
       }
-    } else {
+      if (e instanceof ContinueError) {
+        // Turn-cap exhaustion: offer to continue from the current context, NOT error
+        // (CLI agent-turn.mjs parity — "Ran N turns. Continue?"). Rebuilding the
+        // controller + resume re-runs the loop from the SAME history (the user message
+        // is already pushed; resume=true skips re-pushing it). Unlimited continues —
+        // the user can Stop at any prompt.
+        const willContinue = await vscode.window.showInformationMessage(
+          `Agent reached ${e.turns} turns (limit). Continue from here?`,
+          "Continue",
+          "Stop",
+        )
+        if (willContinue === "Continue") {
+          panel._abortController = new AbortController()
+          continue
+        }
+        panel._panel.webview.postMessage({ type: "aborted" })
+        break
+      }
       // Persist the interrupted/errored turn: the user message and any partial output
       // were already pushed into both lines by runAgent (pushReal). Without this save,
       // an abort/error loses the whole turn from disk (CLI parity: at most half a turn lost).
@@ -214,7 +222,9 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
         const techInfo = [rawMsg, `→ Provider: ${p.baseURL}`, `→ Model: ${p.model}`].join("\n")
         panel._panel.webview.postMessage({ type: "error", text, techInfo })
       }
+      break
     }
+  }
   } finally {
     traceStop("finally: turn complete — UI released", panel._stopClickTs)
     panel._stopClickTs = null

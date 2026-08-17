@@ -147,6 +147,61 @@ describe("consult mechanism", () => {
     assert.match(r, /at most 5/)
   })
 
+  it("turn-cap continue: consultant wall → user Continue → resumes with its own history", async () => {
+    const agent = makeAgent([MODELS[0]])
+    const { ContinueError } = await import("../src/agent.mjs")
+    let calls = 0
+    const asks = []
+    const runner = async (provider, cwd, task, callbacks, signal, autoApprove, opts) => {
+      calls++
+      // Fake runAgent parity: the live child history is exposed via opts.stateSink.
+      opts.stateSink.history = [{ role: "user", content: "consult problem was pushed here" }]
+      if (calls === 1) throw new ContinueError(40)
+      assert.ok(opts?.resume, "second run is a resume")
+      assert.equal(opts?.history?.[0]?.content, "consult problem was pushed here", "child history handed back")
+      return "diagnosis after resume"
+    }
+    const ctx = makeCtx(agent, runner)
+    ctx.callbacks = { onQuestion: async (q, options) => { asks.push({ q, options }); return "Continue" } }
+    await consultStartTool.execute({ problem: "stuck" }, ctx)
+    const replies = []
+    for (;;) {
+      const r = JSON.parse(await consultCheckTool.execute({ id: "1" }, makeCtx(agent, runner)))
+      if (r.reply) replies.push(r)
+      if (r.done) break
+      await sleep(5)
+    }
+    assert.equal(calls, 2, "two runs: wall then resume")
+    assert.ok(replies.some((x) => x.reply.includes("diagnosis after resume")), "resumed consultant's reply lands")
+    assert.ok(asks[0].q.includes("40 turns"), "question names the turn count")
+    assert.deepEqual(asks[0].options, ["Continue", "Stop"], "y/n options")
+    await cleanupConsultSessions(agent)
+  })
+
+  it("turn-cap continue: user Stop → failed reply (no resume)", async () => {
+    const agent = makeAgent([MODELS[0]])
+    const { ContinueError } = await import("../src/agent.mjs")
+    let calls = 0
+    const runner = async (provider, cwd, task, callbacks, signal, autoApprove, opts) => {
+      calls++
+      opts.stateSink.history = []
+      throw new ContinueError(40)
+    }
+    const ctx = makeCtx(agent, runner)
+    ctx.callbacks = { onQuestion: async () => "Stop" }
+    await consultStartTool.execute({ problem: "stuck" }, ctx)
+    const replies = []
+    for (;;) {
+      const r = JSON.parse(await consultCheckTool.execute({ id: "1" }, makeCtx(agent, runner)))
+      if (r.reply) replies.push(r)
+      if (r.done) break
+      await sleep(5)
+    }
+    assert.equal(calls, 1, "no resume after Stop")
+    assert.ok(replies.some((x) => x.failedReply === true && /turn cap reached/.test(x.reply)), "stopped → failed reply naming the cap")
+    await cleanupConsultSessions(agent)
+  })
+
   it("main_history returns the parent's recent history, read-only", async () => {
     const agent = makeAgent(MODELS)
     const tool = makeMainHistoryTool(agent)

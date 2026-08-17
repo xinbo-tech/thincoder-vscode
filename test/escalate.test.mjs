@@ -221,18 +221,20 @@ describe("escalate (飞刀)", () => {
       assert.equal(calls, 2, "no resume without a question channel")
     })
 
-    it("turn-cap continue: MAX_RESUMES caps continues at 2 (a third wall forces partial)", async () => {
+    it("turn-cap continue: UNLIMITED — every wall prompts; the user's Stop ends it", async () => {
       const agent = makeAgent(CONSULTS)
       const { ContinueError } = await import("../src/agent.mjs")
       let calls = 0
       let asks = 0
       const runner = async () => { calls++; throw new ContinueError(100) }
       const ctx = makeCtx(agent, runner)
-      ctx.callbacks = { onQuestion: async () => { asks++; return "Continue" } }
+      // Never-ending walls: the user keeps choosing Continue — resumes are unlimited.
+      // The 4th prompt answers Stop (the user's escape hatch), so the test terminates.
+      ctx.callbacks = { onQuestion: async () => { asks++; return asks >= 4 ? "Stop" : "Continue" } }
       const r = String(await escalateTool.execute({ task: "x" }, ctx))
-      assert.equal(calls, 3, "three runs (2 resumes)")
-      assert.equal(asks, 2, "asked twice, then forced partial")
-      assert.ok(r.includes("stopped: turn cap reached"), "third wall → partial work")
+      assert.equal(calls, 4, "three resumes — no MAX_RESUMES cap")
+      assert.equal(asks, 4, "prompted on every wall")
+      assert.ok(r.includes("stopped: turn cap reached"), "Stop at the prompt → partial work")
     })
 
     it("escalate reasoning + output text stream into the panel (consult-UI parity)", async () => {

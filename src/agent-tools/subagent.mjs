@@ -97,29 +97,48 @@ export const subagentTool = {
     let output = ""
     const sink = {}
     const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:${role}`, chunk)
-    try {
-      const result = await runAgent(provider, cwd, task, {
-        onToken: (t) => { output += t },
-        onToolCall: (name, args) => panel({ kind: "tool", text: name + " " + (JSON.stringify(args) || "").slice(0, 120) }),
-        onToolResult: (name, text) => panel({ kind: "tool", text: "→ " + String(text ?? "").slice(0, 80).replace(/\n/g, " ") }),
-        onComplete: () => {},
-        onQuestion: ctx.callbacks?.onQuestion ?? null,
-      }, ctx.signal, true, {
-        depth: 1, role, maxTurns,
-        engState: { enabled: parent.config?.agent?.engineering ?? false, engDesignToken: parent._engDesignToken },
-        engDesignReviewed: role === "eng-coder", // token verified above → child may write files
-        stateSink: sink,
-      })
+    const agentMod = await import("../agent.mjs")
+    const baseOpts = {
+      depth: 1, role, maxTurns,
+      engState: { enabled: parent.config?.agent?.engineering ?? false, engDesignToken: parent._engDesignToken },
+      engDesignReviewed: role === "eng-coder", // token verified above → child may write files
+      stateSink: sink,
+    }
+    // Turn-cap continue loop (escalate parity): hitting the cap asks the user through
+    // the panel's question card — unlimited continues, each with a fresh budget and the
+    // child's own history (resume:true, opts.history=sink.history). Declined / headless
+    // (no onQuestion) → partial-work return.
+    for (let resume = false; ; resume = true) {
+      try {
+        const result = await runAgent(provider, cwd, task, {
+          onToken: (t) => { output += t },
+          onToolCall: (name, args) => panel({ kind: "tool", text: name + " " + (JSON.stringify(args) || "").slice(0, 120) }),
+          onToolResult: (name, text) => panel({ kind: "tool", text: "→ " + String(text ?? "").slice(0, 80).replace(/\n/g, " ") }),
+          onComplete: () => {},
+          onQuestion: ctx.callbacks?.onQuestion ?? null,
+        }, ctx.signal, true, { ...baseOpts, resume, ...(resume ? { history: sink.history } : {}) })
 
-      mergeChildMutations(parent, sink)
+        mergeChildMutations(parent, sink)
 
-      ctx.callbacks?.onSubagent?.({ id: subId, role, status: "done" })
-      return `Subagent (${role}) completed:\n${result || output.slice(0, 4000)}`
-    } catch (e) {
-      // Max-turns exhaustion may still have written files — merge whatever the child touched
-      if (role === "eng-coder") mergeChildMutations(parent, sink)
-      ctx.callbacks?.onSubagent?.({ id: subId, role, status: "error", error: e.message })
-      return `Subagent (${role}) error: ${e.message}\nPartial output: ${output.slice(0, 2000)}`
+        ctx.callbacks?.onSubagent?.({ id: subId, role, status: "done" })
+        return `Subagent (${role}) completed:\n${result || output.slice(0, 4000)}`
+      } catch (e) {
+        // Max-turns exhaustion may still have written files — merge whatever the child touched
+        if (role === "eng-coder") mergeChildMutations(parent, sink)
+        if (e instanceof agentMod.ContinueError) {
+          if (ctx.callbacks?.onQuestion) {
+            const go = await ctx.callbacks.onQuestion(
+              `Subagent (${role}) reached ${e.turns} turns (limit). Continue from here?`,
+              ["Continue", "Stop"],
+            )
+            if (go === "Continue") continue
+          }
+          ctx.callbacks?.onSubagent?.({ id: subId, role, status: "error", error: `turn cap reached (${e.turns} turns) — work may be partial` })
+          return `Subagent (${role}) stopped: turn cap reached (${e.turns} turns) — work may be partial; review recent_changes before deciding next steps.\nPartial output: ${output.slice(0, 2000)}`
+        }
+        ctx.callbacks?.onSubagent?.({ id: subId, role, status: "error", error: e.message })
+        return `Subagent (${role}) error: ${e.message}\nPartial output: ${output.slice(0, 2000)}`
+      }
     }
   },
 }

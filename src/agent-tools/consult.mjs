@@ -101,10 +101,15 @@ async function runConsultChild(ctx, session, id, m, problem, ctrl) {
   // a slow tool/provider must not hold consult_check for hours (design review D2).
   const timeoutMs = ctx.agent?.config?.agent?.consultTimeoutMs ?? 600_000
   let timedOut = false // watchdog kills settle as TIMEOUT, not a provider failure (review D-GLM)
-  const watchdog = setTimeout(() => {
-    timedOut = true
-    try { ctrl.abort() } catch { /* already settled */ }
-  }, timeoutMs)
+  const armWatchdog = () => {
+    const t = setTimeout(() => {
+      timedOut = true
+      try { ctrl.abort() } catch { /* already settled */ }
+    }, timeoutMs)
+    t.unref?.()
+    return t
+  }
+  let watchdog = armWatchdog()
   const label = consultLabel(m)
   try {
     const build = ctx.buildProvider ?? buildProvider // test-injectable (like ctx.runAgent)
@@ -125,32 +130,68 @@ async function runConsultChild(ctx, session, id, m, problem, ctrl) {
           return { ...provider, reasoningEffort: m.effort }
         })()
       : provider
-    const runner = ctx.runAgent ?? (await import("../agent.mjs")).runAgent
+    const agentMod = await import("../agent.mjs")
+    const runner = ctx.runAgent ?? agentMod.runAgent
     // Activity stream: the consultant's tool calls stream to the panel under its own
     // label (subagent visibility — same channel the subagent tool uses).
     const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:consult ${label}`, chunk)
-    const result = await runner({ ...withEffort, model: m.model }, ctx.cwd, "# Problem\n" + problem, {
-      onToolCall: (name, args) => panel({ kind: "tool", text: name + " " + (JSON.stringify(args) || "").slice(0, 120) }),
-      onToolResult: (name, text) => panel({ kind: "tool", text: "→ " + String(text ?? "").slice(0, 80).replace(/\n/g, " ") }),
-      // 完整思考过程 + 输出文本流 (consult-UI review 2026-08-15): onReasoning has no depth
-      // gate; onToken needs the consult exemption in agent.mjs — both stream as advisor-kind
-      // chunks (think = dimmed, text = merged) so the panel shows the FULL reasoning, not
-      // just tool calls.
-      onReasoning: (r) => panel({ kind: "think", text: String(r ?? "") }),
-      onToken: (t) => panel({ kind: "text", text: String(t ?? "") }),
-    }, ctrl.signal, true, {
-      // role "consult": lean consult-base.md system prompt, read-only tools, small turn budget.
-      // Consultations are diagnosis tasks — 40 tool turns is enough to read the relevant files
-      // (15 was too tight: consultants died mid-file-read at "reached max turns").
-      depth: 1, role: "consult",
-      maxTurns: ctx.agent?.config?.agent?.consultTurns ?? 40,
-      extraTools: [makeMainHistoryTool(ctx.agent)],
-    })
-    settleChild(ctx, session, id, label, true, String(result ?? ""))
-  } catch (e) {
-    // Timeout reads as timeout — "(consultation failed: aborted)" would read as a provider crash
-    const note = timedOut ? `consultation timed out after ${Math.round(timeoutMs / 60000)}min (agent.consultTimeoutMs)` : e?.message ?? String(e)
-    settleChild(ctx, session, id, label, false, note)
+    const sink = {}
+    // Turn-cap continue loop (TURN-CAP-CONTINUE.md): hitting the cap asks the user through
+    // the panel's question card — unlimited continues, each with a fresh turn budget AND a
+    // re-armed wall-clock watchdog (a continue is a fresh budget, the clock restarts too).
+    // Parallel consultants serialize their continue prompts through a session-level queue
+    // (one question card at a time). Declined / headless → failed reply (partial diagnosis).
+    for (let resume = false; ; resume = true) {
+      try {
+        const result = await runner({ ...withEffort, model: m.model }, ctx.cwd, "# Problem\n" + problem, {
+          onToolCall: (name, args) => panel({ kind: "tool", text: name + " " + (JSON.stringify(args) || "").slice(0, 120) }),
+          onToolResult: (name, text) => panel({ kind: "tool", text: "→ " + String(text ?? "").slice(0, 80).replace(/\n/g, " ") }),
+          // 完整思考过程 + 输出文本流 (consult-UI review 2026-08-15): onReasoning has no depth
+          // gate; onToken needs the consult exemption in agent.mjs — both stream as advisor-kind
+          // chunks (think = dimmed, text = merged) so the panel shows the FULL reasoning, not
+          // just tool calls.
+          onReasoning: (r) => panel({ kind: "think", text: String(r ?? "") }),
+          onToken: (t) => panel({ kind: "text", text: String(t ?? "") }),
+          onQuestion: ctx.callbacks?.onQuestion ?? null,
+        }, ctrl.signal, true, {
+          // role "consult": lean consult-base.md system prompt, read-only tools, small turn budget.
+          // Consultations are diagnosis tasks — 40 tool turns is enough to read the relevant files
+          // (15 was too tight: consultants died mid-file-read at "reached max turns").
+          depth: 1, role: "consult",
+          maxTurns: ctx.agent?.config?.agent?.consultTurns ?? 40,
+          extraTools: [makeMainHistoryTool(ctx.agent)],
+          stateSink: sink,
+          resume,
+          ...(resume ? { history: sink.history } : {}),
+        })
+        settleChild(ctx, session, id, label, true, String(result ?? ""))
+        return
+      } catch (e) {
+        if (e instanceof agentMod.ContinueError) {
+          let go = null
+          if (ctx.callbacks?.onQuestion) {
+            const ask = () => ctx.callbacks.onQuestion(
+              `consult ${label} reached ${e.turns} turns (limit). Continue from here?`,
+              ["Continue", "Stop"],
+            )
+            session.continueQueue = (session.continueQueue ?? Promise.resolve()).then(ask, ask)
+            go = await session.continueQueue
+          }
+          if (go === "Continue") {
+            clearTimeout(watchdog)
+            timedOut = false // fresh budget → fresh clock
+            watchdog = armWatchdog()
+            continue
+          }
+          settleChild(ctx, session, id, label, false, `turn cap reached (${e.turns} turns) — stopped, diagnosis may be partial`)
+          return
+        }
+        // Timeout reads as timeout — "(consultation failed: aborted)" would read as a provider crash
+        const note = timedOut ? `consultation timed out after ${Math.round(timeoutMs / 60000)}min (agent.consultTimeoutMs)` : e?.message ?? String(e)
+        settleChild(ctx, session, id, label, false, note)
+        return
+      }
+    }
   } finally {
     clearTimeout(watchdog)
   }

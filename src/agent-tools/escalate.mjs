@@ -117,8 +117,8 @@ export const escalateTool = {
     // aborts NORMAL-but-slow surgery (two max-effort consultants hit a 10min wall just
     // READING files). Hang protection = FETCH_TIMEOUT (per LLM call) + user Stop (signal
     // propagates directly). Turn-cap continue reuses the panel's onQuestion channel —
-    // the SAME y/n card the main agent's question tool uses; MAX_RESUMES caps continues.
-    const MAX_RESUMES = 2
+    // the SAME y/n card the main agent's question tool uses; continues are UNLIMITED
+    // (each gives a fresh budget; Stop is always an option at the prompt).
     const runOpts = (resume) => ({
       depth: 1, role: "coder", // full write path: permission gate, recent-changes tracking
       streamOutput: true, // exempt from the agent.mjs onToken depth gate (consult role parity)
@@ -158,9 +158,9 @@ export const escalateTool = {
         // Turn-cap exhaustion is not a crash: offer to continue from the current context
         // (main-agent panel-chat parity — "reached N turns. Continue?"), resuming with
         // resume:true + the child's own history. No onQuestion (headless) or declined →
-        // partial-work return; MAX_RESUMES caps continues so a stuck child cannot loop.
+        // partial-work return. Unlimited continues — the user can Stop at any prompt.
         if (e instanceof agentMod.ContinueError) {
-          if (resumes < MAX_RESUMES && ctx.callbacks?.onQuestion) {
+          if (ctx.callbacks?.onQuestion) {
             const go = await ctx.callbacks.onQuestion(
               `飞刀 ${tag} reached ${e.turns} turns (limit). Continue from here?`,
               ["Continue", "Stop"],
