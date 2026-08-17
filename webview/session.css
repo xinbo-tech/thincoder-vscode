@@ -124,6 +124,32 @@
   color: var(--error-fg);
 }
 
+/* Rename button mirrors the delete button but with a neutral hover (✎) */
+.session-rename {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+  flex-shrink: 0;
+}
+
+.session-item:hover .session-rename { opacity: 0.5; }
+
+.session-rename:hover {
+  background: var(--hover-bg-strong);
+  opacity: 1;
+  color: var(--accent);
+}
+
 #new-session-btn {
   flex-shrink: 0;
   width: 28px;

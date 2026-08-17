@@ -513,6 +513,18 @@ describe("i18n — locale loading", () => {
     assert.doesNotMatch(result, /\$\{title\}/, "placeholder consumed, not left literal")
   })
 
+  it("session rename keys exist in both locales", () => {
+    initLocale("en")
+    for (const k of ["session.rename", "session.renamePrompt", "session.renamePlaceholder", "session.renameTooLong"]) {
+      assert.notEqual(t(k), k, `missing en key: ${k}`)
+    }
+    initLocale("zh")
+    for (const k of ["session.rename", "session.renamePrompt", "session.renamePlaceholder", "session.renameTooLong"]) {
+      assert.notEqual(t(k), k, `missing zh key: ${k}`)
+    }
+  })
+
+
   it("returns key for untranslated string", () => {
     initLocale("en")
     assert.equal(t("nonexistent.key"), "nonexistent.key")

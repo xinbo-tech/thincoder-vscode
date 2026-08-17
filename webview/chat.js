@@ -372,13 +372,19 @@ function buildSessionDropdown() {
     if (s.active) item.classList.add("active")
     item.innerHTML = `<span class="session-item-title">${escHtml(s.title)}</span>
       <span class="session-item-meta">${s.provider ? escHtml(s.provider) + " · " : ""}${s.count}msgs${s.updated ? " · " + fmtDate(s.updated) : ""}</span>`
+    item.innerHTML += `<button class="session-rename" title="${t("session.rename")}" aria-label="${t("session.rename")} ${escHtml(s.title)}">✎</button>`
     if (ctx._sessions.length > 1) {
       item.innerHTML += `<button class="session-delete" title="${t("session.delete")}" aria-label="${t("session.delete")} ${escHtml(s.title)}">✕</button>`
     }
     item.addEventListener("click", (e) => {
-      if (e.target.closest(".session-delete")) return
+      if (e.target.closest(".session-delete") || e.target.closest(".session-rename")) return
       vscode.postMessage({ type: "switchSession", slot: s.slot })
       ctx.sessionDropdown.style.display = "none"
+    })
+    const renBtn = item.querySelector(".session-rename")
+    if (renBtn) renBtn.addEventListener("click", (e) => {
+      e.stopPropagation()
+      vscode.postMessage({ type: "renameSession", slot: s.slot, currentTitle: s.title })
     })
     const delBtn = item.querySelector(".session-delete")
     if (delBtn) delBtn.addEventListener("click", (e) => {

@@ -3,8 +3,8 @@
  * Every `case` dispatches to a ChatPanel method or a settings/provider helper.
  */
 import * as vscode from "vscode"
-import { loadLocaleStrings } from "../i18n.mjs"
-import { saveModelPrefs, switchToSlot } from "./session-io.mjs"
+import { t, loadLocaleStrings } from "../i18n.mjs"
+import { saveModelPrefs, switchToSlot, setSlotTitle } from "./session-io.mjs"
 import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection, shellCandidates, saveShellSettingsFromPanel, saveWebsearchKeyFromPanel, deleteWebsearchKeyFromPanel, testProviderConnection } from "./settings.mjs"
 import { PRESETS } from "./presets.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
@@ -73,6 +73,19 @@ export async function handlePanelMessage(panel, msg) {
       break
     }
     case "deleteSession": await panel._deleteSession(msg.slot); break
+    case "renameSession": {
+      // Manual rename: prefill the current title; empty input = cancel (keep old title).
+      const title = await vscode.window.showInputBox({
+        prompt: t("session.renamePrompt"),
+        value: msg.currentTitle || "",
+        placeHolder: t("session.renamePlaceholder"),
+        validateInput: (v) => (v.length > 60 ? t("session.renameTooLong") : null),
+      })
+      if (!title || !title.trim()) break
+      setSlotTitle(_cwd(), msg.slot, title.trim())
+      panel._pushSessions()
+      break
+    }
     case "setProject": {
       // Current-project switcher (multi-root): with fsPath → switch directly;
       // without → show the native folder picker.
