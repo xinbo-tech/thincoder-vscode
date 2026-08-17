@@ -295,9 +295,22 @@ ctx.inputEl.addEventListener("keydown", (e) => {
     navigateInputHistory(1)
   }
 })
+// 高度自适应：rAF 节流 + IME 组合期间跳过，避免中文输入每次拼音变化都强制重排
+let _composing = false
+let _heightRaf = 0
+function adjustInputHeight() {
+  if (_heightRaf) return
+  _heightRaf = requestAnimationFrame(() => {
+    _heightRaf = 0
+    ctx.inputEl.style.height = "auto"
+    ctx.inputEl.style.height = Math.min(ctx.inputEl.scrollHeight, 150) + "px"
+  })
+}
+ctx.inputEl.addEventListener("compositionstart", () => { _composing = true })
+ctx.inputEl.addEventListener("compositionend", () => { _composing = false; adjustInputHeight() })
 ctx.inputEl.addEventListener("input", () => {
-  ctx.inputEl.style.height = "auto"
-  ctx.inputEl.style.height = Math.min(ctx.inputEl.scrollHeight, 150) + "px"
+  if (_composing) return
+  adjustInputHeight()
 })
 
 // ─── @-autocomplete & image paste ──────────────
