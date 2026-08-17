@@ -128,6 +128,25 @@ export function resolveProviders() {
 }
 
 /**
+ * Names of provider entries actually persisted in config.json. Unlike
+ * resolveProviders(), this does NOT apply the CLI-DEFAULTS fallback (an empty
+ * providers[] resolves to a synthetic deepseek entry at runtime). "What has the
+ * user added" logic — onboarding presets, duplicate checks — must use THIS list,
+ * otherwise a fresh install hides deepseek from every add-provider UI (welcome
+ * panel, settings [+ Add], model-dropdown QuickPick).
+ */
+export function onDiskProviderNames() {
+  try {
+    const raw = loadRaw()
+    return Array.isArray(raw.providers)
+      ? raw.providers.filter((p) => p && typeof p === "object" && p.name).map((p) => p.name)
+      : []
+  } catch {
+    return []
+  }
+}
+
+/**
  * API key for a provider entry (CLI loadConfig fallback order):
  * provider.apiKey → THINCODER_API_KEY → provider-specific env var (deepseek/openai only).
  */

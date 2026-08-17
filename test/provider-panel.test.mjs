@@ -10,7 +10,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 import { addProviderEntry, removeProviderEntry } from "../src/extension/provider-flows.mjs"
-import { handleSetProviderProxy } from "../src/extension/settings.mjs"
+import { handleSetProviderProxy, providerStatus } from "../src/extension/settings.mjs"
 import { _setConfigPathForTest, resolveProviders } from "../src/config-io.mjs"
 
 let tmpDir
@@ -35,8 +35,6 @@ function raw() { return JSON.parse(readFileSync(cfgPath, "utf8")) }
 
 describe("addProviderEntry — preset", () => {
   it("adds a preset entry with preset values and optional key", () => {
-    // Note: on an EMPTY config, resolveProviders falls back to the default deepseek
-    // entry (CLI loadConfig parity), so deepseek counts as "already there" — use kimi.
     const err = addProviderEntry({ preset: "kimi", key: "sk-kimi" })
     assert.equal(err, null)
     const { providers } = resolveProviders()
@@ -56,6 +54,19 @@ describe("addProviderEntry — preset", () => {
     addProviderEntry({ preset: "glm" })
     const err = addProviderEntry({ preset: "glm" })
     assert.match(err, /already exists/)
+  })
+
+  it("adds the deepseek preset on an EMPTY config — the synthetic runtime default must not block onboarding", () => {
+    // Regression: resolveProviders() falls back to a synthetic deepseek entry when
+    // providers[] is empty (CLI loadConfig parity). Duplicate checks must run against
+    // ON-DISK names, or a fresh install could never add deepseek from any UI
+    // (welcome panel / settings [+ Add] / model-dropdown QuickPick).
+    const err = addProviderEntry({ preset: "deepseek", key: "sk-ds" })
+    assert.equal(err, null)
+    const onDisk = raw().providers
+    assert.equal(onDisk.length, 1)
+    assert.equal(onDisk[0].name, "deepseek")
+    assert.equal(onDisk[0].apiKey, "sk-ds")
   })
 })
 
@@ -156,5 +167,24 @@ describe("handleSetProviderProxy", () => {
     writeFileSync(cfgPath, JSON.stringify({ providers: [{ name: "custom", baseURL: "u", model: "m" }], activeProvider: "custom" }))
     handleSetProviderProxy("custom", true)
     assert.equal(raw().providers[0].proxy, true)
+  })
+})
+
+// ─── onboarding presets (welcome panel + settings [+ Add] data source) ───
+
+describe("providerStatus — presets on an empty config", () => {
+  it("offers deepseek FIRST (the synthetic runtime default must not hide it)", () => {
+    // Regression: an empty config resolves to a synthetic deepseek entry at runtime;
+    // presets used to filter it out, so the welcome panel's dropdown never showed
+    // DeepSeek on a fresh install.
+    const s = providerStatus()
+    assert.equal(s.presets[0]?.name, "deepseek")
+    assert.equal(s.presets.length, 18)
+  })
+
+  it("excludes a provider actually added on disk (duplicate protection intact)", () => {
+    assert.equal(addProviderEntry({ preset: "deepseek" }), null)
+    const s = providerStatus()
+    assert.equal(s.presets.some((p) => p.name === "deepseek"), false)
   })
 })

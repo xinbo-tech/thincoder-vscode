@@ -10,7 +10,7 @@ import {
 } from "./presets.mjs"
 import {
   persistRaw, resolveProviders, loadMcpServers, addMcpServer, removeMcpServer,
-  loadAgentSettings, loadRaw, normalizeProxy,
+  loadAgentSettings, loadRaw, normalizeProxy, onDiskProviderNames,
 } from "../config-io.mjs"
 import { addProviderEntry, removeProviderEntry } from "./provider-flows.mjs"
 import { mcpConnectedNames } from "../mcp.mjs"
@@ -41,8 +41,10 @@ export function providerStatus() {
     }
     labels[name] = providerLabel(name)
   }
-  // Presets not yet added — the panel's [+ Add] form offers these (CLI addProviderFlow parity)
-  const existing = new Set(providerNames())
+  // Presets not yet added — the panel's [+ Add] form offers these (CLI addProviderFlow parity).
+  // ON-DISK names only: an empty config resolves to a synthetic deepseek default at
+  // runtime, which must NOT hide deepseek from the onboarding/add-provider lists.
+  const existing = new Set(onDiskProviderNames())
   const presets = Object.entries(PRESETS)
     .filter(([name]) => !existing.has(name))
     .map(([name, p]) => ({ name, desc: p.desc, model: p.model, baseURL: p.baseURL }))

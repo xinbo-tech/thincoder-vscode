@@ -11,7 +11,7 @@
  */
 
 import * as vscode from "vscode"
-import { PROVIDER_PRESETS, presetToEntry, resolveProviders, persistRaw, setProviderKey } from "../config-io.mjs"
+import { PROVIDER_PRESETS, presetToEntry, onDiskProviderNames, resolveProviders, persistRaw, setProviderKey } from "../config-io.mjs"
 
 const FORMATS = ["openai", "anthropic", "google"]
 
@@ -19,39 +19,38 @@ const FORMATS = ["openai", "anthropic", "google"]
 
 /** Add a provider entry. payload: { preset?: name, custom?: { name, baseURL, model, format }, key? } */
 export function addProviderEntry({ preset, custom, key } = {}) {
-  let providers
+  // Duplicate checks run against ON-DISK names — resolveProviders() falls back to a
+  // synthetic deepseek entry on an empty config, which must not block adding deepseek.
+  const existing = new Set(onDiskProviderNames())
   try {
-    ({ providers } = resolveProviders())
+    let entry
+    if (preset) {
+      if (!PROVIDER_PRESETS[preset]) return `Unknown preset: ${preset}`
+      if (existing.has(preset)) return `Provider "${preset}" already exists`
+      entry = presetToEntry(preset)
+    } else if (custom) {
+      const name = (custom.name || "").trim()
+      if (!name) return "Provider name is required"
+      if (existing.has(name) || PROVIDER_PRESETS[name]) return `Name "${name}" is already in use`
+      const baseURL = (custom.baseURL || "").trim().replace(/\/+$/, "")
+      if (!baseURL) return "Base URL is required"
+      const model = (custom.model || "").trim()
+      if (!model) return "Model is required"
+      const format = (custom.format || "openai").trim()
+      if (!FORMATS.includes(format)) return `Unknown API format: ${format} (expected ${FORMATS.join("/")})`
+      entry = { name, baseURL, model }
+      if (format !== "openai") entry.format = format
+    } else {
+      return "Add provider needs a preset or a custom config"
+    }
+
+    persistRaw((raw) => { (raw.providers ??= []).push(entry) })
+    const k = (key || "").trim()
+    if (k) setProviderKey(entry.name, k)
+    return null
   } catch (e) {
     return e.message
   }
-  const existing = new Set(providers.map((p) => p.name))
-
-  let entry
-  if (preset) {
-    if (!PROVIDER_PRESETS[preset]) return `Unknown preset: ${preset}`
-    if (existing.has(preset)) return `Provider "${preset}" already exists`
-    entry = presetToEntry(preset)
-  } else if (custom) {
-    const name = (custom.name || "").trim()
-    if (!name) return "Provider name is required"
-    if (existing.has(name) || PROVIDER_PRESETS[name]) return `Name "${name}" is already in use`
-    const baseURL = (custom.baseURL || "").trim().replace(/\/+$/, "")
-    if (!baseURL) return "Base URL is required"
-    const model = (custom.model || "").trim()
-    if (!model) return "Model is required"
-    const format = (custom.format || "openai").trim()
-    if (!FORMATS.includes(format)) return `Unknown API format: ${format} (expected ${FORMATS.join("/")})`
-    entry = { name, baseURL, model }
-    if (format !== "openai") entry.format = format
-  } else {
-    return "Add provider needs a preset or a custom config"
-  }
-
-  persistRaw((raw) => { (raw.providers ??= []).push(entry) })
-  const k = (key || "").trim()
-  if (k) setProviderKey(entry.name, k)
-  return null
 }
 
 /** Remove a provider entry. The active provider is protected (CLI parity). */
@@ -72,14 +71,9 @@ export function removeProviderEntry(name) {
 
 /** Add a provider interactively: pick an unused preset or configure custom manually. */
 export async function addProviderFlow(refresh) {
-  let providers
-  try {
-    ({ providers } = resolveProviders())
-  } catch (e) {
-    vscode.window.showErrorMessage(e.message)
-    return
-  }
-  const existing = new Set(providers.map((p) => p.name))
+  // ON-DISK names — an empty config's synthetic deepseek default must not hide
+  // deepseek from the picker (same bug as the welcome panel).
+  const existing = new Set(onDiskProviderNames())
 
   const items = Object.entries(PROVIDER_PRESETS)
     .filter(([name]) => !existing.has(name))
