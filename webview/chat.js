@@ -1021,8 +1021,11 @@ function showQuestion(ctx, question, options) {
     for (const opt of options) {
       const b = document.createElement("button")
       b.className = "perm-btn approve question-option"
-      b.textContent = opt
-      b.addEventListener("click", () => answer(opt))
+      // 防御：schema 声明 options 是 string[]，但 LLM 可能误传 {label,description} 对象。
+      // 取 label/text/title 字段兜底，绝不显示 "[object Object]"。
+      const label = typeof opt === "string" ? opt : (opt?.label ?? opt?.text ?? opt?.title ?? String(opt))
+      b.textContent = label
+      b.addEventListener("click", () => answer(label))
       actions.appendChild(b)
     }
     // Preset options PLUS a free-text input — the user can pick a preset or

@@ -11,7 +11,7 @@ export const questionTool = {
     "Ask the user a question and wait for their response.\n" +
     "Parameters:\n" +
     "- question (required): The question to ask\n" +
-    "- options: Array of single-choice options (optional)",
+    "- options: Array of single-choice options (optional). MUST be plain strings, e.g. [\"A\", \"B\", \"C\"] — never objects.",
   parameters: {
     type: "object",
     properties: {
@@ -35,7 +35,8 @@ export const questionTool = {
       // Use createQuickPick for proper title support
       const picker = vscode.window.createQuickPick()
       picker.title = question
-      picker.items = options.map((o) => ({ label: o }))
+      // 防御：options 声明为 string[]，但 LLM 可能传对象；取 label/text/title 兜底，避免 [object Object]。
+      picker.items = options.map((o) => ({ label: typeof o === "string" ? o : (o?.label ?? o?.text ?? o?.title ?? String(o)) }))
       picker.placeholder = question
       answer = await new Promise((resolve) => {
         picker.onDidAccept(() => {
