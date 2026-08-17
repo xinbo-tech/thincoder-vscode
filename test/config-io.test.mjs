@@ -114,12 +114,17 @@ describe("loadRaw / saveRaw", () => {
 // ─── Providers resolution ─────────────────────────────────────
 
 describe("resolveProviders", () => {
-  it("falls back to deepseek preset when config is missing", () => {
+  it("resolves to an EMPTY list when config is missing (no synthetic preset entries)", () => {
     const { providers, activeProvider } = resolveProviders()
-    assert.equal(providers.length, 1)
-    assert.equal(providers[0].name, "deepseek")
-    assert.equal(providers[0].baseURL, "https://api.deepseek.com")
-    assert.equal(activeProvider, "deepseek")
+    assert.equal(providers.length, 0)
+    assert.equal(activeProvider, undefined)
+  })
+
+  it("resolves to an empty list when providers[] is empty", () => {
+    writeCfg({ providers: [] })
+    const { providers, activeProvider } = resolveProviders()
+    assert.equal(providers.length, 0)
+    assert.equal(activeProvider, undefined)
   })
 
   it("normalizes baseURL trailing slashes and drops nameless entries", () => {

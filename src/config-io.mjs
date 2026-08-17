@@ -110,40 +110,22 @@ export function normalizeProxy(proxy) {
 }
 
 /**
- * Resolve providers list + active name from disk. Empty/missing providers fall back to the
- * deepseek preset entry (CLI DEFAULTS); baseURL trailing slashes normalized. Env overrides:
- * THINCODER_ACTIVE_PROVIDER (active pointer) — resolved here so every read path sees them.
- * Returns { providers, activeProvider }.
+ * Resolve providers list + active name from disk. BaseURL trailing slashes normalized.
+ * Env overrides: THINCODER_ACTIVE_PROVIDER (active pointer) — resolved here so every
+ * read path sees them. Returns { providers, activeProvider }.
+ * An empty/missing providers[] resolves to an EMPTY list (no synthetic preset entries):
+ * the onboarding UI (welcome panel) is the path from "nothing configured" to a setup.
  */
 export function resolveProviders() {
   const raw = loadRaw()
-  const providers = Array.isArray(raw.providers) && raw.providers.length
+  const providers = Array.isArray(raw.providers)
     ? raw.providers.filter((p) => p && typeof p === "object" && p.name)
-    : [presetToEntry("deepseek")]
+    : []
   for (const p of providers) {
     if (typeof p.baseURL === "string") p.baseURL = p.baseURL.replace(/\/+$/, "")
   }
   const activeProvider = process.env.THINCODER_ACTIVE_PROVIDER || raw.activeProvider || providers[0]?.name
   return { providers, activeProvider }
-}
-
-/**
- * Names of provider entries actually persisted in config.json. Unlike
- * resolveProviders(), this does NOT apply the CLI-DEFAULTS fallback (an empty
- * providers[] resolves to a synthetic deepseek entry at runtime). "What has the
- * user added" logic — onboarding presets, duplicate checks — must use THIS list,
- * otherwise a fresh install hides deepseek from every add-provider UI (welcome
- * panel, settings [+ Add], model-dropdown QuickPick).
- */
-export function onDiskProviderNames() {
-  try {
-    const raw = loadRaw()
-    return Array.isArray(raw.providers)
-      ? raw.providers.filter((p) => p && typeof p === "object" && p.name).map((p) => p.name)
-      : []
-  } catch {
-    return []
-  }
 }
 
 /**

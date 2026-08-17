@@ -56,11 +56,11 @@ describe("addProviderEntry — preset", () => {
     assert.match(err, /already exists/)
   })
 
-  it("adds the deepseek preset on an EMPTY config — the synthetic runtime default must not block onboarding", () => {
-    // Regression: resolveProviders() falls back to a synthetic deepseek entry when
-    // providers[] is empty (CLI loadConfig parity). Duplicate checks must run against
-    // ON-DISK names, or a fresh install could never add deepseek from any UI
-    // (welcome panel / settings [+ Add] / model-dropdown QuickPick).
+  it("adds the deepseek preset on an EMPTY config — onboarding must work from scratch", () => {
+    // Regression: an empty config used to resolve to a synthetic deepseek default,
+    // which blocked adding deepseek from any UI (welcome panel / settings [+ Add] /
+    // model-dropdown QuickPick). No synthetic entries exist anymore, so deepseek must
+    // be addable like any other preset.
     const err = addProviderEntry({ preset: "deepseek", key: "sk-ds" })
     assert.equal(err, null)
     const onDisk = raw().providers
@@ -173,10 +173,9 @@ describe("handleSetProviderProxy", () => {
 // ─── onboarding presets (welcome panel + settings [+ Add] data source) ───
 
 describe("providerStatus — presets on an empty config", () => {
-  it("offers deepseek FIRST (the synthetic runtime default must not hide it)", () => {
-    // Regression: an empty config resolves to a synthetic deepseek entry at runtime;
-    // presets used to filter it out, so the welcome panel's dropdown never showed
-    // DeepSeek on a fresh install.
+  it("offers deepseek FIRST (onboarding must list every preset)", () => {
+    // Regression: the old synthetic deepseek default was filtered out of presets,
+    // so the welcome panel's dropdown never showed DeepSeek on a fresh install.
     const s = providerStatus()
     assert.equal(s.presets[0]?.name, "deepseek")
     assert.equal(s.presets.length, 18)
