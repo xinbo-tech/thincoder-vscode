@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.33] — 2026-08-17
+
+### Changed
+
+- **空配置不再合成 deepseek 默认条目** — resolveProviders 直接反映磁盘真实状态（providers 为空就是空）。首次安装走向欢迎界面，18 个预设全部可选（DeepSeek 第一个）。与 CLI 行为一致
+
 ## [0.1.32] — 2026-08-17
 
 ### Fixed
