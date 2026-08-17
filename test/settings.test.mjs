@@ -66,6 +66,80 @@ describe("buildSettings — provider cards", () => {
   })
 })
 
+describe("updateProviderStatus — live refresh while the panel is open (add-provider bug)", () => {
+  // Regression: after addProvider persisted, the extension pushes providerStatus —
+  // the open panel must show the new provider immediately (it used to appear only
+  // after closing and reopening the panel, because the card rendered on open only).
+  // NOTE: never assert element-to-null via assert.equal — a FAILING assert inspects
+  // the happy-dom element and hangs node:assert synchronously (25GB OOM). All DOM
+  // absence checks here are boolean-safe (assert.ok(x === null)).
+  it("a newly added provider appears immediately without reopening the panel", () => {
+    api.updateProviderStatus({ providers: { deepseek: { configured: true } } })
+    const body = openPanel()
+    assert.ok(body.querySelector("#prov-deepseek") !== null)
+    assert.ok(body.querySelector("#prov-kimi") === null, "kimi not yet present")
+    // Simulate the extension's providerStatus push after addProvider persisted
+    api.updateProviderStatus({ providers: { deepseek: { configured: true }, kimi: { configured: false } } })
+    assert.ok(body.querySelector("#prov-kimi") !== null, "new provider row rendered in place, no reopen")
+  })
+
+  it("a removed provider disappears immediately while the panel stays open", () => {
+    api.updateProviderStatus({ providers: { deepseek: { configured: true }, kimi: { configured: false } } })
+    const body = openPanel()
+    assert.ok(body.querySelector("#prov-kimi") !== null)
+    api.updateProviderStatus({ providers: { deepseek: { configured: true } } })
+    assert.ok(body.querySelector("#prov-kimi") === null, "removed provider row dropped in place")
+  })
+
+  it("an unchanged status push leaves the card alone (no rebuild, in-progress edits survive)", () => {
+    api.updateProviderStatus({ providers: { deepseek: { configured: true } } })
+    const body = openPanel()
+    const card = body.querySelector("#providers-card")
+    card.dataset.marker = "keep"
+    api.updateProviderStatus({ providers: { deepseek: { configured: true } } })
+    const after = body.querySelector("#providers-card")
+    assert.ok(after && after.dataset.marker === "keep", "same status must not rebuild the card")
+  })
+
+  it("push while the panel is CLOSED only stores state — rendered on next open", () => {
+    api.updateProviderStatus({ providers: {} })
+    const body = openPanel()
+    const card = body.querySelector("#providers-card")
+    card.dataset.marker = "keep"
+    api.closeSettings()
+    // Panel hidden: the push must not touch the DOM — the status is stored for the
+    // next open (closeSettings only sets display:none; the card stays in the DOM).
+    api.updateProviderStatus({ providers: { deepseek: { configured: true } } })
+    const after = body.querySelector("#providers-card")
+    assert.ok(after && after.dataset.marker === "keep", "no live re-render while the panel is closed")
+    assert.ok(body.querySelector("#prov-deepseek") === null, "new provider not rendered while closed")
+    api.openSettings()
+    const reopened = document.getElementById("settings-body")
+    assert.ok(reopened.querySelector("#prov-deepseek") !== null, "provider visible after opening")
+  })
+
+  it("the [+ Add] form stays functional after a live re-render (controls re-bound)", () => {
+    api.updateProviderStatus({ providers: {}, presets: [] })
+    const body = openPanel()
+    // A provider mutation arrives while the panel is open → card rebuilt in place
+    api.updateProviderStatus({ providers: { kimi: { configured: true } }, presets: [] })
+    assert.ok(body.querySelector("#prov-kimi"), "card re-rendered")
+    // Reopen the add form on the REBUILT card and save a custom provider — the
+    // save button is wired with addEventListener, so it must have been re-bound.
+    window._toggleAddForm(true)
+    document.getElementById("pa-type").value = "custom"
+    window._paTypeChanged()
+    document.getElementById("pa-name").value = "mine"
+    document.getElementById("pa-url").value = "https://api.example.com/v1"
+    document.getElementById("pa-key").value = "sk-x"
+    document.getElementById("pa-model").innerHTML = '<option value="m1">m1</option>'
+    document.getElementById("pa-save-btn").click()
+    const last = env.capturedPosts.at(-1)
+    assert.equal(last.type, "addProvider", "save button still posts after re-render")
+    assert.equal(last.custom.name, "mine")
+  })
+})
+
 describe("buildSettings — switch toggles (agent / advisor)", () => {
   it("reflects verifyGuard and advisor.enabled as checked switches", () => {
     api.updateAgentSettings({ verifyGuard: true, advisor: { enabled: true, guard: true } })

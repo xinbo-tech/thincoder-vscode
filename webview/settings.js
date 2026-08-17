@@ -549,15 +549,15 @@ function closeSettings() {
   // inputEl.focus() — caller should handle this via the returned closeSettings
 }
 
-function buildSettings() {
-  const body = document.getElementById("settings-body")
+/**
+ * Providers card HTML — the ONLY card that must refresh while the panel is open:
+ * add/remove/provider-change pushes arrive after every provider mutation, and the
+ * list must update in place (rebuildSettings runs only on open, which is why a new
+ * provider used to appear only after closing and reopening the panel).
+ */
+function providersCardHtml() {
   const ps = _providerStatus.providers || {}
-  const vscode = window._vscode
-
-  let html = ""
-
-  // ─── Providers card ───
-  html += `<section class="settings-card"><h4 class="settings-card-title">${t("settings.providersSection")}</h4><div class="settings-card-body">`
+  let html = `<section id="providers-card" class="settings-card"><h4 class="settings-card-title">${t("settings.providersSection")}</h4><div class="settings-card-body">`
   html += `<div id="prov-list">`
   for (const [name, s0] of Object.entries(ps)) {
     const label = _providerStatus.labels?.[name] || PROVIDER_LABELS[name] || name
@@ -610,6 +610,33 @@ function buildSettings() {
     <button id="pa-cancel-btn" class="key-btn">${t("settings.cancel")}</button>
   </div>`
   html += `</div></section>`
+  return html
+}
+
+/** Bind the [+ Add] form controls — they are wired with addEventListener (not inline
+ *  onclick), so a re-rendered card must re-bind them or Save/Cancel silently die. */
+function bindAddProviderForm() {
+  document.getElementById("pa-save-btn").addEventListener("click", () => { window._paSave(); flashSaved(document.getElementById("pa-save-btn")) })
+  document.getElementById("pa-cancel-btn").addEventListener("click", () => window._toggleAddForm(false))
+  paTypeChanged()
+}
+
+/** Re-render ONLY the providers card in place (panel open). A full buildSettings()
+ *  rebuild would clobber in-progress edits in the other cards — forbidden by design. */
+function renderProvidersCard() {
+  const card = document.getElementById("providers-card")
+  if (!card) return
+  card.outerHTML = providersCardHtml()
+  bindAddProviderForm()
+}
+
+function buildSettings() {
+  const body = document.getElementById("settings-body")
+  const vscode = window._vscode
+
+  let html = ""
+
+  html += providersCardHtml()
 
   // ─── Agent card (run parameters + subagent model assignments) ───
   const as = _agentSettings || {}
@@ -732,9 +759,7 @@ function buildSettings() {
   body.innerHTML = html
 
   // Bind Add-provider form controls
-  document.getElementById("pa-save-btn").addEventListener("click", () => { window._paSave(); flashSaved(document.getElementById("pa-save-btn")) })
-  document.getElementById("pa-cancel-btn").addEventListener("click", () => window._toggleAddForm(false))
-  paTypeChanged()
+  bindAddProviderForm()
 
   // Agent/Advisor/Consult settings: CHANGE-TO-SAVE (no submit button).
   // Every control mutates → saveAgentSettings immediately (local config write, no debounce).
@@ -980,7 +1005,14 @@ function updateMcpTools({ name, tools, error }) {
 }
 
 function updateProviderStatus(status) {
+  const changed = JSON.stringify(_providerStatus) !== JSON.stringify(status)
   _providerStatus = status
+  if (!changed) return
+  // Live refresh: providerStatus pushes arrive after every provider mutation (add /
+  // remove / key / proxy). When the panel is open, update the providers card in
+  // place — otherwise the change only appears on the next open (stale list bug).
+  const panel = document.getElementById("settings-panel")
+  if (panel && panel.style.display === "flex") renderProvidersCard()
 }
 
 function updateAgentSettings(settings) {
