@@ -56,7 +56,7 @@ function readCfg() {
 
 describe("PROVIDER_PRESETS — CLI parity", () => {
   it("mirrors the CLI preset values (endpoints, models, field names)", () => {
-    assert.equal(Object.keys(PROVIDER_PRESETS).length, 18)
+    assert.equal(Object.keys(PROVIDER_PRESETS).length, 20)
     assert.equal(PROVIDER_PRESETS.deepseek.baseURL, "https://api.deepseek.com") // no /v1
     assert.equal(PROVIDER_PRESETS.minimax.baseURL, "https://api.minimaxi.com/v1")
     assert.equal(PROVIDER_PRESETS.grok.model, "grok-4.5")
@@ -66,6 +66,11 @@ describe("PROVIDER_PRESETS — CLI parity", () => {
     assert.equal(PROVIDER_PRESETS["glm-code"].baseURL, "https://open.bigmodel.cn/api/coding/paas/v4") // Zhipu coding plan
     assert.equal(PROVIDER_PRESETS["glm-code"].model, "glm-5.2")
     assert.equal(PROVIDER_PRESETS.qwen.reasoningEffort, "high")
+    assert.equal(PROVIDER_PRESETS.mimo.baseURL, "https://api.xiaomimimo.com/v1") // Xiaomi MiMo pay-as-you-go
+    assert.equal(PROVIDER_PRESETS.mimo.model, "mimo-v2.5-pro")
+    assert.deepEqual(PROVIDER_PRESETS.mimo.thinking, { type: "enabled" })
+    assert.equal(PROVIDER_PRESETS.mimoplan.baseURL, "https://token-plan-cn.xiaomimimo.com/v1") // MiMo Token Plan (tp- keys)
+    assert.equal(PROVIDER_PRESETS.mimoplan.model, "mimo-v2.5-pro")
     // field names use CLI vocabulary: reasoningEffort / desc (not defaultEffort / label)
     assert.equal("reasoningEffort" in PROVIDER_PRESETS.deepseek, true)
     assert.equal("desc" in PROVIDER_PRESETS.deepseek, true)

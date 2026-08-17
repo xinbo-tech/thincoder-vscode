@@ -49,6 +49,11 @@ const MODEL_SPECS = [
   ["qwen",              { context: 1_000_000, maxOutput: 131_072, thinking: false, partialMode: true, multimodal: true, cacheMode: "none", thinkApi: "effort", tempRange: [0, 2] }],
   // MiniMax series
   ["MiniMax-M3",        { context: 1_000_000, maxOutput: 128_000, thinking: true,  multimodal: true, cacheMode: "auto", thinkApi: "type", thinkEnabledValue: "adaptive", tempRange: [0, 2], noUsageStream: true }],
+  // MiMo series (Xiaomi — OpenAI-compatible https://api.xiaomimimo.com/v1;
+  // deep thinking via thinking.type, default ON; multi-turn tool calls MUST echo
+  // reasoning_content back exactly like DeepSeek V4, else 400 on follow-ups)
+  ["mimo-v2.5-pro",     { context: 1_000_000, maxOutput: 128_000, thinking: true,  thinkApi: "type", reasoningEcho: "required", tempRange: [0, 1.5] }],
+  ["mimo-v2.5",         { context: 1_000_000, maxOutput: 128_000, thinking: true,  multimodal: true, thinkApi: "type", reasoningEcho: "required", tempRange: [0, 1.5] }],
   ["minimax-m3",        { context: 1_000_000, maxOutput: 128_000, thinking: true,  multimodal: true, cacheMode: "auto", thinkApi: "type", thinkEnabledValue: "adaptive", tempRange: [0, 2], noUsageStream: true }],
   ["minimax-m1",        { context: 256_000,   maxOutput: 128_000, thinking: false, cacheMode: "auto", noUsageStream: true }],
   // Grok series (xAI — OpenAI-compatible)

@@ -178,7 +178,7 @@ describe("providerStatus — presets on an empty config", () => {
     // so the welcome panel's dropdown never showed DeepSeek on a fresh install.
     const s = providerStatus()
     assert.equal(s.presets[0]?.name, "deepseek")
-    assert.equal(s.presets.length, 18)
+    assert.equal(s.presets.length, 20)
   })
 
   it("excludes a provider actually added on disk (duplicate protection intact)", () => {
