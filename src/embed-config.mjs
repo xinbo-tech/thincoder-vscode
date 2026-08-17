@@ -1,7 +1,7 @@
 /**
  * embed-config.mjs — shared embedding config (used by chat-panel, code tools, memory tools)
  *
- * Priority: ~/.thincoder/config.json (shared with CLI) → env vars
+ * Config source: ~/.thincoder/config.json (shared with CLI) — env vars are NOT a key source.
  * (Legacy VS Code SecretStorage keys are migrated into config.json by migrate-settings.mjs)
  */
 
@@ -29,19 +29,6 @@ export function getEmbedder() {
       }
     }
   } catch {}
-
-  // 2) Env vars
-  const apiKey = process.env.SILICONFLOW_API_KEY || process.env.THINCODER_EMBEDDING_API_KEY
-  if (apiKey) {
-    try {
-      _embedder = createEmbedder({
-        baseURL: "https://api.siliconflow.cn/v1",
-        model: "BAAI/bge-m3",
-        apiKey,
-      })
-      return _embedder
-    } catch {}
-  }
 
   return _embedder
 }

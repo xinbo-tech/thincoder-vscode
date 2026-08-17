@@ -129,16 +129,11 @@ export function resolveProviders() {
 }
 
 /**
- * API key for a provider entry (CLI loadConfig fallback order):
- * provider.apiKey → THINCODER_API_KEY → provider-specific env var (deepseek/openai only).
+ * API key for a provider entry — config.json only. Env vars are NOT a key source
+ * (users configure keys in the settings panel / config file, never in the environment).
  */
-export function resolveKey(entry, activeName) {
-  if (entry?.apiKey?.trim()) return entry.apiKey.trim()
-  if (process.env.THINCODER_API_KEY) return process.env.THINCODER_API_KEY
-  const envMap = { deepseek: "DEEPSEEK_API_KEY", openai: "OPENAI_API_KEY" }
-  const keyVar = envMap[activeName ?? entry?.name]
-  if (keyVar && process.env[keyVar]) return process.env[keyVar]
-  return null
+export function resolveKey(entry) {
+  return entry?.apiKey?.trim() || null
 }
 
 /**
@@ -159,7 +154,7 @@ export function providerFromConfig(name) {
   const { providers, activeProvider } = resolveProviders()
   const target = name ? findProvider(providers, name) : findProvider(providers, activeProvider)
   if (!target) return null
-  const apiKey = resolveKey(target, target.name)
+  const apiKey = resolveKey(target)
   if (!apiKey) return null
   const raw = loadRaw()
   const provider = {

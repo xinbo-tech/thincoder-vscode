@@ -83,7 +83,7 @@ export const escalateTool = {
     // Key precheck: fail BEFORE the child spawns, not at its first chat call — an
     // auth failure there would surface as an escalate crash, misdiagnosing the cause.
     if (!provider.apiKey?.trim()) {
-      return `Error: provider "${pick.provider}" has no API key — set it in Settings (or THINCODER_API_KEY) before flying it in`
+      return `Error: provider "${pick.provider}" has no API key — set it in Settings before flying it in`
     }
     let effortNote = ""
     const withEffort = pick.effort

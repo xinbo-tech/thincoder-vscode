@@ -27,7 +27,7 @@ before(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "thincoder-cfgio-"))
   cfgPath = join(tmpDir, "config.json")
   _setConfigPathForTest(cfgPath)
-  for (const k of ["THINCODER_API_KEY", "THINCODER_BASE_URL", "THINCODER_MODEL", "THINCODER_ACTIVE_MODEL", "THINCODER_ACTIVE_PROVIDER", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"]) {
+  for (const k of ["THINCODER_BASE_URL", "THINCODER_MODEL", "THINCODER_ACTIVE_MODEL", "THINCODER_ACTIVE_PROVIDER"]) {
     savedEnv[k] = process.env[k]
     delete process.env[k]
   }
@@ -157,24 +157,19 @@ describe("findProvider", () => {
 
 // ─── Key / model resolution ───────────────────────────────────
 
-describe("resolveKey precedence", () => {
-  it("provider.apiKey wins", () => {
-    assert.equal(resolveKey({ apiKey: " pk " }, "deepseek"), "pk")
+describe("resolveKey — config-only (env vars are not a key source)", () => {
+  it("provider.apiKey wins and is trimmed", () => {
+    assert.equal(resolveKey({ apiKey: " pk " }), "pk")
   })
-  it("falls back to THINCODER_API_KEY", () => {
+  it("returns null when the entry has no key — even with env vars set", () => {
     process.env.THINCODER_API_KEY = "env-key"
-    try {
-      assert.equal(resolveKey({}, "whatever"), "env-key")
-    } finally {
-      delete process.env.THINCODER_API_KEY
-    }
-  })
-  it("falls back to provider-specific env (deepseek/openai only)", () => {
     process.env.DEEPSEEK_API_KEY = "ds-key"
     try {
-      assert.equal(resolveKey({}, "deepseek"), "ds-key")
-      assert.equal(resolveKey({}, "kimi"), null)
+      assert.equal(resolveKey({}), null)
+      assert.equal(resolveKey({ name: "deepseek" }), null)
+      assert.equal(resolveKey(undefined), null)
     } finally {
+      delete process.env.THINCODER_API_KEY
       delete process.env.DEEPSEEK_API_KEY
     }
   })

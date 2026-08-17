@@ -493,7 +493,7 @@ export class ChatPanel {
     }
     const embedder = await this._resolveEmbedder()
     if (!embedder) {
-      vscode.window.showErrorMessage("No embedding API key configured. Set SILICONFLOW_API_KEY environment variable or configure embedding in ~/.thincoder/config.json")
+      vscode.window.showErrorMessage("No embedding API key configured. Configure embedding.apiKey in ~/.thincoder/config.json")
       return
     }
 

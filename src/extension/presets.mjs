@@ -26,7 +26,7 @@ export function isProviderConfigured(name) {
     const { providers } = resolveProviders()
     const entry = providers.find((p) => p.name === name)
     if (!entry) return false
-    return !!resolveKey(entry, name)
+    return !!resolveKey(entry)
   } catch {
     return false
   }
@@ -54,7 +54,7 @@ export function readProviders() {
 }
 
 /**
- * Get API key for a provider (config.json apiKey → THINCODER_API_KEY → provider-specific env).
+ * Get API key for a provider (config.json apiKey only — env vars are not a key source).
  * Kept async — call sites await it.
  */
 export async function getKey(name) {
@@ -62,7 +62,7 @@ export async function getKey(name) {
     const { providers } = resolveProviders()
     const entry = providers.find((p) => p.name === name)
     if (!entry) return null
-    return resolveKey(entry, name)
+    return resolveKey(entry)
   } catch {
     return null
   }

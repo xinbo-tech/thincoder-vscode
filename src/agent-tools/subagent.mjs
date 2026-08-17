@@ -19,19 +19,12 @@ export function effectiveSubagentModel(parent, role, modelArg) {
  * Resolve the sub-agent's provider from a model override string (CLI parity).
  * "provider:model" → named provider + model; "provider" → named provider;
  * "model" → parent's provider with a different model; null → parent's provider.
- * Keys follow the config fallback order (CLI parity via config-io resolveKey).
+ * Keys come from config.json only (env vars are not a key source).
  */
 export function resolveChildProvider(parent, modelArg) {
   if (!modelArg) return { ...parent._provider }
   const providers = parent.config?.providersList ?? []
-  const withKey = (p) => {
-    if (p.apiKey?.trim()) return { ...p, apiKey: p.apiKey.trim() }
-    if (process.env.THINCODER_API_KEY) return { ...p, apiKey: process.env.THINCODER_API_KEY }
-    const envMap = { deepseek: "DEEPSEEK_API_KEY", openai: "OPENAI_API_KEY" }
-    const keyVar = envMap[p.name]
-    if (keyVar && process.env[keyVar]) return { ...p, apiKey: process.env[keyVar] }
-    return { ...p }
-  }
+  const withKey = (p) => (p.apiKey?.trim() ? { ...p, apiKey: p.apiKey.trim() } : { ...p })
   if (modelArg.includes(":")) {
     const [pname, mname] = modelArg.split(":")
     const p = providers.find((x) => x.name === pname)

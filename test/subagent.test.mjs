@@ -37,12 +37,11 @@ test("resolveChildProvider: provider:model / provider name / model name / null",
 })
 
 
-test("resolveChildProvider: env key fallback when provider has no apiKey", async () => {
+test("resolveChildProvider: env keys are NOT picked up (config-only)", async () => {
   const { resolveChildProvider } = await import("../src/agent-tools/subagent.mjs")
   const parent = {
     _provider: { name: "glm", baseURL: "x", model: "glm-5.2", apiKey: "k" },
     config: {
-
       providersList: [{ name: "deepseek", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro" }],
     },
   }
@@ -50,7 +49,7 @@ test("resolveChildProvider: env key fallback when provider has no apiKey", async
   process.env.DEEPSEEK_API_KEY = "env-key"
   try {
     const p = resolveChildProvider(parent, "deepseek")
-    assert.equal(p.apiKey, "env-key")
+    assert.equal(p.apiKey, undefined, "env key must not leak into the child provider")
   } finally {
     if (prev === undefined) delete process.env.DEEPSEEK_API_KEY
     else process.env.DEEPSEEK_API_KEY = prev
