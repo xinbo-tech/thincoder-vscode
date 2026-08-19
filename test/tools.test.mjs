@@ -444,3 +444,34 @@ it("edit on a CRLF file with LF old_string succeeds (EOL normalization regressio
     assert.match(r, /old_string not found/)
   })
 })
+
+
+describe("context — on-demand IDE state snapshot", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("is registered in the builtin registry", async () => {
+    const { builtinTools } = await import("../src/tools/index.mjs")
+    const names = builtinTools.map((t) => t.name)
+    assert.ok(names.includes("context"))
+  })
+
+  it("changes slice reports uncommitted files (real repo)", async () => {
+    const { contextTool } = await import("../src/tools/context.mjs")
+    const { execSync } = await import("node:child_process")
+    execSync("git init -q", { cwd })
+    execSync('git config user.email t@t && git config user.name t', { cwd })
+    writeFileSync(join(cwd, "a.txt"), "x\n")
+    execSync("git add a.txt && git commit -qm init", { cwd })
+    writeFileSync(join(cwd, "a.txt"), "y\n")
+    const r = await contextTool.execute({ what: "changes" }, ctx())
+    assert.match(r, /a\.txt/, "modified file listed: " + r)
+  })
+
+  it("empty IDE returns a no-context message without crashing", async () => {
+    const { contextTool } = await import("../src/tools/context.mjs")
+    const r = await contextTool.execute({}, ctx())
+    assert.match(r, /no active editor/, "result: " + r)
+  })
+})
+

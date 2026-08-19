@@ -17,6 +17,7 @@ import { readImageTool } from "./read_image.mjs"
 import { codeSearchTool, docSearchTool } from "./code.mjs"
 import { repoOutlineTool } from "../repomap.mjs"
 import { memoryPutTool, memorySearchTool } from "../memory.mjs"
+import { contextTool } from "./context.mjs"
 
 export { readTool, writeTool, editTool, hashlineEditTool }
 export { globTool, grepTool }
@@ -32,6 +33,8 @@ export { questionTool }
 export { readImageTool }
 export { codeSearchTool, docSearchTool }
 
+export { contextTool } from "./context.mjs"
+
 export { BASH_TIMEOUT_MS, resolvePath, formatSize } from "./shared.mjs"
 
 /** All built-in tools */
@@ -44,6 +47,7 @@ export const builtinTools = [
   repoOutlineTool, codeSearchTool, docSearchTool,
   lspTool, executeTool,
   memoryPutTool, memorySearchTool,
+  contextTool,
 ]
 
 /** Convert a tool definition to OpenAI function schema */

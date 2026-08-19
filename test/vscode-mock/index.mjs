@@ -79,6 +79,8 @@ export const window = {
   // Window focus state (notify.mjs) + text editor (openFile)
   state: { focused: true },
   showTextDocument: async (doc) => ({ document: doc, selection: null, revealRange: () => {} }),
+  // tab groups (context tool) — safe no-op default
+  tabGroups: { all: [] },
 }
 
 export const commands = {
@@ -131,7 +133,7 @@ export const l10n = { t: (s) => s }
 export const workspaceState = { get: () => undefined, update: async () => {} }
 export const globalState = { get: () => undefined, update: async () => {} }
 
-export const languages = { createDiagnosticCollection: () => ({ dispose: () => {} }) }
+export const languages = { createDiagnosticCollection: () => ({ dispose: () => {} }), getDiagnostics: () => [] }
 
 export const ExtensionMode = { Production: 1, Development: 2, Test: 3 }
 
