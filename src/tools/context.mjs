@@ -22,9 +22,10 @@ export const contextTool = {
   name: "context",
   readonly: true,
   description:
-    "Collect the current IDE context on demand: cursor position, open tabs, hover info at the cursor, " +
-    "diagnostics (errors/warnings), and uncommitted git changes. Call this to get the live editor state " +
-    "instead of guessing — cheaper than re-reading files you already have open.\n" +
+    "Read the live IDE state on demand — what the user is looking at RIGHT NOW in the editor: " +
+    "cursor position, open tabs, hover info at the cursor, diagnostics (errors/warnings), and uncommitted " +
+    "git changes. You are in the VS Code side panel; prefer this over re-reading files to learn what the " +
+    "user is currently looking at or what errors are showing.\n" +
     "Parameters:\n" +
     "- what (optional): which slice to collect — all | cursor | tabs | hover | diagnostics | changes (default all)",
   parameters: {

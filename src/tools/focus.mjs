@@ -11,9 +11,9 @@ export const focusTool = {
   name: "focus",
   readonly: true,
   description:
-    "Open a file in the editor and move the cursor to a line/column, so the user can see " +
-    "exactly where you're working or where a change should go. Bidirectional — you drive the " +
-    "editor, not just read it.\n" +
+    "Open a file in the editor and move the cursor to a line/column, so the user can SEE where you're " +
+    "working or where a change should go. You are in the VS Code side panel — use this to point the user " +
+    "at a location: reveal a file you just edited, navigate to a fix site, or show where to type next.\n" +
     "Parameters:\n" +
     "- uri (required): target file path (relative to project root, or absolute)\n" +
     "- line: 1-based line number to place the cursor (optional)\n" +

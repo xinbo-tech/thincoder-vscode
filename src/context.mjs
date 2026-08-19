@@ -119,6 +119,16 @@ export { parseImports }
  * relevant memories, and relevant doc chunks into the conversation history.
  */
 export function injectContext(history, cwd, userInput) {
+  // VS Code side-panel bridge tools — one-time hint so the agent knows it can read
+  // and drive the LIVE editor (not just the repo on disk). CLI has no context/focus.
+  history.push({
+    role: "user",
+    content:
+      "[System reminder: you are in the VS Code side panel. Use `context` to read the live editor state on demand " +
+      "(cursor, open tabs, hover, diagnostics, uncommitted changes) instead of re-reading files; use `focus` to open " +
+      "a file and move the cursor so the user can see where you're working.]",
+  })
+
   // Git
   try {
     const branch = execSync("git branch --show-current", { cwd, encoding: "utf8", timeout: 5000, stdio: "pipe" }).trim()
