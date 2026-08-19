@@ -288,6 +288,67 @@ describe("git — unified tool (CLI parity: action subcommands)", () => {
     const r = await gitTool.execute({ action: "nope" }, ctx())
     assert.match(r, /Unknown action 'nope'/)
   })
+
+  it("show returns commit stat; rm untracks; commit+push work", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const { execSync } = await import("node:child_process")
+    execSync("git init -q", { cwd })
+    execSync("git config user.email t@t && git config user.name t", { cwd })
+    writeFileSync(join(cwd, "a.txt"), "hello\n")
+    execSync("git add a.txt && git commit -qm init", { cwd })
+    writeFileSync(join(cwd, "b.txt"), "world\n")
+
+    // show: 默认 HEAD，有 init 提交的 stat
+    const sh = await gitTool.execute({ action: "show" }, ctx())
+    assert.match(sh, /init/)
+
+    // rm: 把 b.txt 移出跟踪（文件保留）
+    execSync("git add b.txt", { cwd })
+    const rm = await gitTool.execute({ action: "rm", path: "b.txt" }, ctx())
+    assert.match(rm, /Removed from tracking: b\.txt/)
+    const tracked = execSync("git ls-files", { cwd, encoding: "utf8" })
+    assert.ok(tracked.includes("a.txt"))
+    assert.ok(!tracked.includes("b.txt"))
+    assert.ok(existsSync(join(cwd, "b.txt"))) // 磁盘还在
+
+    // commit + push: 提交一个文件
+    writeFileSync(join(cwd, "c.txt"), "c\n")
+    const cm = await gitTool.execute({ action: "commit", message: "add c" }, ctx())
+    assert.match(cm, /add c/)
+    const lg = await gitTool.execute({ action: "log", oneline: true }, ctx())
+    assert.match(lg, /add c/)
+  })
+
+  it("filter keeps only matching lines on read-only actions", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const { execSync } = await import("node:child_process")
+    execSync("git init -q", { cwd })
+    execSync("git config user.email t@t && git config user.name t", { cwd })
+    writeFileSync(join(cwd, "target.txt"), "x\n")
+    writeFileSync(join(cwd, "other.txt"), "y\n")
+    execSync("git add -A && git commit -qm init", { cwd })
+    writeFileSync(join(cwd, "target.txt"), "changed\n")
+
+    const st = await gitTool.execute({ action: "status", filter: "target" }, ctx())
+    assert.match(st, /target\.txt/)
+    assert.ok(!st.includes("other.txt"))
+  })
+
+  it("isReadonlyAction distinguishes read vs write actions", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    assert.ok(gitTool.isReadonlyAction({ action: "status" }))
+    assert.ok(gitTool.isReadonlyAction({ action: "diff" }))
+    assert.ok(gitTool.isReadonlyAction({ action: "log" }))
+    assert.ok(gitTool.isReadonlyAction({ action: "show" }))
+    assert.ok(gitTool.isReadonlyAction({ action: "checkpoint", checkpointAction: "list" }))
+    assert.ok(gitTool.isReadonlyAction({ action: "checkpoint", checkpointAction: "cat" }))
+    assert.ok(!gitTool.isReadonlyAction({ action: "rm" }))
+    assert.ok(!gitTool.isReadonlyAction({ action: "commit" }))
+    assert.ok(!gitTool.isReadonlyAction({ action: "push" }))
+    assert.ok(!gitTool.isReadonlyAction({ action: "checkpoint", checkpointAction: "create" }))
+    assert.ok(!gitTool.isReadonlyAction({ action: "checkpoint", checkpointAction: "rewind" }))
+    assert.ok(!gitTool.isReadonlyAction({ action: "nope" }))
+  })
 })
 
 describe("bash — git destructive-command protection (CLI parity)", () => {

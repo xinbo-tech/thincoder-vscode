@@ -13,35 +13,73 @@ export const gitTool = {
   name: "git",
   readonly: false,
   description:
-    "Run a git command. Use this to see uncommitted changes, staged changes, diff against a ref, recent commits, or manage checkpoints. Only works inside a git repository.\n" +
+    "Run a git command. Use this to see uncommitted changes, staged changes, diff against a ref, recent commits, show a commit, or manage checkpoints. Only works inside a git repository.\n" +
     "- action='diff': Show unified diff — what changed since last commit. Set staged=true for staged-only diff, ref=<ref> to compare against a specific commit/branch, path=<dir> to scope to a file or directory.\n" +
     "- action='status': Show working tree state — staged, unstaged, untracked files, and conflicts. Returns categorized lists.\n" +
     "- action='log': Show recent commit history. Set count to limit, oneline=true for compact format, path=<file> to see history of one file.\n" +
-    "- action='checkpoint': Manage git-based snapshots. Use checkpointAction to choose: list (overview), create (snapshot now), rewind (restore snapshot by id), cat (read a file from a snapshot).\n\n" +
+    "- action='show': Show a commit's details. Set ref=<ref> to inspect a specific commit (default HEAD).\n" +
+    "- action='checkpoint': Manage git-based snapshots. Use checkpointAction to choose: list (overview), create (snapshot now), rewind (restore snapshot by id), cat (read a file from a snapshot).\n" +
+    "- action='rm': Remove a file from git tracking (keeps the file on disk). path is required.\n" +
+    "- action='commit': Commit all staged changes. message is required.\n" +
+    "- action='push': Push the current branch to the remote.\n" +
+    "filter (optional): only return output lines matching this regular expression (case-insensitive) — for read-only actions (diff/status/log/show).\n\n" +
     "Parameters:\n" +
-    "- action (required): diff / status / log / checkpoint\n" +
+    "- action (required): diff / status / log / show / checkpoint / rm / commit / push\n" +
     "- staged: (diff) Show staged changes instead of working tree\n" +
-    "- path: (diff/log/checkpoint:cat/checkpoint:rewind) File or directory to scope to\n" +
-    "- ref: (diff) Compare against this ref (default HEAD)\n" +
+    "- path: (diff/log/checkpoint:cat/checkpoint:rewind/rm) File or directory to scope to\n" +
+    "- ref: (diff/show) Commit ref (default HEAD)\n" +
     "- count: (log) Number of commits (default 10)\n" +
     "- oneline: (log) One-line-per-commit format\n" +
+    "- message: (commit) Commit message — required for commit\n" +
+    "- filter: (read-only actions) Regex to filter output lines by\n" +
     "- checkpointAction: (checkpoint) list snapshots / create one / restore by id / read file from snapshot\n" +
     "- checkpointId: (checkpoint) Snapshot id — required for rewind and cat; optional for list (shows file tree)",
   parameters: {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["diff", "status", "log", "checkpoint"], description: "diff / status / log / checkpoint" },
+      action: { type: "string", enum: ["diff", "status", "log", "show", "checkpoint", "rm", "commit", "push"], description: "diff / status / log / show / checkpoint / rm / commit / push" },
       staged: { type: "boolean", description: "(diff) Show staged changes instead of working tree" },
-      path: { type: "string", description: "(diff/log/checkpoint:cat/checkpoint:rewind) File or directory to scope to" },
-      ref: { type: "string", description: "(diff) Compare against this ref (default HEAD)" },
+      path: { type: "string", description: "(diff/log/checkpoint:cat/checkpoint:rewind/rm) File or directory to scope to" },
+      ref: { type: "string", description: "(diff/show) Commit ref (default HEAD)" },
       count: { type: "number", description: "(log) Number of commits (default 10)" },
       oneline: { type: "boolean", description: "(log) One-line-per-commit format" },
+      message: { type: "string", description: "(commit) Commit message — required for commit" },
+      filter: { type: "string", description: "(read-only actions) Regex to filter output lines by (case-insensitive)" },
       checkpointAction: { type: "string", enum: ["list", "create", "rewind", "cat"], description: "(checkpoint) list snapshots / create one / restore by id / read file from snapshot" },
       checkpointId: { type: "string", description: "(checkpoint) Snapshot id — required for rewind and cat; optional for list (shows file tree)" },
     },
     required: ["action"],
   },
   async execute(args, ctx) {
+    const out = await this._execute(args, ctx)
+    return out
+  },
+
+  /**
+   * 判断某次 git 调用是否只读（供 execute-tools 审批过滤用）。
+   * 只读 action 不弹审批：diff/status/log/show + checkpoint 的 list/cat。
+   */
+  isReadonlyAction(args) {
+    if (!args || typeof args.action !== "string") return false
+    if (["diff", "status", "log", "show"].includes(args.action)) return true
+    if (args.action === "checkpoint") return ["list", "cat"].includes(args.checkpointAction)
+    return false // rm/commit/push + checkpoint create/rewind 是写操作
+  },
+
+  /** 内部实现：执行各 action。 */
+  async _execute(args, ctx) {
+    // filter 只在只读 action 上生效
+    const applyFilter = (text) => {
+      if (!args.filter) return text
+      try {
+        const re = new RegExp(args.filter, "i")
+        const lines = text.split("\n").filter((l) => re.test(l))
+        return lines.length ? lines.join("\n") : "(no matching lines)"
+      } catch (e) {
+        return `filter error: ${e.message}`
+      }
+    }
+
     switch (args.action) {
       case "diff": {
         const ref = args.ref ?? "HEAD"
@@ -49,7 +87,7 @@ export const gitTool = {
         const flags = args.staged ? ["--staged"] : []
         const paths = args.path ? [args.path] : []
         const out = runGit(ctx.cwd, ["diff", ...flags, ref, "--", ...paths])
-        return truncate(out || "(no changes)")
+        return truncate(applyFilter(out || "(no changes)"))
       }
       case "status": {
         const porcelain = runGit(ctx.cwd, ["status", "--porcelain"])
@@ -82,7 +120,7 @@ export const gitTool = {
         if (unstaged.length) parts.push("Unstaged (" + unstaged.length + "):\n" + unstaged.join("\n"))
         if (untracked.length) parts.push("Untracked (" + untracked.length + "):\n" + untracked.join("\n"))
         if (conflicts.length) parts.push("Conflicts (" + conflicts.length + "):\n" + conflicts.join("\n"))
-        return truncate(parts.join("\n\n"))
+        return truncate(applyFilter(parts.join("\n\n")))
       }
       case "log": {
         const n = Math.min(Math.max(1, args.count ?? 10), 200)
@@ -92,13 +130,34 @@ export const gitTool = {
           : ["log", "-" + n, "--format=%h %ad %an %s", "--date=short"]
         if (args.path) cmdArgs.push("--", args.path)
         const out = runGit(ctx.cwd, cmdArgs)
-        return truncate(out || "(no commits)")
+        return truncate(applyFilter(out || "(no commits)"))
+      }
+      case "show": {
+        const ref = args.ref ?? "HEAD"
+        if (!/^[A-Za-z0-9._/~^@][A-Za-z0-9._/~^@{}-]*$/.test(ref)) throw new Error(`Invalid git ref: ${ref}`)
+        const out = runGit(ctx.cwd, ["show", "--stat", ref])
+        return truncate(applyFilter(out || "(no such commit)"))
+      }
+      case "rm": {
+        if (!args.path) return "Error: rm requires path (file to remove from tracking)"
+        runGit(ctx.cwd, ["rm", "--cached", "-r", "--", args.path])
+        return `Removed from tracking: ${args.path} (file kept on disk)`
+      }
+      case "commit": {
+        if (!args.message) return "Error: commit requires message"
+        runGit(ctx.cwd, ["add", "-A"])
+        const out = runGit(ctx.cwd, ["commit", "-m", args.message])
+        return out || "(commit done)"
+      }
+      case "push": {
+        const out = runGit(ctx.cwd, ["push"])
+        return out || "(push done)"
       }
       case "checkpoint": {
         return await checkpointExecute(args, ctx)
       }
       default:
-        return `Unknown action '${args.action}'. Use: diff | status | log | checkpoint`
+        return `Unknown action '${args.action}'. Use: diff | status | log | show | checkpoint | rm | commit | push`
     }
   },
 }

@@ -85,7 +85,10 @@ export async function executeToolBatches(agent, { response, history, fullHistory
       // Permission gate: any non-readonly tool at depth 0 in manual mode. getAuto() is the
       // LIVE flag (CLI parity) — approve-all / the AUTO button can flip it mid-turn, so
       // re-read it per tool call instead of using the startup snapshot.
-      if (!getAuto() && tool && !tool.readonly && depth === 0 && callbacks.onPermissionRequired) {
+      // Tools may declare action-level readonly-ness (e.g. git diff/status/log/show) —
+      // those skip approval while write actions (git commit/push/rm) still prompt.
+      const actionReadonly = tool?.isReadonlyAction?.(args) ?? false
+      if (!getAuto() && tool && !tool.readonly && !actionReadonly && depth === 0 && callbacks.onPermissionRequired) {
         // Compute diff preview for file-based tools
         let diffInfo = null
         if (toolName !== "bash" && args.path) {
