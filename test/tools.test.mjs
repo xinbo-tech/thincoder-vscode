@@ -475,3 +475,29 @@ describe("context — on-demand IDE state snapshot", () => {
   })
 })
 
+
+describe("focus — agent-driven cursor/editor navigation", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("is registered in the builtin registry", async () => {
+    const { builtinTools } = await import("../src/tools/index.mjs")
+    assert.ok(builtinTools.map((t) => t.name).includes("focus"))
+  })
+
+  it("opens an existing file and reports the focused position", async () => {
+    const { focusTool } = await import("../src/tools/focus.mjs")
+    writeFileSync(join(cwd, "f.txt"), "one\ntwo\nthree\n")
+    const r = await focusTool.execute({ uri: "f.txt", line: 2, character: 1 }, ctx())
+    assert.match(r, /Opened and focused/)
+    assert.match(r, /L2:1/)
+  })
+
+  it("reports missing files", async () => {
+    const { focusTool } = await import("../src/tools/focus.mjs")
+    const r = await focusTool.execute({ uri: "nope.txt" }, ctx())
+    assert.match(r, /file not found/)
+  })
+})
+
+
