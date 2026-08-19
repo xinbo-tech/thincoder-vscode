@@ -1454,7 +1454,7 @@ function scheduleStreamRender() {
   _renderScheduled = true
   requestAnimationFrame(() => {
     _renderScheduled = false
-    const now = performance.now()
+    const now = Date.now()
     if (now - _lastStreamRender < STREAM_RENDER_MIN_MS) {
       // 距上次渲染 <50ms：跳过一次，仍有脏内容则继续排队（flushStreamRender 兜底尾帧）
       if (_tokenDirty || _reasoningDirty || _advisorScrollDirty) scheduleStreamRender()

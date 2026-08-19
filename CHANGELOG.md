@@ -1,4 +1,10 @@
 # Changelog
+## [0.1.37] — 2026-08-20
+
+### Fixed
+
+- **webview 输入越用越卡（中文 IME 尤其明显）** — 根因是消息 DOM 无界增长 × 输入路径强制 reflow。修复：`adjustInputHeight` 缓存高度不变跳过、`scrollTop` 改用 `MAX_SAFE_INTEGER` 免读布局、`.message/.tool-call` 加 `content-visibility` 隔离离屏渲染、`#messages` 去 `aria-live`、工具输出限长 64KB 入 DOM、流式渲染降频 ≥50ms/次（2026-08-20 用户报告）
+
 ## [0.1.36] — 2026-08-19
 
 ### Added
