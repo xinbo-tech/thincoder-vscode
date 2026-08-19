@@ -103,6 +103,27 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   // pushReal into fullHistory (no separate accumulation needed here).
   // Accumulate token usage across all LLM calls in this turn (matches CLI)
   const totalUsage = { prompt_tokens: 0, completion_tokens: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 }
+  // Ask a question in the panel (persistent in-chat card, never auto-dismisses) — shared
+  // by the `question` tool and the turn-cap "Continue?" prompt. A native notification toast
+  // (showInformationMessage) auto-dismisses after a while and resolves undefined, which can
+  // leave the turn silently stopped with no way to continue or cancel.
+  const askInPanel = (question, options) => new Promise((resolve) => {
+    const entry = { resolve }
+    panel._questionQueue.push(entry)
+    panel._setStatus("waiting")
+    panel._panel?.webview.postMessage({ type: "question", question, options: options ?? null })
+    // Stop must release the waiting turn — an unanswered question would otherwise keep the
+    // loop hung on this promise forever (user presses Stop, UI stays "running").
+    const onAbort = () => {
+      const i = panel._questionQueue.indexOf(entry)
+      if (i >= 0) panel._questionQueue.splice(i, 1)
+      panel._panel?.webview.postMessage({ type: "questionCancelled" })
+      resolve(null)
+    }
+    if (panel._abortController?.signal.aborted) onAbort()
+    else panel._abortController?.signal.addEventListener("abort", onAbort, { once: true })
+  })
+
   // Callbacks shared by the initial run and the interrupt-resume run (extracted so
   // they can't drift apart).
   const buildCallbacks = () => ({
@@ -147,23 +168,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       notifyCompletionIfUnfocused()
     },
     onPermissionRequired: permissionGate(panel),
-    onQuestion: (question, options) => new Promise((resolve) => {
-      const entry = { resolve }
-      panel._questionQueue.push(entry)
-      panel._setStatus("waiting")
-      panel._panel?.webview.postMessage({ type: "question", question, options: options ?? null })
-      // Stop must release the waiting agent turn — an unanswered question would
-      // otherwise keep the loop hung on this promise forever (user presses Stop,
-      // UI stays "running" until the question card is answered).
-      const onAbort = () => {
-        const i = panel._questionQueue.indexOf(entry)
-        if (i >= 0) panel._questionQueue.splice(i, 1)
-        panel._panel?.webview.postMessage({ type: "questionCancelled" })
-        resolve(null)
-      }
-      if (panel._abortController?.signal.aborted) onAbort()
-      else panel._abortController?.signal.addEventListener("abort", onAbort, { once: true })
-    }),
+    onQuestion: (question, options) => askInPanel(question, options),
   })
   const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume, planMode: panel._activeData()?.planMode ?? false })
   // Turn-cap continue loop (CLI agent-turn.mjs parity): each ContinueError offers
@@ -191,10 +196,9 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
         // controller + resume re-runs the loop from the SAME history (the user message
         // is already pushed; resume=true skips re-pushing it). Unlimited continues —
         // the user can Stop at any prompt.
-        const willContinue = await vscode.window.showInformationMessage(
+        const willContinue = await askInPanel(
           `Agent reached ${e.turns} turns (limit). Continue from here?`,
-          "Continue",
-          "Stop",
+          ["Continue", "Stop"],
         )
         if (willContinue === "Continue") {
           panel._abortController = new AbortController()
