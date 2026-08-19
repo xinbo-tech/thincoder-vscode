@@ -1,6 +1,6 @@
 # Webview 输入卡顿修复方案
 
-> 状态：**已实施** P0（止血）+ 工具输出限长 + 流式降频；**待做** 窗口化裁剪（需扩展宿主给 live 消息发 idx）
+> 状态：**全部已实施**（P0 止血 + 工具输出限长 + 流式降频 + 窗口化裁剪）
 > 症状：使用时间越长，输入越卡，中文 IME 尤其明显；退出 VS Code 重进恢复。
 > 依据：会诊共识（4 家一致）+ 代码走查（webview/chat.js、ui.js、md.js、highlight.js、autocomplete.js、chat.css、base.css）
 
@@ -53,7 +53,7 @@
 |---|---|---|
 | **P0（止血）** | #2.3 去强制 reflow（adjustInputHeight 缓存跳过 + scrollTop=MAX_SAFE_INTEGER）+ #2.4 CSS 隔离（content-visibility + 去 aria-live + grid minmax） | ✅ 已做 |
 | **P1（治本）** | #2.2 工具输出限长（capText 64KB，流式 + 完成态都截断） | ✅ 已做 |
-| **P1（治本）** | #2.1 窗口化裁剪 | ⏳ 待做（需扩展宿主给 live 消息发 data-idx，否则 loadOlder 无法锚回被裁的 live 块） |
+| **P1（治本）** | #2.1 窗口化裁剪（顶层块超 150 删最旧；live 块本地 `_nextIdx` 续接 data-idx，`loadOlder` 可锚回） | ✅ 已做 |
 | **P2（打磨）** | #2.5 流式降频（scheduleStreamRender 限 ≥50ms/次） | ✅ 已做 |
 
 ## 4. 验证

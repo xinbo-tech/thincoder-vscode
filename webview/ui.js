@@ -97,7 +97,8 @@ export function buildUserMessage(ctx, text, timestamp, idx) {
 
 export function addUser(ctx, text, timestamp, idx) {
   ctx.assistantLabeled = false // new turn — the next assistant label is allowed once
-  ctx.messagesEl.appendChild(buildUserMessage(ctx, text, timestamp, idx))
+  ctx.messagesEl.appendChild(buildUserMessage(ctx, text, timestamp, idx !== undefined ? idx : ctx._nextIdx++))
+  trimOldMessages(ctx)
   scrollDown(ctx)
 }
 
@@ -125,6 +126,7 @@ export function newBlock(ctx) {
   ctx.currentRaw = ""
   ctx.currentBlock = document.createElement("div")
   ctx.currentBlock.className = "message assistant"
+  ctx.currentBlock.dataset.idx = String(ctx._nextIdx++) // 窗口裁剪：live 块补全局 idx，供 loadOlder 锚回
   // One "❯ ThinCoder:" per turn (CLI ensureAssistantLabel parity): only the
   // turn's FIRST block carries the label; segments after tool batches start
   // fresh blocks but must not paint a second label.
@@ -133,6 +135,7 @@ export function newBlock(ctx) {
     ctx.currentBlock.innerHTML = `<div class="msg-label">❯ ${t("msg.assistant")}:</div>`
   }
   ctx.messagesEl.appendChild(ctx.currentBlock)
+  trimOldMessages(ctx)
 }
 
 export function addTool(ctx, name, args, id) {
@@ -380,6 +383,18 @@ export function scrollDown(ctx) {
 
 export function maybeScrollDown(ctx) {
   if (ctx._pinBottom !== false) ctx.messagesEl.scrollTop = Number.MAX_SAFE_INTEGER
+}
+
+/** 窗口化裁剪：顶层内容块超过上限时删最旧的，防 DOM 无界增长（webview 输入卡顿治本）。
+ *  被裁掉的块带 data-idx（history 来自宿主、live 由本地 _nextIdx 续接），向上滚动时 loadOlder 拉回。 */
+const MAX_MESSAGE_BLOCKS = 150
+export function trimOldMessages(ctx) {
+  const blocks = [...ctx.messagesEl.children].filter((el) =>
+    el.classList.contains("message") || el.classList.contains("tool-call") || el.classList.contains("advisor-block"))
+  const overflow = blocks.length - MAX_MESSAGE_BLOCKS
+  if (overflow <= 0) return
+  for (let i = 0; i < overflow; i++) blocks[i].remove()
+  ctx._hasOlder = true
 }
 
 /** Wire the pin/unpin listeners once. Threshold ~24px counts "near the bottom" as bottom. */

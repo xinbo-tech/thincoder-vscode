@@ -59,6 +59,9 @@ const ctx = {
   welcomeSettingsBtn: document.getElementById("welcome-settings-btn"),
   // Current-project button (multi-root switcher, session bar)
   projectBtn: document.getElementById("project-btn"),
+  // 窗口化裁剪 + 懒加载：本地 live 消息 idx 计数 + 是否还有更早历史（live 消息宿主不回发 idx，本地自增）
+  _nextIdx: 0,
+  _hasOlder: false,
 }
 
 // ─── Shared mutable state (must be declared before setInterval / event handlers)
@@ -76,9 +79,8 @@ let _goalInfo = null
 let _advisorBlock = null
 // Subagent/consultant activity-stream blocks (reset per turn together with _advisorBlock).
 const _subBlocks = new Map()
-// Lazy history loading: _hasOlder = more pages exist before the first rendered
+// Lazy history loading: ctx._hasOlder = more pages exist before the first rendered
 // message; _loadingOlder guards against scroll-triggered double requests.
-let _hasOlder = false
 let _loadingOlder = false
 // First-run onboarding: shown when no provider is configured; dismissed on skip
 // (stays dismissed for the webview's lifetime, reappears after a reload).
@@ -972,7 +974,13 @@ function applyHistoryPage(ctx, m) {
     ctx.messagesEl.insertBefore(frag, anchor)
     scrollDown(ctx)
   }
-  _hasOlder = !!m.hasOlder
+  ctx._hasOlder = !!m.hasOlder
+  if (!m.older) {
+    // 初始页：以页内最大 idx+1 作为后续 live 消息的起始 idx（宿主不回发 live idx，本地续接）
+    let maxIdx = -1
+    for (const msg of m.messages || []) if (typeof msg.idx === "number" && msg.idx > maxIdx) maxIdx = msg.idx
+    ctx._nextIdx = maxIdx + 1
+  }
   _loadingOlder = false
   removeLoadOlderIndicator(ctx)
 }
@@ -1055,10 +1063,10 @@ function showQuestion(ctx, question, options) {
 // double requests; _hasOlder=false means everything is already rendered).
 ctx.messagesEl.addEventListener("scroll", () => {
   updateScrollBottomVisibility()
-  if (!_hasOlder || _loadingOlder) return
+  if (!ctx._hasOlder || _loadingOlder) return
   if (ctx.messagesEl.scrollTop > 40) return
   const before = minLoadedIdx(ctx)
-  if (before == null) { _hasOlder = false; return }  // nothing anchorable — defensive stop
+  if (before == null) { ctx._hasOlder = false; return }  // nothing anchorable — defensive stop
   _loadingOlder = true
   showLoadOlderIndicator(ctx)
   vscode.postMessage({ type: "loadOlder", before })
@@ -1124,7 +1132,8 @@ window.addEventListener("message", (e) => {
       ctx.messagesEl.replaceChildren()
       ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentTools = []; ctx.currentRaw = ""; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""
       _advisorBlock = null; _subBlocks.clear()
-      _hasOlder = false
+      ctx._hasOlder = false
+      ctx._nextIdx = 0
       _loadingOlder = false
       renderStatusBar()
       showWelcome(ctx)
