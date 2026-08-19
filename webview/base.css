@@ -81,7 +81,7 @@ body {
 
 #chat-container {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100%;
   position: relative;
 }

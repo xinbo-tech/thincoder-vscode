@@ -398,3 +398,10 @@
    height than advisor reviews, dimmer title — collapsible, reopenable, height 0 when closed. */
 .advisor-block.sub-block .advisor-content { max-height: 180px; }
 .advisor-block.sub-block > summary { opacity: 0.75; }
+
+/* 性能（webview 输入卡顿修复）：离屏消息/工具卡跳过 layout/paint，
+   隔离「大 DOM 让每次 reflow 变贵」的系数。 */
+.message, .tool-call, .advisor-block {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}

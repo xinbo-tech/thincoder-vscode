@@ -4,7 +4,7 @@
  */
 
 import { md, mdInline, esc } from "./md.js"
-import { fmtTime } from "./lib.js"
+import { fmtTime, capText } from "./lib.js"
 import { t } from "./i18n.js"
 
 // ─── Advisor review block (in-conversation, reasoning-style) ──
@@ -223,7 +223,8 @@ function resultSummary(text) {
 
 /** Update a tool card to its done state: elapsed ms, result summary, collapse/expand, error tint. */
 function finishToolCard(ref, text, links) {
-  ref.b.textContent = text || ""
+  // 截断超长输出入 DOM（防无界增长），完整结果不保留——摘要已在 header 显示
+  ref.b.textContent = capText(text || "")
   linkifyPaths(ref.b, links)
   const ms = Date.now() - (ref.startTime || Date.now())
   const isError = /^Error[:：]/.test((text || "").trim())
@@ -372,12 +373,13 @@ export function escHtml(s) {
  *  (reading history), scrolling back to the bottom repins. Stream-driven callers use
  *  maybeScrollDown; explicit user actions (the scroll-bottom button) call scrollDown. */
 export function scrollDown(ctx) {
-  ctx.messagesEl.scrollTop = ctx.messagesEl.scrollHeight
+  // 用超大值替代读 scrollHeight，避免强制同步布局（代价随 DOM 变大而涨）
+  ctx.messagesEl.scrollTop = Number.MAX_SAFE_INTEGER
   ctx._pinBottom = true
 }
 
 export function maybeScrollDown(ctx) {
-  if (ctx._pinBottom !== false) ctx.messagesEl.scrollTop = ctx.messagesEl.scrollHeight
+  if (ctx._pinBottom !== false) ctx.messagesEl.scrollTop = Number.MAX_SAFE_INTEGER
 }
 
 /** Wire the pin/unpin listeners once. Threshold ~24px counts "near the bottom" as bottom. */

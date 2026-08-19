@@ -3,7 +3,7 @@
  */
 import { md } from "./md.js"
 import { openModelMenu, closeModelMenu } from "./model-menu.js"
-import { fmtK, patchLineType } from "./lib.js"
+import { fmtK, patchLineType, MAX_TOOL_OUTPUT } from "./lib.js"
 import { renderDiff, lineDiff } from "./diff.js"
 import {
   showWelcome, showBanner, addUser, addAssistantHistory, newBlock,
@@ -297,15 +297,19 @@ ctx.inputEl.addEventListener("keydown", (e) => {
     navigateInputHistory(1)
   }
 })
-// 高度自适应：rAF 节流 + IME 组合期间跳过，避免中文输入每次拼音变化都强制重排
+// 高度自适应：rAF 节流 + IME 组合期间跳过 + 缓存高度（不变则跳过），避免每次击键 write→read 强制全文档 reflow
 let _composing = false
 let _heightRaf = 0
+let _lastInputHeight = 0
 function adjustInputHeight() {
   if (_heightRaf) return
   _heightRaf = requestAnimationFrame(() => {
     _heightRaf = 0
+    const target = Math.min(ctx.inputEl.scrollHeight, 150)
+    if (target === _lastInputHeight) return // 高度未变，跳过本次，避免每键都写 height
+    _lastInputHeight = target
     ctx.inputEl.style.height = "auto"
-    ctx.inputEl.style.height = Math.min(ctx.inputEl.scrollHeight, 150) + "px"
+    ctx.inputEl.style.height = target + "px"
   })
 }
 ctx.inputEl.addEventListener("compositionstart", () => { _composing = true })
@@ -1081,7 +1085,13 @@ window.addEventListener("message", (e) => {
       const ref = ctx._toolRefs[m.id || m.name]
       if (!ref) break
       if (ref.b.textContent === t("tool.initial")) ref.b.textContent = ""
-      ref.b.textContent += m.text
+      if (!ref._capped) {
+        ref.b.textContent += m.text
+        if (ref.b.textContent.length > MAX_TOOL_OUTPUT) {
+          ref.b.textContent = ref.b.textContent.slice(0, MAX_TOOL_OUTPUT) + "…(输出过长已截断)"
+          ref._capped = true
+        }
+      }
       ref.b.classList.add("open")
       ref.h.querySelector(".tool-call-icon")?.classList.add("open")
       ref.h.setAttribute("aria-expanded", "true")
@@ -1436,12 +1446,21 @@ let _renderScheduled = false
 let _reasoningDirty = false
 let _tokenDirty = false
 let _advisorScrollDirty = false
+let _lastStreamRender = 0
+const STREAM_RENDER_MIN_MS = 50 // 长回复降频：全量 md() 重渲染限到 ≥50ms 一次
 
 function scheduleStreamRender() {
   if (_renderScheduled) return
   _renderScheduled = true
   requestAnimationFrame(() => {
     _renderScheduled = false
+    const now = performance.now()
+    if (now - _lastStreamRender < STREAM_RENDER_MIN_MS) {
+      // 距上次渲染 <50ms：跳过一次，仍有脏内容则继续排队（flushStreamRender 兜底尾帧）
+      if (_tokenDirty || _reasoningDirty || _advisorScrollDirty) scheduleStreamRender()
+      return
+    }
+    _lastStreamRender = now
     if (ctx.currentReasoning && _reasoningDirty) {
       try { ctx.currentReasoning.innerHTML = md(ctx.currentReasoningRaw) } catch { ctx.currentReasoning.textContent = ctx.currentReasoningRaw }
       ctx.currentReasoning.scrollTop = ctx.currentReasoning.scrollHeight

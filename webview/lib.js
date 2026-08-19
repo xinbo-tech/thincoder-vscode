@@ -23,6 +23,16 @@ export function tailTruncate(text, max = 2000) {
   return t.slice(start)
 }
 
+/** 工具输出在 DOM 里的显示上限（字符）。超过则截断，防无界 DOM 增长拖慢布局（webview 输入卡顿修复）。 */
+export const MAX_TOOL_OUTPUT = 64 * 1024
+
+/** 把文本截到 max 字符并附截断提示（保头，工具输出用）。 */
+export function capText(text, max = MAX_TOOL_OUTPUT, note = "…(输出过长已截断)") {
+  const t = String(text || "")
+  if (t.length <= max) return t
+  return t.slice(0, max) + note
+}
+
 /** Compact token count: 10_000 → "10k", 1_500 → "1.5k", 999 → "999". */
 export function fmtK(n) {
   if (n >= 10000) return Math.round(n / 1000) + "k"
