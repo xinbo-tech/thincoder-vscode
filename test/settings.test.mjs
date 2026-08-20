@@ -3,7 +3,7 @@
  * Exercises the card layout + provider rows + switch toggles + the save flow
  * via the initSettings() return value (the extension's real message-dispatch API).
  */
-import { describe, it, before, after, beforeEach, afterEach } from "node:test"
+import { describe, it, before, after, beforeEach } from "node:test"
 import assert from "node:assert/strict"
 import { setupWebview, installSettingsFixture } from "./helpers/webview-env.mjs"
 import { initSettings } from "../webview/settings.js"

@@ -95,9 +95,9 @@ function renderTable(raw) {
     line
       .replace(/^\||\|$/g, "")
       // Escaped pipe (\| = literal |) must not split the cell — placeholder before splitting
-      .replace(/\\\|/g, "\x00P\x00")
+      .replace(/\\\|/g, "\uE000P\uE000")
       .split("|")
-      .map((c) => c.replace(/\x00P\x00/g, "|").trim())
+      .map((c) => c.replace(/\uE000P\uE000/g, "|").trim())
 
   const header = parseRow(lines[0])
   const body = lines.slice(2).map(parseRow)

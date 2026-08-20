@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createServer } from "node:http"
-import { consultStartTool, consultCheckTool, cleanupConsultSessions } from "../src/agent-tools/consult.mjs"
+import { consultStartTool, cleanupConsultSessions } from "../src/agent-tools/consult.mjs"
 import { runAgent } from "../src/agent.mjs"
 
 const makeAgent = (consultModels) => ({
@@ -51,8 +51,8 @@ describe("Stop during a consult", () => {
     const cwd = mkdtempSync(join(tmpdir(), "csi-"))
     let n = 0
     const server = createServer((req, res) => {
-      let body = ""
-      req.on("data", (c) => { body += c })
+      let _body = ""
+      req.on("data", (c) => { _body += c })
       req.on("end", () => {
         n++
         const frame = n === 1

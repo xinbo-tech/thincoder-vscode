@@ -10,9 +10,6 @@
  */
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { runAgent } from "../src/agent.mjs"
 
 const TIME_RE = /current time is \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/
