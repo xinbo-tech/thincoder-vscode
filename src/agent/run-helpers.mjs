@@ -2,7 +2,7 @@
  * run-helpers.mjs — agent loop helpers (split out of agent.mjs for the 500-line limit).
  * Constants + pure helpers shared by runAgent and executeToolBatches.
  */
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs"
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import { loadAgentSettings } from "../config-io.mjs"
 import { isDocFile } from "../advisor/repos.mjs"
@@ -62,6 +62,8 @@ export function hasCodeMutations(agent) {
 }
 export const MAX_TOOL_RESULT = 16000 // chars — large results saved to disk instead of truncated (aligns with CLI)
 export const TOOL_RESULT_PREVIEW = 2000 // chars shown inline when offloaded (aligns with CLI)
+/** Offload-dir write-time self-cleanup retention window (CLI parity 2026-08-21): files older than 3 days are deleted on the next offload. */
+export const TMP_RETENTION_MS = 3 * 24 * 3600 * 1000
 export const MAX_PARALLEL_SUBAGENTS = 3
 
 /** Run async tasks with a concurrency limit */
@@ -78,13 +80,32 @@ export async function runWithLimit(items, fn, limit) {
   return results
 }
 
-/** Save large tool results to disk so the agent can read them with the read tool */
+/** Save large tool results to disk so the agent can read them with the read tool.
+ *  Writes trigger write-time self-cleanup of <cwd>/.thincoder/tmp/ first (CLI parity, 2026-08-21):
+ *  delete files older than TMP_RETENTION_MS (incl. paste-* images in the same dir); subdirs untouched; silent failures. */
 export function offloadToolResult(cwd, text) {
   if (text.length <= MAX_TOOL_RESULT) return text
+  const dir = join(cwd, ".thincoder", "tmp")
+  const now = Date.now()
+  let entries
   try {
-    if (!existsSync(join(cwd, ".thincoder", "tmp"))) mkdirSync(join(cwd, ".thincoder", "tmp"), { recursive: true })
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    entries = [] // dir missing or unreadable → nothing to clean
+  }
+  for (const entry of entries) {
+    if (!entry.isFile()) continue // subdirectories untouched
+    try {
+      const st = statSync(join(dir, entry.name))
+      if (now - st.mtimeMs > TMP_RETENTION_MS) unlinkSync(join(dir, entry.name))
+    } catch {
+      /* entry vanished concurrently or I/O error — best effort, keep going */
+    }
+  }
+  try {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-    const path = join(cwd, ".thincoder", "tmp", `tool-${id}.txt`)
+    const path = join(dir, `tool-${id}.txt`)
     writeFileSync(path, text, "utf8")
     return `[Large output saved. Read the full result with the read tool: ${path}]\n\n${text.slice(0, TOOL_RESULT_PREVIEW)}...`
   } catch {
