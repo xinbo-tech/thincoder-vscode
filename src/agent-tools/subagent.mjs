@@ -6,6 +6,34 @@
 import { validateDesignToken } from "./advisor.mjs"
 
 /**
+ * Mode-dependent subagent role schema field (CLI setup.mjs parity). The role enum is
+ * mutually exclusive per mode: normal mode advertises "coder", engineering mode
+ * advertises "eng-coder". The schema filter is the FIRST line of defense — the model
+ * never sees the disabled role as legal; the runtime throws in execute() stay as the
+ * hard gate. Returns { role, suffix }: `role` replaces parameters.properties.role
+ * wholesale; `suffix` appends to the tool-level description ("" in normal mode).
+ */
+export function modeRoleField(engineering) {
+  return engineering
+    ? {
+        role: {
+          type: "string",
+          enum: ["explore", "plan", "eng-coder"],
+          description: "Sub-agent role: 'explore' (read-only search/analysis), 'plan' (read-only implementation planning), 'eng-coder' (engineering coder — strict methodology, design-driven). 'coder' is disabled in engineering mode.",
+        },
+        suffix: "In engineering mode, use role='eng-coder' for implementation (coder is disabled).",
+      }
+    : {
+        role: {
+          type: "string",
+          enum: ["explore", "plan", "coder"],
+          description: "Sub-agent role: 'explore' (read-only search/analysis), 'plan' (read-only implementation planning), or 'coder' (full implementation). 'eng-coder' is disabled in normal mode.",
+        },
+        suffix: "",
+      }
+}
+
+/**
  * Effective subagent model override for a role (CLI parity):
  * priority — subagent tool `model` arg > config.agent.subagentModels[role] > config.agent.subagentModel > null (inherit parent).
  */

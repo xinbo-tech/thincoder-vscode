@@ -15,6 +15,7 @@ import {
   advisorTool, engTool, consultStartTool, consultCheckTool, consultStopTool, escalateTool,
 } from "./agent-tools.mjs"
 import { compactHistory, truncateFallback, COMPRESS_FAILURE_LIMIT } from "./compact.mjs"
+import { modeRoleField } from "./agent-tools/subagent.mjs"
 import { cleanupConsultSessions } from "./agent-tools/consult.mjs"
 import { traceStop } from "./extension/stop-trace.mjs"
 import { injectContext } from "./context.mjs"
@@ -134,7 +135,8 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     ...mcpTools,
     ...(opts.extraTools ?? []), // caller-injected tools (e.g. consult's main_history)
   ]
-  const toolSchemas = tools.map(toOpenAISchema)
+  // toolSchemas is built further down, after `engineering` is computed — the subagent
+  // role enum is mode-dependent (see modeRoleField).
   const toolByName = new Map(tools.map((t) => [t.name, t]))
 
   // Runtime config: advisor settings live in the shared config.json (CLI agent.advisor),
@@ -173,6 +175,24 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     cfgWebsearch = raw.websearch ?? { provider: "tavily", apiKey: "" }
   } catch { /* config unreadable — defaults */ }
   const engineering = engState?.enabled ?? cfgEngineering
+
+  // Tool schemas are built AFTER `engineering` is known: the subagent role enum is
+  // mode-dependent (CLI setup.mjs parity) — normal mode must not advertise 'eng-coder'
+  // as a legal role. Schema filtering is the first line of defense; the runtime
+  // mutual-exclusion throws in subagentTool.execute stay as the hard gate.
+  const toolSchemas = tools.map((t) => {
+    if (depth === 0 && t.name === "subagent") {
+      const { role: roleField, suffix } = modeRoleField(engineering)
+      const schema = toOpenAISchema(t)
+      schema.function.description = t.description + (suffix ? "\n" + suffix : "")
+      schema.function.parameters = {
+        ...t.parameters,
+        properties: { ...t.parameters.properties, role: roleField },
+      }
+      return schema
+    }
+    return toOpenAISchema(t)
+  })
 
   const agent = {
     _tasks: [], _touchedFiles: [], _planMode: planMode,

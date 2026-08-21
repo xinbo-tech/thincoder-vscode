@@ -149,3 +149,92 @@ test("subagent tool: user Stop at the wall → partial-work return, no resume", 
     server.close()
   }
 })
+
+
+// ─── mode-dependent subagent role enum (ARCHITECTURE.md: subagent role 枚举按模式覆盖) ───
+
+test("modeRoleField(false): coder shown, eng-coder hidden, suffix empty", async () => {
+  const { modeRoleField } = await import("../src/agent-tools/subagent.mjs")
+  const { role, suffix } = modeRoleField(false)
+  assert.equal(role.type, "string")
+  assert.ok(role.enum.includes("coder"), "normal mode advertises coder")
+  assert.ok(!role.enum.includes("eng-coder"), "normal mode hides eng-coder")
+  assert.match(role.description, /disabled in normal mode/)
+  assert.equal(suffix, "")
+})
+
+test("modeRoleField(true): eng-coder shown, coder hidden, suffix names eng-coder", async () => {
+  const { modeRoleField } = await import("../src/agent-tools/subagent.mjs")
+  const { role, suffix } = modeRoleField(true)
+  assert.equal(role.type, "string")
+  assert.ok(role.enum.includes("eng-coder"), "engineering mode advertises eng-coder")
+  assert.ok(!role.enum.includes("coder"), "engineering mode hides coder")
+  assert.match(role.description, /disabled in engineering mode/)
+  assert.match(suffix, /role='eng-coder'/)
+})
+
+test("runtime gate: non-engineering + role='eng-coder' still throws (unchanged)", async () => {
+  const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+  const ctx = { agent: { config: { agent: { engineering: false } } }, cwd: process.cwd(), callbacks: {} }
+  await assert.rejects(
+    subagentTool.execute({ task: "t", role: "eng-coder" }, ctx),
+    /Engineering mode is not active/,
+  )
+})
+
+test("runtime gate: engineering + role='coder' throws mutual exclusion (unchanged)", async () => {
+  const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+  const ctx = { agent: { config: { agent: { engineering: true } } }, cwd: process.cwd(), callbacks: {} }
+  await assert.rejects(
+    subagentTool.execute({ task: "t", role: "coder" }, ctx),
+    /Engineering mode: use role='eng-coder' for implementation tasks\./,
+  )
+})
+
+// ④ wiring: capture the actual depth-0 LLM request and inspect the subagent schema it carries.
+async function depth0SubagentSchema(engEnabled) {
+  const { runAgent } = await import("../src/agent.mjs")
+  const bodies = []
+  const server = createServer((req, res) => {
+    let body = ""
+    req.on("data", (c) => (body += c))
+    req.on("end", () => {
+      bodies.push(JSON.parse(body))
+      res.writeHead(200, { "Content-Type": "text/event-stream" })
+      res.end(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "ok" } }] })}\n\n` +
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` +
+        "data: [DONE]\n\n",
+      )
+    })
+  })
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-schema-"))
+  try {
+    const provider = { name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" }
+    const result = await runAgent(provider, cwd, "hi", {}, undefined, true, {
+      history: [], fullHistory: [], mcpServers: [], skills: [],
+      engState: { enabled: engEnabled }, // pinned — the shared config.json must not leak into this test
+    })
+    assert.equal(result, "ok")
+    const sub = bodies[0].tools.find((t) => t.function.name === "subagent")
+    assert.ok(sub, "depth-0 tool table includes subagent")
+    return sub
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+}
+
+test("wiring: depth-0 subagent schema role enum follows the mode", async () => {
+  const normal = await depth0SubagentSchema(false)
+  assert.ok(normal.function.parameters.properties.role.enum.includes("coder"))
+  assert.ok(!normal.function.parameters.properties.role.enum.includes("eng-coder"), "non-engineering schema must not show eng-coder")
+  assert.ok(!normal.function.description.includes("In engineering mode"), "no engineering suffix in normal mode")
+
+  const eng = await depth0SubagentSchema(true)
+  assert.ok(eng.function.parameters.properties.role.enum.includes("eng-coder"))
+  assert.ok(!eng.function.parameters.properties.role.enum.includes("coder"), "engineering schema must not show coder")
+  assert.match(eng.function.description, /role='eng-coder'/, "engineering suffix appended to the description")
+})
