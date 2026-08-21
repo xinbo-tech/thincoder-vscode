@@ -18,3 +18,4 @@
 - [ ] §2 runAgent 签名参数名对齐实际实现（input → text，advisor #8）
 - [ ] §4 模型能力表补 thinkEnabledValue / noUsageStream（advisor #10）
 - [ ] advisor 子代理工具集补 lsp（原文档 T19 遗留）
+- [ ] 跨端文档漂移（2026-08-21 评审 advisory）：checkpoint 机制两端语义差异待明确（CLI v2 全量副本快照 vs VS Code git stash）、preset 计数 16/17、TUI 模块数 ~24/45、12 位旧 hash 改名侧未标注

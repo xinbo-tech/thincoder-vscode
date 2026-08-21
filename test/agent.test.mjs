@@ -4,13 +4,16 @@
  * Full agent loop is tested via smoke-provider.mjs.
  * Run: node --test test/agent.test.mjs
  */
-import { describe, it } from "node:test"
+import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs"
-import { join } from "node:path"
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync, readFileSync } from "node:fs"
+import { join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { tmpdir } from "node:os"
 import { compactHistory, truncateFallback, shrinkOversized } from "../src/compact.mjs"
 import { specForModel, ctxPercentForModel, contextWindowForModel } from "../src/config.mjs"
+import { _setConfigPathForTest } from "../src/config-io.mjs"
+import { MAX_ADVISOR_PUSHBACKS } from "../src/agent/run-helpers.mjs"
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -544,5 +547,196 @@ describe("pending-task pushback fires at most once (CLI parity)", () => {
       server.close()
       rmSync(cwd, { recursive: true, force: true })
     }
+  })
+})
+
+// ─── Advisor guard loop pushback (CLI parity, 2026-08-21) ─────────────
+// The guard logic is INLINE in runAgent's loop (agent.mjs) — these tests drive
+// the real loop through a scripted SSE server, so the extension's own copy of
+// the pushback condition is covered without depending on the CLI side.
+
+/** Scripted SSE server: serves `responses` (one chunk array per request) in order. */
+async function scriptedServer(responses) {
+  const http = await import("node:http")
+  const server = http.createServer((req, res) => {
+    let body = ""
+    req.on("data", (c) => (body += c))
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "text/event-stream" })
+      const chunks = responses.shift() ?? []
+      res.end(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n")
+    })
+  })
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  return { server, port: server.address().port }
+}
+
+/** Turn that mutates code: one `write` tool call into src/ (triggers _mutatedThisRun + hasCodeMutations). */
+function writeTurnChunks(file = "src/a.mjs") {
+  const args = JSON.stringify({ path: file, content: "export const x = 1\n" })
+  return [
+    { choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "write", arguments: args } }] } }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+  ]
+}
+
+/** Turn that declares done with no tool calls (end-of-run attempt). */
+function doneTurnChunks() {
+  return [
+    { choices: [{ index: 0, delta: { content: "done" } }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+  ]
+}
+
+const ADVISOR_REMINDER = "MUST get an advisor review"
+
+describe("advisor guard loop pushback (2026-08-21 semantic refactor)", () => {
+  let cfgDir
+
+  before(() => {
+    cfgDir = mkdtempSync(join(tmpdir(), "thincoder-guard-"))
+    _setConfigPathForTest(join(cfgDir, "config.json"))
+  })
+
+  after(() => {
+    _setConfigPathForTest(null)
+    rmSync(cfgDir, { recursive: true, force: true })
+  })
+
+  function setAdvisorConfig(advisor) {
+    writeFileSync(join(cfgDir, "config.json"), JSON.stringify({ agent: { advisor } }))
+  }
+
+  it("guard default OFF: advisor {} + code mutation finishes without pushback", async () => {
+    setAdvisorConfig({})
+    const cwd = setupTempDir()
+    const { server, port } = await scriptedServer([writeTurnChunks(), doneTurnChunks()])
+    const history = []
+    try {
+      const { runAgent } = await import("../src/agent.mjs")
+      const result = await runAgent(mockProvider("deepseek-v4-pro", port), cwd, "do it", {}, undefined, true, { history, fullHistory: [] })
+      assert.equal(result, "done", "run finishes normally")
+      const reminders = history.filter((m) => typeof m.content === "string" && m.content.includes(ADVISOR_REMINDER))
+      assert.equal(reminders.length, 0, "no advisor reminder when guard is absent: " + JSON.stringify(reminders))
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("guard ON: advisor { guard: true } + code mutation without review is pushed back, then converges", async () => {
+    setAdvisorConfig({ guard: true })
+    const cwd = setupTempDir()
+    // tool-call turn + (MAX_ADVISOR_PUSHBACKS pushbacks + 1 final acceptance) "done" turns
+    const responses = [writeTurnChunks(), ...Array.from({ length: MAX_ADVISOR_PUSHBACKS + 1 }, doneTurnChunks)]
+    const { server, port } = await scriptedServer(responses)
+    const history = []
+    try {
+      const { runAgent } = await import("../src/agent.mjs")
+      const result = await runAgent(mockProvider("deepseek-v4-pro", port), cwd, "do it", {}, undefined, true, { history, fullHistory: [] })
+      assert.equal(result, "done", "the loop converges once the pushback budget is exhausted")
+      const reminders = history.filter((m) => typeof m.content === "string" && m.content.includes(ADVISOR_REMINDER))
+      assert.equal(reminders.length, MAX_ADVISOR_PUSHBACKS, "pushed back exactly MAX_ADVISOR_PUSHBACKS times: " + JSON.stringify(reminders))
+      assert.ok(reminders[0].content.includes("round 1"), "first reminder names round 1 (advisorRound starts at 0)")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("engineering mode exemption: guard: true + engineering with design token finishes without pushback", async () => {
+    setAdvisorConfig({ guard: true })
+    const cwd = setupTempDir()
+    const { server, port } = await scriptedServer([writeTurnChunks(), doneTurnChunks()])
+    const history = []
+    try {
+      const { runAgent } = await import("../src/agent.mjs")
+      const result = await runAgent(
+        mockProvider("deepseek-v4-pro", port), cwd, "do it", {}, undefined, true,
+        { history, fullHistory: [], engState: { enabled: true, engDesignToken: "test-token" } },
+      )
+      assert.equal(result, "done", "engineering mode finishes normally")
+      const reminders = history.filter((m) => typeof m.content === "string" && m.content.includes(ADVISOR_REMINDER))
+      assert.equal(reminders.length, 0, "engineering mode is exempt from the advisor guard: " + JSON.stringify(reminders))
+      // The write went through (design token present) — the mutation really happened,
+      // so the absence of a pushback proves the exemption, not a failed mutation.
+      assert.ok(existsSync(join(cwd, "src", "a.mjs")), "code mutation landed on disk")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("legacy enabled does not trigger: advisor { enabled: true } finishes without pushback", async () => {
+    setAdvisorConfig({ enabled: true })
+    const cwd = setupTempDir()
+    const { server, port } = await scriptedServer([writeTurnChunks(), doneTurnChunks()])
+    const history = []
+    try {
+      const { runAgent } = await import("../src/agent.mjs")
+      const result = await runAgent(mockProvider("deepseek-v4-pro", port), cwd, "do it", {}, undefined, true, { history, fullHistory: [] })
+      assert.equal(result, "done", "run finishes normally")
+      const reminders = history.filter((m) => typeof m.content === "string" && m.content.includes(ADVISOR_REMINDER))
+      assert.equal(reminders.length, 0, "deprecated enabled field is not read anymore: " + JSON.stringify(reminders))
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+})
+
+// ─── Prompt borrowing increments (kimi-code comparison, 2026-08-21) ───
+// 两端 src/prompts/ 必须 byte-identical（项目铁律）；①—③ 在本端断言内容，
+// 两端 15 文件比对断言在 CLI 侧（thincoder/test/agent.test.mjs）。
+
+const PROMPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "prompts")
+
+describe("prompt borrowing increments (kimi-code comparison)", () => {
+  it("explore.md: Thoroughness levels — three levels with default", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "explore.md"), "utf8")
+    assert.ok(text.includes("Thoroughness levels"), "section header present")
+    const lines = text.split("\n")
+    assert.ok(lines.some((l) => l.trim().startsWith("- quick")), "quick level present")
+    const medium = lines.find((l) => /^- medium/.test(l.trim()))
+    assert.ok(medium, "medium level present")
+    assert.ok(/default/i.test(medium), `medium marked as default: ${medium}`)
+    const thorough = lines.find((l) => /^- thorough/.test(l.trim()))
+    assert.ok(thorough, "thorough level present")
+    assert.ok(/NOT find/i.test(thorough), `thorough requires reporting what was not found: ${thorough}`)
+  })
+
+  it("main.md: Delegate well includes thoroughness guidance for explore delegation", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "main.md"), "utf8")
+    assert.ok(text.includes("quick / medium / thorough"), "three levels named in main.md")
+    assert.match(text, /Delegate well[\s\S]*thoroughness/, "guidance sits in the Delegate well section")
+  })
+
+  it("system.md: confirmation sentence names the most important acceptance criteria", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "system.md"), "utf8")
+    const line = text.split("\n").find((l) => l.includes("Confirm understanding"))
+    assert.ok(line, "Confirm understanding sentence exists")
+    assert.ok(line.includes("most important acceptance criteria"), line)
+    assert.ok(line.includes("Wait for confirmation"), "rest of the sentence preserved")
+  })
+})
+
+// ─── Pre-work plan confirmation discipline (2026-08-21) ───
+
+describe("pre-work plan confirmation discipline", () => {
+  it("system.md: no-exemption confirmation discipline — file-writing tool list + explicit confirmation gate", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "system.md"), "utf8")
+    assert.ok(/write \/ edit \/ apply_patch \/ insert_after \/ delete \/ hashline_edit/.test(text), "file-writing tool list present")
+    assert.ok(/no exemptions/i.test(text), "no-exemption wording present")
+    assert.ok(text.includes("obvious enough to skip"), "self-exemption excuse explicitly blocked")
+    assert.ok(text.includes("a new question from the user is not a confirmation"), "a new user question is not a confirmation")
+    assert.ok(text.includes("Re-confirm when the requirement changes"), "re-confirm on requirement change present")
+  })
+
+  it("engineering.md: plan confirmation before writing docs (no exemptions)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "engineering.md"), "utf8")
+    assert.ok(/Plan confirmation before writing any doc/i.test(text), "clause heading present")
+    assert.ok(text.includes("before writing the requirements doc"), "confirmation before writing requirements/design docs")
+    assert.ok(text.includes("no exemptions"), "no-exemption wording present")
+    assert.ok(text.includes("obvious enough to skip"), "self-exemption excuse explicitly blocked")
   })
 })

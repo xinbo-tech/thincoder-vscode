@@ -68,7 +68,7 @@ export const subagentTool = {
   name: "subagent",
   sideEffectExempt: true, // subagent mutations are tracked by the child, not the parent
   description:
-    "Spawn a sub-agent for an independent subtask. role: explore (read-only search), plan (architecture design), coder (implementation), eng-coder (engineering-mode coder — design-driven, requires designToken).\n" +
+    "Spawn a sub-agent for an independent subtask. role: explore (read-only search — specify thoroughness in the task: quick / medium / thorough (default medium)), plan (architecture design), coder (implementation), eng-coder (engineering-mode coder — design-driven, requires designToken).\n" +
     "Parameters:\n" +
     "- task (required): Task description\n" +
     "- role (required): explore | plan | coder | eng-coder\n" +

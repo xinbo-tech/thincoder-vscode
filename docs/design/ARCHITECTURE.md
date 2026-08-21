@@ -83,6 +83,8 @@ runAgent(provider, cwd, input, callbacks, signal, autoApprove, opts)
 - Stall 检测：连续 5 轮中工具重复 ≥ 3 次 → 警告注入
 - Verify 守卫：顶层 agent 最多 push back 2 次（verify 失败后重试）
 
+**工具结果落盘与写时自清理（2026-08-21）**：工具结果超 16k 字符落盘 `<cwd>/.thincoder/tmp/tool-<id>.txt`，模型只见 2k 预览 + `[Large output saved…]` 路径指引（`offloadToolResult`，CLI parity）。落盘目录写时自清理：每次 offload 写新文件前删除目录内 mtime 超过 3 天（`TMP_RETENTION_MS`）的文件——子目录不动、异常静默；同目录的 paste-* 粘贴图片临时文件一并按此回收。需求与用例见 CLI `docs/design/ARCHITECTURE.md`「落盘目录写时自清理」——**清理逻辑**两端逐行等价、CLI 为准；落盘目录两端各自为政（CLI `~/.thincoder/tool-results/`、VS Code `<cwd>/.thincoder/tmp/`）。实现 `src/agent/run-helpers.mjs`（sync 版 readdirSync/statSync/unlinkSync），测试新建 `test/run-helpers.test.mjs`。
+
 **上下文注入（顶层）**：
 ```
 [System: working directory snapshot]
@@ -128,10 +130,23 @@ user input
 **lsp（VS Code 原生实现）**：CLI 的 lsp 工具自起 LSP server 进程（JSON-RPC over stdio，需 config.json `lsp.servers` 配置）；VS Code 侧直接用编辑器自己的语言服务（`vscode.executeDefinitionProvider` / `executeReferenceProvider` / `executeHoverProvider` / `executeDocumentSymbolProvider` + `languages.getDiagnostics`），无需配置、无需进程管理，任何装有语言扩展的语言都可用。子命令与 CLI 一致：definition / references / hover / symbols / diagnostics。
 
 **advisor / eng（与 CLI 同源移植）**：
-- `advisor`：独立只读评审子代理，工具集 = read/glob/grep/ls/git_diff/git_status/git_log/code_search（CLI 另有 lsp，VS Code 侧待补，见 TODO.md）。收敛协议（round 1 全量 → round 2 验证+新明显问题 → round 3+ 严格验证，机械上限 5 轮）、会话内 `_advisorSession` 复用、`.thincoder/advisor.md` 自定义标准、`advisor.enabled/guard` 配置、advisor guard pushback（最多 3 次）——全部与 CLI 一致。
+- `advisor`：独立只读评审子代理，工具集 = read/glob/grep/ls/git_diff/git_status/git_log/code_search（CLI 另有 lsp，VS Code 侧待补，见 TODO.md）。收敛协议（round 1 全量 → round 2 验证+新明显问题 → round 3+ 严格验证，机械上限 5 轮）、会话内 `_advisorSession` 复用、`.thincoder/advisor.md` 自定义标准、advisor guard pushback（最多 3 次）——全部与 CLI 一致。
 - `type='design'` 设计评审：生成 HMAC 签名 design token（1 小时过期），advisor 仅在无 🔴 时回显 `[DESIGN-TOKEN:…]`，回显即签发 token 给 eng-coder。
 - `eng`：工程模式开关，engineering 标志落盘共享 config.json（`agent.engineering`）；工程模式下主代理 system prompt 换成 `engineering.md` + 项目 METHODOLOGY.md，dispatch 门禁机械拦截 design review 通过前的代码文件写入（docs/** 豁免），`eng-coder` 子代理须持 token 才获写权限（spawn 时校验 + 运行时门禁双保险）。
 - 工程状态持久化：`engineering` 进 config.json，`engDesignToken` 进会话槽位文件（`_advisorRound` 为 per-run，不持久化，与 CLI 一致）。
+
+**提示词借鉴增量（kimi-code 对照，2026-08-21）**：explore 彻底度分级（quick/medium/thorough，prompt 约定形态）+ system.md 确认理解补"列出最重要的验收标准"。需求/设计/测试/文件清单见 CLI `docs/design/AGENT-LOOP.md`「## 10. 提示词借鉴增量」——两端 `src/prompts/` 改动保持 byte-identical，subagent 工具 description 两端各自同步语义。VS Code 端受影响文件：`src/prompts/explore.md`、`src/prompts/main.md`、`src/prompts/system.md`、`src/agent-tools/subagent.mjs`、测试、`CHANGELOG.md`。
+
+**开工前计划确认纪律（2026-08-21）**：任何写代码/写文档动作前纯文字复述"理解+计划"并等用户明确确认，无豁免（普通模式 + 工程模式；子 agent 不适用）。需求/设计/测试/文件清单见 CLI `docs/design/AGENT-LOOP.md`「## 11. 开工前计划确认纪律」——两端 `src/prompts/system.md`、`engineering.md` 保持 byte-identical。VS Code 端受影响文件：`src/prompts/system.md`、`src/prompts/engineering.md`、`test/agent.test.mjs`、`CHANGELOG.md`。
+
+
+
+**advisor 开关语义重构（对齐 CLI AGENT-LOOP.md §8，2026-08-21）**：
+
+- **需求**：`advisor.enabled` 是双义开关——既 gate 评审能力（非工程模式 enabled=false 时 advisor 工具返回 "not enabled"），又 gate guard 推回。用户拍板：**评审能力恒启用（不设禁用开关），开关语义收敛为 guard，guard 默认 OFF**（评审自愿调用，打开才强制）。工程模式行为不变。
+- **设计**：`src/advisor/run.mjs` 删除 enabled gate；`src/agent.mjs` guard 条件 `advisorCfg?.enabled && advisorCfg?.guard !== false` → `advisorCfg?.guard === true`（工程模式豁免保留）；`src/config-io.mjs` guard 默认 `?? true` → `?? false`；`enabled` 字段废弃不再读写（存量不迁移，pre-release 约定，CHANGELOG 说明）。UI：工具栏 ADVISOR 按钮语义改为 guard（消息 `setAdvisorEnabled` → `setAdvisorGuard`，`webview/chat.js` `_advisorOn` ← `settings.advisor.guard`，按钮文案/aria 由 ADVISOR 改为 GUARD）；设置面板删除 `adv-enabled` 开关、保留 `adv-guard`（默认未勾选）；`locales/*.json` 相应文案（`toolbar.advisor` 改 guard 语义，`settings.advisorEnabled*` 移除或改义）。评审 provider 沿用 `resolveAdvisorProvider`（未配 advisor.provider → 继承主 provider，恒启用零障碍）。
+- **测试**（更新 `test/advisor.test.mjs` / `test/settings.test.mjs` / `test/settings-panel.test.mjs` / `test/chat-panel.test.mjs`）：① 无任何 advisor 配置时调 advisor 正常执行（不再 "not enabled"）；② `{ advisor: {} }` 改代码收尾不推回（guard 默认 OFF）；③ `{ advisor: { guard: true } }` 改代码未评审收尾推回 "MUST get an advisor review"；④ 工程模式豁免不变；⑤ `{ advisor: { enabled: true } }` 不再触发推回（enabled 废弃）；⑥ 面板开关读写真值：`saveAgentSettingsFromPanel({ advisor: { guard: true } })` → config.json `advisor.guard === true`，enabled 不再写入；⑦ `agentSettings()` 返回 guard 供按钮/面板反射。
+- **受影响文件**：`src/advisor/run.mjs`、`src/agent.mjs`、`src/config-io.mjs`、`src/extension/panel-messages.mjs`、`src/extension/settings.mjs`、`webview/chat.js`、`webview/settings.js`、`webview/index.html`、`locales/en.json`、`locales/zh.json`、`AGENTS.md`（消息协议表 setAdvisorEnabled 行）、`test/advisor.test.mjs`、`test/settings.test.mjs`、`test/settings-panel.test.mjs`、`test/chat-panel.test.mjs`、`test/agent.test.mjs`（补 loop 级 guard 推回用例 ②③④⑤ 的 VS Code 侧断言——agent.mjs 内联 guard 逻辑需本端测试兜底，不依赖 CLI 侧）、`CHANGELOG.md`。CLI 端文件清单见 CLI AGENT-LOOP.md §8（两端逐行等价，CLI 为准）。
 
 **subagent role 枚举按模式覆盖（对齐 CLI setup.mjs）**：
 

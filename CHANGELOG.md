@@ -1,4 +1,16 @@
 # Changelog
+## [0.1.40] — 2026-08-21
+
+### Changed
+
+- **advisor 开关语义重构（对齐 CLI）** — 评审能力恒启用：`advisor` 工具任何模式都可调用（删除 `advisor.enabled` gate，不再返回 "not enabled"）；开关语义收敛为 guard——收尾推回仅当 `advisor.guard === true`（默认 OFF，评审自愿调用，打开才强制）。工程模式行为不变（评审恒可用、guard 豁免）
+- **`advisor.enabled` 废弃**：字段不再读写，存量配置不迁移（pre-release 约定）；工具栏 ADVISOR 按钮改为 GUARD（消息 `setAdvisorEnabled` → `setAdvisorGuard`），设置面板删除 Enabled 开关、保留 Guard 开关（默认未勾选）
+
+### Prompt system
+
+- **提示词借鉴增量（kimi-code 对照，对齐 CLI）**：explore.md 新增 Thoroughness levels 三档（quick 单点定向 / medium 默认适度并行 / thorough 全面分析且报告须列出搜索过什么与没找到什么）；main.md Delegate well 补委派 explore 时在 task 描述中指定彻底度（未指定走默认）；system.md 确认理解句补 "including the most important acceptance criteria"；subagent 工具 description 同步补彻底度说明。两端 15 个 prompt 文件保持 byte-identical
+- **开工前计划确认纪律（对齐 CLI）**：system.md 追加无豁免纪律——任何写文件动作（write/edit/apply_patch/insert_after/delete/hashline_edit 及一切写文件的 bash）前必须纯文字复述理解+计划要点并等待用户明确确认（未确认/沉默/用户回复新问题或新要求 → 一律不动手；"这太明显了不用问"不是跳过理由；用户的新问题不是确认；需求变化后重新复述重新确认）；engineering.md 澄清完成后、写需求/设计文档前同样须把理解+计划文字化并等待确认。两端 15 个 prompt 文件保持 byte-identical（两端测试断言关键句）
+
 ## [0.1.39] — 2026-08-21
 
 ### Fixed
