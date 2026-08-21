@@ -10,6 +10,9 @@
 
 ## 文档债（2026-08-21 ARCHITECTURE.md 设计评审 advisory，未实现项）
 
+- [ ] 存量碎片合并（2026-08-21 §12 文档归属纪律，范围外项）：Settings 板块 6 文档（SETTINGS-PANEL、SETTINGS-PANEL-2、SETTINGS-PANEL-PROXY-ROW、SETTINGS-REORG、SETTINGS-SUBMODEL-SHELL、MODEL-PICKER-UNIFY）合并；TURN-CAP-CONTINUE 两端同源描述收敛单一权威源（详见两端 docs/design/README.md 地图标注）
+- [ ] design round2 专用提示词（§11 评审发现 #4）：design 重跑不再复用 code-review 收敛提示词
+
 - [ ] ARCHITECTURE.md 补 NFR 小节（性能/安全/兼容性）与测试层总览（advisor #2）
 - [ ] 原则 2 "postMessage 单向通信" 改述为"无共享状态、全部经消息协议通信"（advisor #3）
 - [ ] 明确 PROVIDER_PRESETS 是静态镜像拷贝而非运行时 import CLI（advisor #4）

@@ -3,7 +3,7 @@
  * Split out of advisor.mjs to keep it under the 300-line advisory threshold
  * (.thincoder/advisor.md). System prompts live in advisor.mjs / prompts/.
  */
-import { readFileSync } from "node:fs"
+import { readFileSync, existsSync } from "node:fs"
 import { resolve, join, relative } from "node:path"
 import { findReviewRepos, collectRepoSnapshots, collectChangedFiles } from "./repos.mjs"
 import { buildConvergenceBody, buildConvergenceInstructions } from "./convergence.mjs"
@@ -82,13 +82,27 @@ export function buildAdvisorUserMessage(agent, prior, reviewType, designToken = 
       } catch { /* file doesn't exist — skip */ }
     }
 
+    // Document map (docs/design/README.md) — inject when the project has one:
+    // the reviewer checks document ownership against it (a change for an
+    // existing section must amend that section's document, not spawn a new
+    // file for it). Absent map → skip (nothing to check against).
+    try {
+      const mapPath = resolve(agent.cwd, "docs", "design", "README.md")
+      if (existsSync(mapPath)) {
+        parts.push("## Document Map")
+        parts.push("The document map below registers which document files exist per section. Use it for the Document ownership criterion: a change for an existing section must amend that section's document, not create a new file.")
+        parts.push(readFileSync(mapPath, "utf8"))
+        parts.push("")
+      }
+    } catch { /* file doesn't exist or is unreadable — skip */ }
+
     parts.push("## Instructions")
     if (docList.length > 0) {
       parts.push("1. Read every document in the Documents to Review list in full — review ONLY those files. Read METHODOLOGY.md to understand the project's standards.")
     } else {
       parts.push("1. Read the design document fully. Read METHODOLOGY.md to understand the project's standards.")
     }
-    parts.push("2. Review against: completeness (all requirements covered?), feasibility (can this be built?), clarity (specific enough?), acceptance criteria (verifiable?), scope (appropriate?).")
+    parts.push("2. Review against: completeness (all requirements covered?), feasibility (can this be built?), methodology compliance (does it follow the project's METHODOLOGY.md?), clarity (specific enough?), acceptance criteria (verifiable?), scope (appropriate?).")
     parts.push("3. Do NOT run git diff or look for code changes — there are none at this stage.")
     parts.push("4. If you find issues, produce your review table with the format: | # | Category | Severity | Issue | Suggestion |. If the design passes, no table is needed.")
     if (designToken) {

@@ -5,9 +5,10 @@
  */
 import { describe, it, before, after, beforeEach } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs"
-import { join } from "node:path"
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs"
+import { join, dirname } from "node:path"
 import { tmpdir } from "node:os"
+import { fileURLToPath } from "node:url"
 
 import { extractAgentResponseTable, extractConversationBackground } from "../src/advisor/history.mjs"
 import { buildAdvisorSystemPrompt, prepareAdvisorMessages, escapeLiteralEscapes } from "../src/advisor/main.mjs"
@@ -424,5 +425,84 @@ describe("_renderTimeline (CLI parity — review process at its real positions)"
     assert.ok(out.indexOf("看到问题了") < out.indexOf("| 1 | x |"), "final text last")
     const withPlaceholder = _renderTimeline([{ kind: "think", text: "a\n[thinking…]\nb" }])
     assert.ok(!withPlaceholder.includes("[thinking…]"), "placeholder stripped")
+  })
+})
+
+// ─── 文档归属纪律 + advisor 设计评审增强（2026-08-21，规格见 CLI AGENT-LOOP.md §12） ───
+
+const VSCODE_SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "src")
+const VSCODE_PROMPTS_DIR = join(VSCODE_SRC_DIR, "prompts")
+
+describe("document ownership + design-review enhancement (2026-08-21)", () => {
+  it("advisor-design.md: Document ownership 维度 + 🔴/🟡 分级 + 引用纪律 + Approval Signal 保留", () => {
+    const text = readFileSync(join(VSCODE_PROMPTS_DIR, "advisor-design.md"), "utf8")
+    assert.ok(text.includes("Document ownership"), "第 7 维 Document ownership 存在")
+    assert.match(text, /CONTRADICTS[^\n]*🔴/, "与现有文档矛盾 → 🔴 分级句")
+    assert.match(text, /duplicating[^\n]*🟡/, "该并入却新建/重复描述 → 🟡 分级句")
+    assert.ok(text.includes("file:line"), "引用纪律：精确 file:line 格式")
+    assert.ok(text.includes("unverified"), "引用纪律：未核实内容标注 unverified")
+    assert.ok(text.includes("## Approval Signal"), "Approval Signal 段保留")
+    assert.ok(text.includes("[DESIGN-TOKEN:...]"), "DESIGN-TOKEN 回显规则保留（防 fallback 删除后丢失）")
+  })
+
+  it("system.md: 文档归属纪律条款（doc map / update instead of creating）", () => {
+    const text = readFileSync(join(VSCODE_PROMPTS_DIR, "system.md"), "utf8")
+    assert.ok(text.includes("Document ownership"), "条款存在")
+    assert.ok(text.includes("docs/design/README.md"), "doc map 定位句")
+    assert.match(text, /update it; never create a new file/, "找到就改、不得新建（update instead of creating）")
+    assert.match(text, /exactly ONE place/, "单一权威源语义")
+  })
+
+  it("docs/design/README.md: 文档地图存在且含板块映射表 + Settings 待合并标注", () => {
+    const text = readFileSync(join(VSCODE_SRC_DIR, "..", "docs", "design", "README.md"), "utf8")
+    assert.ok(text.includes("板块 → 文档映射"), "映射表存在")
+    assert.match(text, /\| 架构 \|/, "架构板块行")
+    assert.match(text, /\| 配置面板（Settings） \|/, "Settings 板块行")
+    assert.ok(text.includes("6 文档同板块"), "Settings 6 文档如实登记")
+    assert.ok(text.includes("待合并（TODO）"), "存量碎片待合并标注")
+  })
+
+  it("advisor/main.mjs: design 提示词硬加载——无 ADVISOR_DESIGN_FALLBACK 残留，内容与文件逐字节一致", () => {
+    const src = readFileSync(join(VSCODE_SRC_DIR, "advisor", "main.mjs"), "utf8")
+    assert.ok(!src.includes("ADVISOR_DESIGN_FALLBACK"), "ADVISOR_DESIGN_FALLBACK 常量已删除")
+    assert.ok(src.includes('loadPrompt("advisor-design.md"'), "design 提示词走 loadPrompt 硬加载（缺失即抛错，与 round1/2/3 同待遇）")
+    const prompt = buildAdvisorSystemPrompt({ history: [], _advisorRound: 0 }, null, "design")
+    const file = readFileSync(join(VSCODE_PROMPTS_DIR, "advisor-design.md"), "utf8")
+    assert.equal(prompt, file, "设计审查系统提示词与 advisor-design.md 逐字节一致（无静默降级）")
+  })
+
+  it("design 分支 Instructions 补 Methodology compliance 维度", () => {
+    const agent = { history: [], _advisorRound: 0, cwd: tmpDir, config: { agent: {} } }
+    const msg = buildAdvisorUserMessage(agent, null, "design")
+    assert.ok(msg.includes("methodology compliance (does it follow the project's METHODOLOGY.md?)"), "Instructions 第 2 条含 Methodology 维度")
+  })
+
+  it("design 分支：存在 docs/design/README.md 时注入 Document Map 段", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "advisor-docmap-"))
+    try {
+      mkdirSync(join(tmp, "docs", "design"), { recursive: true })
+      writeFileSync(join(tmp, "docs", "design", "README.md"), "# 文档地图\n\n| 板块 | 文档 |\n| 架构 | ARCHITECTURE.md |\n")
+      const agent = { history: [], _advisorRound: 0, cwd: tmp, config: { agent: {} } }
+      const msg = buildAdvisorUserMessage(agent, null, "design")
+      assert.ok(msg.includes("## Document Map"), "Document Map 段注入")
+      assert.ok(msg.includes("| 架构 | ARCHITECTURE.md |"), "地图文件内容注入")
+      const mapIdx = msg.indexOf("## Document Map")
+      const instrIdx = msg.indexOf("## Instructions")
+      assert.ok(mapIdx !== -1 && instrIdx !== -1 && mapIdx < instrIdx, "Document Map 位于 Instructions 之前")
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it("design 分支：无 docs/design/README.md 时正常跳过 Document Map 段", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "advisor-docmap-"))
+    try {
+      const agent = { history: [], _advisorRound: 0, cwd: tmp, config: { agent: {} } }
+      const msg = buildAdvisorUserMessage(agent, null, "design")
+      assert.ok(!msg.includes("## Document Map"), "无地图时不注入")
+      assert.ok(msg.includes("## Design Review"), "设计审查消息本体正常")
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })

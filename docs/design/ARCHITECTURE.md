@@ -139,6 +139,17 @@ user input
 
 **开工前计划确认纪律（2026-08-21）**：任何写代码/写文档动作前纯文字复述"理解+计划"并等用户明确确认，无豁免（普通模式 + 工程模式；子 agent 不适用）。需求/设计/测试/文件清单见 CLI `docs/design/AGENT-LOOP.md`「## 11. 开工前计划确认纪律」——两端 `src/prompts/system.md`、`engineering.md` 保持 byte-identical。VS Code 端受影响文件：`src/prompts/system.md`、`src/prompts/engineering.md`、`test/agent.test.mjs`、`CHANGELOG.md`。
 
+**subagent 活动流修复（2026-08-22）**：
+
+- **需求**（用户报告，仅 VS Code 端）：① 同一 turn 多次调用 eng-coder 时，后续调用的活动流继续显示在第一个 eng-coder 块里（应每次调用独立一块）；② eng-coder 块只有工具调用输出，无 reasoning 也无主输出 token。
+- **设计**：`src/agent-tools/subagent.mjs`——① 面板通道名 `sub:${role}` → `sub:${role}#${subId}`（webview `_subBlocks` 按 name 复用块的根因；resume 续跑 subId 不变，块不重复）；② `baseOpts` 加 `streamOutput: true`（agent.mjs 的 onToken depth gate 豁免，escalate 同款）；③ runAgent 调用的 `onToken` 改为累加 + `panel({ kind: "text", text: t })`，新增 `onReasoning: (r) => panel({ kind: "think", text: r })`（agent.mjs 的 onReasoning 无 gate，传了就流）。`webview/chat.js` 的 `subagentChunk` 无需改动（按 name 建块，标题自动显示 `eng-coder#N` 可区分多次调用）。CLI 端无此问题（relay 前缀已含 role#id），不涉及。
+- **测试**（`test/subagent.test.mjs` + webview 测试）：① panel 通道名含 `#${subId}`（单测 execute 的 onToolPanel 捕获）；② onToken 转 panel kind=text、onReasoning 转 panel kind=think；③ webview `subagentChunk`：`sub:eng-coder#1` 与 `sub:eng-coder#2` 各自建独立块、`_subBlocks` 两个 key；④ 回归：全量测试通过。
+- **受影响文件**：`src/agent-tools/subagent.mjs`、`test/subagent.test.mjs`、webview 测试文件（`test/webview-lib.test.mjs` 或 `test/ui.test.mjs`，选现有 subagentChunk 覆盖处）、`CHANGELOG.md`。
+
+
+**文档归属纪律 + advisor 设计评审增强（2026-08-21）**：文档地图（`docs/design/README.md`，两端各建）+ system.md 归属纪律（找到就改、新建须登记、单一权威源引用不复制）+ advisor-design.md 加 Document ownership 维度（矛盾表述 🔴、碎片化 🟡）与引用纪律 + fallback 转硬加载。需求/设计/测试/文件清单见 CLI `docs/design/AGENT-LOOP.md`「## 12. 文档归属纪律 + advisor 设计评审增强」——两端 prompts 保持 byte-identical。
+
+
 
 
 **advisor 开关语义重构（对齐 CLI AGENT-LOOP.md §8，2026-08-21）**：
