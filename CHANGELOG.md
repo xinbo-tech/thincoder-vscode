@@ -1,4 +1,10 @@
 # Changelog
+## [0.1.39] — 2026-08-21
+
+### Fixed
+
+- **非工程模式不再暴露 eng-coder 角色** — subagent 工具的 role 枚举按工程模式覆盖（对齐 CLI）：普通模式 schema 只列 explore/plan/coder，模型看不到 eng-coder，无法自主走 eng(enter)→advisor design token→派生 eng-coder 的解锁链盗用实现通道。运行期互斥门禁原样保留（schema 过滤是第一道防线，运行期校验兜底）
+
 ## [0.1.38] — 2026-08-20
 
 ### Fixed
