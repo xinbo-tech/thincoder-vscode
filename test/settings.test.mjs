@@ -141,19 +141,25 @@ describe("updateProviderStatus — live refresh while the panel is open (add-pro
 })
 
 describe("buildSettings — switch toggles (agent / advisor)", () => {
-  it("reflects verifyGuard and advisor.enabled as checked switches", () => {
-    api.updateAgentSettings({ verifyGuard: true, advisor: { enabled: true, guard: true } })
+  it("reflects verifyGuard and advisor.guard as checked switches", () => {
+    api.updateAgentSettings({ verifyGuard: true, advisor: { guard: true } })
     const body = openPanel()
     assert.equal(body.querySelector("#ag-verifyguard")?.checked, true)
-    assert.equal(body.querySelector("#adv-enabled")?.checked, true)
+    assert.equal(body.querySelector("#adv-enabled"), null, "advisor enabled switch removed (2026-08-21)")
     assert.equal(body.querySelector("#adv-guard")?.checked, true)
   })
 
-  it("unchecked when verifyGuard is false", () => {
-    api.updateAgentSettings({ verifyGuard: false, advisor: { enabled: false, guard: false } })
+  it("advisor guard unchecked when off", () => {
+    api.updateAgentSettings({ verifyGuard: false, advisor: { guard: false } })
     const body = openPanel()
     assert.equal(body.querySelector("#ag-verifyguard")?.checked, false)
-    assert.equal(body.querySelector("#adv-enabled")?.checked, false)
+    assert.equal(body.querySelector("#adv-guard")?.checked, false)
+  })
+
+  it("advisor guard unchecked when advisor config is absent (default OFF)", () => {
+    api.updateAgentSettings({ verifyGuard: false, advisor: {} })
+    const body = openPanel()
+    assert.equal(body.querySelector("#adv-guard")?.checked, false, "missing guard → unchecked")
   })
 
   it("renders agent numeric fields and submodel menu slots", () => {

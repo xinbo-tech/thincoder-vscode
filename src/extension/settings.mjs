@@ -81,7 +81,7 @@ export function agentSettings() {
       engineering: s.engineering,
     consultTurns: s.consultTurns,
     consultTimeoutMs: s.consultTimeoutMs,
-    advisor: s.advisor ?? { enabled: false },
+    advisor: { ...(s.advisor ?? {}), guard: s.advisor?.guard === true },
     consultModels: s.consultModels ?? [],
     // Spec-derived effort enums — offline, always available; the webview's model list
     // (network probe) may not have arrived when the panel opens, and the effort dropdown

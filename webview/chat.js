@@ -677,8 +677,8 @@ ctx.welcomeKey.addEventListener("keydown", (e) => {
   if (e.key === "Enter") ctx.welcomeSaveBtn.click()
 })
 
-// Advisor / Engineering / Plan mode toggles (session-bar quick switches; the settings
-// panel has the full advisor configuration — these mirror config.json fields).
+// Review-guard / Engineering / Plan mode toggles (session-bar quick switches; the
+// settings panel has the full advisor configuration — these mirror config.json fields).
 let _advisorOn = false
 let _engOn = false
 
@@ -698,7 +698,7 @@ function applyModeButtons() {
 advisorBtn.addEventListener("click", () => {
   _advisorOn = !_advisorOn
   applyModeButtons()
-  vscode.postMessage({ type: "setAdvisorEnabled", value: _advisorOn })
+  vscode.postMessage({ type: "setAdvisorGuard", value: _advisorOn })
 })
 engBtn.addEventListener("click", () => {
   _engOn = !_engOn
@@ -1213,7 +1213,7 @@ window.addEventListener("message", (e) => {
       break
     case "agentSettings":
       updateAgentSettings(m.settings || {})
-      _advisorOn = !!(m.settings?.advisor?.enabled)
+      _advisorOn = !!(m.settings?.advisor?.guard)
       _engOn = !!(m.settings?.engineering)
       applyModeButtons()
       break
@@ -1626,7 +1626,7 @@ function applyI18nToDOM() {
   if (reasoningBtn) reasoningBtn.title = t("toolbar.reasoning")
   const autoBtn = document.getElementById("auto-btn")
   if (autoBtn) autoBtn.title = t("toolbar.autoApprove")
-  if (document.getElementById("advisor-btn")) document.getElementById("advisor-btn").title = t("toolbar.advisor")
+  if (document.getElementById("advisor-btn")) document.getElementById("advisor-btn").title = t("toolbar.guard")
   if (document.getElementById("eng-btn")) document.getElementById("eng-btn").title = t("toolbar.engineering")
   const settingsBtn = document.getElementById("settings-btn")
   if (settingsBtn) settingsBtn.title = t("toolbar.settings")

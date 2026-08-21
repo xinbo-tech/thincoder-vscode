@@ -671,8 +671,7 @@ function buildSettings() {
   html += `<div id="agent-saved-badge" class="agent-saved-badge"></div>`
   html += `<button id="consult-add" class="key-btn" style="margin-top:4px">${t("settings.consultAdd")}</button>`
   html += `<div class="settings-subtitle">${t("settings.advisorSection")}</div>`
-  html += `<label class="switch" title="${t("settings.advisorEnabledHelp")}"><input type="checkbox" id="adv-enabled" ${adv.enabled ? "checked" : ""}> ${t("settings.advisorEnabled")}</label>`
-  html += `<label class="switch" title="${t("settings.advisorGuardHelp")}"><input type="checkbox" id="adv-guard" ${adv.guard !== false ? "checked" : ""}> ${t("settings.advisorGuard")}</label>`
+  html += `<label class="switch" title="${t("settings.advisorGuardHelp")}"><input type="checkbox" id="adv-guard" ${adv.guard === true ? "checked" : ""}> ${t("settings.advisorGuard")}</label>`
   const advProvider = adv.provider || ""
   html += `<div class="key-field"><label title="${t("settings.advisorProviderHelp")}">${t("settings.advisorProvider")}</label><span id="adv-model-slot" class="adv-model-slot" data-provider="${escHtml(advProvider)}" data-model="${escHtml(adv.model || "")}"></span></div>`
   {
@@ -787,7 +786,6 @@ function buildSettings() {
         consultTimeoutMs: (() => { const m = get("consult-timeout"); return m ? String(Math.round(Number(m) * 60000)) : undefined })(),
         verifyGuard: chk("ag-verifyguard"),
         advisor: {
-          enabled: chk("adv-enabled"),
           guard: chk("adv-guard"),
           provider: document.getElementById("adv-model-slot")?.dataset.provider || undefined,
           model: document.getElementById("adv-model-slot")?.dataset.model || undefined,
@@ -820,10 +818,10 @@ function buildSettings() {
   }
   agCard.querySelectorAll("input, select").forEach((el) => el.addEventListener("change", autoSaveAgent))
   // Consult & Advisor is a SEPARATE card since the reorg — its static controls live outside
-  // agCard and must be bound explicitly (adv-enabled/adv-guard were silently unbound after the
+  // agCard and must be bound explicitly (adv-guard was silently unbound after the
   // split; consult-turns/consult-timeout are new). Consult rows and the advisor model slot
-  // already save via fireAgentSave/consult-rows-changed, so only these four need binding here.
-  for (const id of ["adv-enabled", "adv-guard", "consult-turns", "consult-timeout"]) {
+  // already save via fireAgentSave/consult-rows-changed, so only these three need binding here.
+  for (const id of ["adv-guard", "consult-turns", "consult-timeout"]) {
     document.getElementById(id)?.addEventListener("change", autoSaveAgent)
   }
   document.getElementById("consult-rows")?.addEventListener("consult-rows-changed", autoSaveAgent)

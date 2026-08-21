@@ -141,7 +141,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
 
   // Runtime config: advisor settings live in the shared config.json (CLI agent.advisor),
   // engineering state is per-session (persisted by chat-panel alongside the history lines).
-  let advisorCfg = { enabled: false }
+  let advisorCfg = { guard: false }
   let cfgEngineering = false
   let cfgVerifyGuard = false
   let cfgCompactThreshold = null
@@ -158,7 +158,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   let cfgWebsearch = { provider: "tavily", apiKey: "" } // structured search; empty key → Bing fallback
   try {
     const raw = loadRaw()
-    advisorCfg = raw.agent?.advisor ?? { enabled: false }
+    advisorCfg = raw.agent?.advisor ?? { guard: false }
     cfgEngineering = raw.agent?.engineering ?? false
     cfgVerifyGuard = raw.agent?.verifyGuard === true // opt-in, CLI parity
     cfgCompactThreshold = raw.agent?.compactThreshold ?? null // null = auto from model context
@@ -540,14 +540,15 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           }
         }
 
-        // Advisor guard (CLI completion.mjs parity): active by default when
-        // advisor.enabled is set (opt-out via guard: false), NEVER in
-        // engineering mode (engineering has its own mandatory gates).
+        // Advisor guard (CLI completion.mjs parity): OPT-IN ONLY
+        // (advisor.guard === true, default OFF — 2026-08-21 semantic
+        // refactor), NEVER in engineering mode (engineering has its own
+        // mandatory gates). The advisor tool itself is always available.
         // Cap sync (CLI b74e413): beyond MAX_ADVISOR_ROUNDS the advisor tool
         // refuses reviews (run.mjs convergence cap) — pushing back further
         // would loop forever (fix → pushback → cap-refused call → fix …).
         const advisorCfg = agent.config?.advisor
-        const advisorReview = advisorCfg?.enabled && advisorCfg?.guard !== false
+        const advisorReview = advisorCfg?.guard === true
         if (advisorReview && !agent.config?.agent?.engineering
             && agent._mutatedThisRun && !agent._calledAdvisorThisRun && hasCodeMutations(agent)
             && advisorPushbacks < MAX_ADVISOR_PUSHBACKS

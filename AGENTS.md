@@ -66,7 +66,7 @@ webview/index.html   Webview shell (referenced by ChatPanel._html())
 | webview → extension | `interrupt` | `{ message }` — Ctrl+I inject: abort with an interrupt reason; the agent loop commits partial output, injects the message, and resumes the same turn on a rebuilt controller |
 | webview → extension | `newSession` / `switchSession` / `deleteSession` / `getSessions` | `{ name? }` |
 | webview → extension | `selectModel` / `selectReasoning` | `{ model, provider? }` / `{ reasoning }` |
-| webview → extension | `setAdvisorEnabled` / `setEngineeringEnabled` | `{ value }` — toolbar quick switches (ADVISOR / ENG buttons), persisted to config.json `agent.advisor.enabled` / `agent.engineering` |
+| webview → extension | `setAdvisorGuard` / `setEngineeringEnabled` | `{ value }` — toolbar quick switches (GUARD / ENG buttons), persisted to config.json `agent.advisor.guard` / `agent.engineering` (guard = require advisor review after code changes; advisor reviews themselves are always available) |
 | extension → webview | `token` | `{ text }` |
 | extension → webview | `reasoning` | `{ text }` (model's thinking process, shown in collapsible block) |
 | extension → webview | `toolCall` / `toolResult` | `{ name, args? / text }` |

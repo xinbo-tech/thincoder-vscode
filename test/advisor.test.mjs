@@ -174,7 +174,7 @@ describe("resolveAdvisorProvider", () => {
 
   it("falls back to the main agent provider when advisor has no provider", () => {
     const agent = {
-      config: { advisor: { enabled: true } },
+      config: { advisor: {} },
       _provider: { baseURL: "https://api.test/v1", model: "test-model", apiKey: "sk" },
     }
     const p = resolveAdvisorProvider(agent)
@@ -184,7 +184,7 @@ describe("resolveAdvisorProvider", () => {
 
   it("advisor.model overrides the main model", () => {
     const agent = {
-      config: { advisor: { enabled: true, model: "advisor-model" } },
+      config: { advisor: { model: "advisor-model" } },
       _provider: { baseURL: "https://api.test/v1", model: "test-model", apiKey: "sk" },
     }
     const p = resolveAdvisorProvider(agent)
@@ -193,7 +193,7 @@ describe("resolveAdvisorProvider", () => {
 
   it("advisor.thinking=null explicitly disables thinking", () => {
     const agent = {
-      config: { advisor: { enabled: true, thinking: null } },
+      config: { advisor: { thinking: null } },
       _provider: { baseURL: "https://api.test/v1", model: "test-model", apiKey: "sk", thinking: { type: "enabled" } },
     }
     const p = resolveAdvisorProvider(agent)
@@ -206,7 +206,7 @@ describe("resolveAdvisorProvider", () => {
       activeProvider: "deepseek",
     }))
     const agent = {
-      config: { advisor: { enabled: true, provider: "reviewer" } },
+      config: { advisor: { provider: "reviewer" } },
       _provider: { baseURL: "https://api.test/v1", model: "test-model", apiKey: "sk" },
     }
     const p = resolveAdvisorProvider(agent)
@@ -220,11 +220,46 @@ describe("resolveAdvisorProvider", () => {
       activeProvider: "only",
     }))
     const agent = {
-      config: { advisor: { enabled: true, provider: "nonexistent" } },
+      config: { advisor: { provider: "nonexistent" } },
       _provider: { baseURL: "https://main.test/v1", model: "main-model", apiKey: "mk" },
     }
     const p = resolveAdvisorProvider(agent)
     assert.equal(p.baseURL, "https://main.test/v1")
+  })
+})
+
+// ─── runAdvisorReview — always available (2026-08-21) ────────────
+
+describe("runAdvisorReview", () => {
+  it("runs with NO advisor config — the former enabled gate is gone", async () => {
+    const { runAdvisorReview } = await import("../src/advisor/run.mjs")
+    const agent = {
+      config: { agent: {} }, // no advisor key at all — the old gate would refuse "not enabled"
+      _provider: { name: "p", model: "m" },
+      history: [{ role: "user", content: "update the readme" }],
+      _touchedFiles: [],
+      _advisorRound: 0,
+      cwd: tmpDir,
+    }
+    // Pre-aborted signal: the tool loop returns "interrupted" immediately —
+    // no network call. Reaching the loop at all proves the gate is removed.
+    const result = await runAdvisorReview(agent, "code", { signal: { aborted: true } })
+    assert.ok(!result.includes("not enabled"), `enabled gate removed, got: ${result}`)
+    assert.ok(result.startsWith("Advisor:"), "explicit outcome, not a silent pass")
+  })
+
+  it("legacy enabled:true config does not gate the review either", async () => {
+    const { runAdvisorReview } = await import("../src/advisor/run.mjs")
+    const agent = {
+      config: { advisor: { enabled: true } }, // deprecated field — must be ignored
+      _provider: { name: "p", model: "m" },
+      history: [{ role: "user", content: "update the readme" }],
+      _touchedFiles: [],
+      _advisorRound: 0,
+      cwd: tmpDir,
+    }
+    const result = await runAdvisorReview(agent, "code", { signal: { aborted: true } })
+    assert.ok(!result.includes("not enabled"), `deprecated enabled must not be read, got: ${result}`)
   })
 })
 

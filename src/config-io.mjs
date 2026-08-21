@@ -231,7 +231,7 @@ export function loadAgentSettings() {
       engineering: a?.engineering ?? false, // engineering mode flag (VS Code: config-level; the eng tool persists here)
     consultTurns: a?.consultTurns ?? 40, // consultation turn budget (was 100, then 15 was too tight)
     consultTimeoutMs: a?.consultTimeoutMs ?? 600000, // wall-clock watchdog per consultant (5 min)
-    advisor: a?.advisor ?? { enabled: false },
+    advisor: a?.advisor ?? { guard: false },
     consultModels: Array.isArray(a?.consultModels) ? a.consultModels : [],
   }
 }
@@ -286,12 +286,12 @@ export function saveAgentSettingsFromPanel(payload) {
     patch.consultModels = clean.length > 0 ? clean : undefined
   }
   if (payload.advisor !== undefined) {
-    // Merge with existing advisor values; "in" guards allow clearing provider/model
+    // Merge with existing advisor values; "in" guards allow clearing provider/model.
+    // advisor.enabled is deprecated (2026-08-21) — never written; guard defaults OFF.
     const adv = payload.advisor ?? {}
     const current = loadAgentSettings().advisor ?? {}
     patch.advisor = {
-      enabled: !!adv.enabled,
-      guard: adv.guard !== undefined ? !!adv.guard : (current.guard ?? true),
+      guard: adv.guard !== undefined ? !!adv.guard : (current.guard ?? false),
       ...(typeof adv.effort === "string" && adv.effort.trim() ? { effort: adv.effort.trim() } : {}),
       ...("provider" in adv ? (adv.provider ? { provider: adv.provider } : undefined) : {}),
       ...("model" in adv ? (adv.model ? { model: adv.model } : undefined) : {}),

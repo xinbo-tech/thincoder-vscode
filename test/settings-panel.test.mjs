@@ -41,7 +41,7 @@ describe("saveAgentSettingsFromPanel — single write channel (regression)", () 
       subagentModels: { coder: "glm:glm-5.2" },
       compactThreshold: "150000",
       verifyGuard: true,
-      advisor: { enabled: true, guard: true },
+      advisor: { guard: true },
     })
     const raw = loadRaw()
     assert.equal(raw.agent.maxTurns, 30, "maxTurns must persist alongside advisor")
@@ -50,29 +50,37 @@ describe("saveAgentSettingsFromPanel — single write channel (regression)", () 
     assert.deepEqual(raw.agent.subagentModels, { coder: "glm:glm-5.2" })
     assert.equal(raw.agent.compactThreshold, 150000)
     assert.equal(raw.agent.verifyGuard, true)
-    assert.equal(raw.agent.advisor.enabled, true)
+    assert.equal(raw.agent.advisor.guard, true, "guard persisted")
+    assert.ok(!("enabled" in raw.agent.advisor), "deprecated advisor.enabled is never written (2026-08-21)")
   })
 
   it("cleared subagentModel / empty subagentModels delete the keys", () => {
-    writeFileSync(cfgPath, JSON.stringify({ agent: { subagentModel: "x", subagentModels: { coder: "y" }, advisor: { enabled: false } } }))
+    writeFileSync(cfgPath, JSON.stringify({ agent: { subagentModel: "x", subagentModels: { coder: "y" }, advisor: { guard: false } } }))
     saveAgentSettingsFromPanel({
       subagentModel: undefined,
       subagentModels: {},
-      advisor: { enabled: false, guard: true },
+      advisor: { guard: true },
     })
     const raw = loadRaw()
     assert.ok(!("subagentModel" in raw.agent), "cleared global must delete the key")
     assert.ok(!("subagentModels" in raw.agent), "empty subagentModels must delete the key")
+    assert.equal(raw.agent.advisor.guard, true, "advisor guard updated in the same write")
   })
 
   it("advisor provider/model cleared when emptied; guard survives merge", () => {
-    writeFileSync(cfgPath, JSON.stringify({ agent: { advisor: { enabled: true, guard: false, provider: "deepseek", model: "m1" } } }))
-    saveAgentSettingsFromPanel({ advisor: { enabled: true, guard: true, provider: undefined, model: "" } })
+    writeFileSync(cfgPath, JSON.stringify({ agent: { advisor: { guard: false, provider: "deepseek", model: "m1" } } }))
+    saveAgentSettingsFromPanel({ advisor: { guard: true, provider: undefined, model: "" } })
     const raw = loadRaw()
-    assert.deepEqual(raw.agent.advisor, { enabled: true, guard: true }, "cleared provider/model removed, guard updated")
+    assert.deepEqual(raw.agent.advisor, { guard: true }, "cleared provider/model removed, guard updated, no enabled key")
     // guard not sent → previous guard survives
-    saveAgentSettingsFromPanel({ advisor: { enabled: true } })
+    saveAgentSettingsFromPanel({ advisor: {} })
     assert.equal(loadRaw().agent.advisor.guard, true, "guard preserved when not in payload")
+  })
+
+  it("advisor guard defaults OFF when the payload carries no guard value (2026-08-21)", () => {
+    saveAgentSettingsFromPanel({ advisor: {} })
+    assert.equal(loadRaw().agent.advisor.guard, false, "no guard → defaults to OFF")
+    assert.ok(!("enabled" in loadRaw().agent.advisor), "deprecated enabled never written")
   })
 
   it("loadAgentSettings surfaces subagent fields (CLI parity)", () => {

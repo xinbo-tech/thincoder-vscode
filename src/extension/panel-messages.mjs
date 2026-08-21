@@ -230,8 +230,8 @@ export async function handlePanelMessage(panel, msg) {
       panel._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
       break
     }
-    case "setAdvisorEnabled": {
-      saveAgentSettingsFromPanel({ advisor: { enabled: !!msg.value } })
+    case "setAdvisorGuard": {
+      saveAgentSettingsFromPanel({ advisor: { guard: !!msg.value } })
       panel._pushSettingsLight()
       break
     }

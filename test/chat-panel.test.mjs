@@ -66,3 +66,40 @@ describe("ChatPanel._saveLines — display cleared (CLI resume parity)", () => {
     assert.deepEqual(loadSlot(tmp, 1).display, [], "stale display cleared on VS Code write")
   })
 })
+
+describe("panel message routing — setAdvisorGuard (2026-08-21 advisor switch refactor)", () => {
+  let cfgPath
+  beforeEach(() => {
+    cfgPath = join(tmp, "config.json")
+    // Route config-io writes into the sandbox (same pattern as settings-panel.test.mjs)
+  })
+
+  it("setAdvisorGuard true → config.json advisor.guard === true, no enabled key written", async () => {
+    const { _setConfigPathForTest, loadRaw } = await import("../src/config-io.mjs")
+    _setConfigPathForTest(cfgPath)
+    const { handlePanelMessage } = await import("../src/extension/panel-messages.mjs")
+    const panel = { _pushSettingsLight: () => {} }
+    await handlePanelMessage(panel, { type: "setAdvisorGuard", value: true })
+    const raw = loadRaw()
+    assert.equal(raw.agent.advisor.guard, true, "guard persisted from the toolbar switch")
+    assert.ok(!("enabled" in raw.agent.advisor), "deprecated advisor.enabled is never written")
+  })
+
+  it("setAdvisorGuard false → advisor.guard === false", async () => {
+    const { _setConfigPathForTest, loadRaw } = await import("../src/config-io.mjs")
+    _setConfigPathForTest(cfgPath)
+    const { handlePanelMessage } = await import("../src/extension/panel-messages.mjs")
+    const panel = { _pushSettingsLight: () => {} }
+    await handlePanelMessage(panel, { type: "setAdvisorGuard", value: false })
+    assert.equal(loadRaw().agent.advisor.guard, false)
+  })
+
+  it("legacy setAdvisorEnabled message is a no-op (no config write)", async () => {
+    const { _setConfigPathForTest, loadRaw } = await import("../src/config-io.mjs")
+    _setConfigPathForTest(cfgPath)
+    const { handlePanelMessage } = await import("../src/extension/panel-messages.mjs")
+    const panel = { _pushSettingsLight: () => {} }
+    await handlePanelMessage(panel, { type: "setAdvisorEnabled", value: true })
+    assert.equal(loadRaw().agent, undefined, "unknown legacy message type must not write anything")
+  })
+})
