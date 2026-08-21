@@ -238,3 +238,99 @@ test("wiring: depth-0 subagent schema role enum follows the mode", async () => {
   assert.ok(!eng.function.parameters.properties.role.enum.includes("coder"), "engineering schema must not show coder")
   assert.match(eng.function.description, /role='eng-coder'/, "engineering suffix appended to the description")
 })
+
+// ─── subagent activity stream (ARCHITECTURE.md: subagent 活动流修复 2026-08-22) ───
+
+/** Fake SSE LLM streaming a reasoning chunk + a content token per call, then either
+ *  demands a read tool (loop — the first `walls` calls) or answers and stops. */
+function streamServer(walls) {
+  const calls = { n: 0 }
+  const server = createServer((req, res) => {
+    let body = ""
+    req.on("data", (c) => (body += c))
+    req.on("end", () => {
+      calls.n++
+      const frames = calls.n <= walls
+        ? [
+            { choices: [{ index: 0, delta: { reasoning_content: `think-${calls.n}` } }] },
+            { choices: [{ index: 0, delta: { content: `part${calls.n} ` } }] },
+            { choices: [{ index: 0, finish_reason: "tool_calls", delta: { tool_calls: [{ index: 0, id: "t1", type: "function", function: { name: "read", arguments: JSON.stringify({ path: "x" }) } }] } }] },
+          ]
+        : [
+            { choices: [{ index: 0, delta: { reasoning_content: "final-think" } }] },
+            { choices: [{ index: 0, delta: { content: "done" } }] },
+            { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+          ]
+      res.end(frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join("") + "data: [DONE]\n\n")
+    })
+  })
+  return { server, calls }
+}
+
+test("activity stream: panel channel name carries #subId (one block per invocation)", async () => {
+  const { server } = streamServer(0)
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  try {
+    const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+    const panels = []
+    const parent = {
+      _provider: { name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" },
+      config: {
+        providersList: [{ name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" }],
+        agent: { subagentTurns: 3, engineering: true },
+      },
+      _subIdCounter: 0,
+      _engDesignToken: "plain-token", // no ":" → validateDesignToken short-circuits true
+    }
+    const ctx = { agent: parent, cwd, callbacks: { onToolPanel: (name, chunk) => panels.push({ name, chunk }) } }
+    const r = String(await subagentTool.execute({ task: "child", role: "eng-coder", designToken: "plain-token" }, ctx))
+    assert.ok(r.includes("Subagent (eng-coder) completed"), "run completes")
+    assert.ok(panels.length > 0, "activity streamed to the panel")
+    for (const p of panels) assert.match(p.name, /^sub:eng-coder#\d+$/, `channel name carries #subId: ${p.name}`)
+    assert.match(panels[0].name, /^sub:eng-coder#1$/, "first invocation is block #1")
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("activity stream: onToken → panel kind=text and accumulates; onReasoning → panel kind=think", async () => {
+  const { server, calls } = streamServer(3)
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  try {
+    const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+    const panels = []
+    const parent = {
+      _provider: { name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" },
+      config: {
+        providersList: [{ name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" }],
+        agent: { subagentTurns: 3, engineering: false },
+      },
+      _subIdCounter: 0,
+    }
+    const ctx = {
+      agent: parent, cwd,
+      callbacks: {
+        onToolPanel: (name, chunk) => panels.push({ name, chunk }),
+        onQuestion: async () => "Stop",
+      },
+    }
+    const r = String(await subagentTool.execute({ task: "loop until the cap", role: "coder" }, ctx))
+    assert.equal(calls.n, 3, "three looped calls hit the cap — stopped without resume")
+    const thinks = panels.filter((p) => p.chunk.kind === "think")
+    assert.equal(thinks.length, 3, "every reasoning chunk streams as kind=think")
+    assert.deepEqual(thinks.map((p) => p.chunk.text), ["think-1", "think-2", "think-3"])
+    const texts = panels.filter((p) => p.chunk.kind === "text")
+    assert.equal(texts.length, 3, "every content delta streams as kind=text")
+    assert.equal(texts.map((p) => p.chunk.text).join(""), "part1 part2 part3 ")
+    assert.ok(r.includes("Partial output: part1 part2 part3 "), "tokens accumulate into output")
+    for (const p of panels) assert.match(p.name, /^sub:coder#1$/, "all chunks share the same per-call channel")
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})

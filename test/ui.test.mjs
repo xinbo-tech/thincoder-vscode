@@ -5,12 +5,16 @@
  */
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import { join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { setupWebview } from "./helpers/webview-env.mjs"
 import {
   buildUserMessage, buildAssistantHistory, buildToolHistory, buildHistoryMessage, escHtml,
   newBlock, addUser, buildAdvisorBlock, appendAdvisorChunk, finishTool,
 } from "../webview/ui.js"
 
+const __dirname = dirname(fileURLToPath(import.meta.url))
 let env
 before(() => { env = setupWebview() })
 after(() => env?.cleanup())
@@ -189,5 +193,43 @@ describe("buildHistoryMessage (lazy-load dispatch)", () => {
     assert.equal(buildHistoryMessage(ctx(), { kind: "bogus" }), null)
     assert.equal(buildHistoryMessage(ctx(), null), null)
     assert.equal(buildHistoryMessage(ctx(), undefined), null)
+  })
+})
+
+// ─── subagentChunk: one activity block per #subId channel (ARCHITECTURE.md 2026-08-22) ───
+// Loads the real index.html body + chat.js (search/session-draft harness): subagentChunk
+// keys its blocks by the toolPanel message NAME — "sub:eng-coder#1" and "sub:eng-coder#2"
+// must each open their own block (the old "sub:eng-coder" shared name collapsed every
+// invocation into the first block).
+describe("subagent activity stream — one block per #subId channel", () => {
+  before(async () => {
+    const html = readFileSync(join(__dirname, "..", "webview", "index.html"), "utf8")
+    const body = html.match(/<body>([\s\S]*)<\/body>/)?.[1] ?? ""
+    document.body.innerHTML = body.replace(/<script[\s\S]*?<\/script>/g, "")
+    // chat.js calls the VS Code webview bridge acquireVsCodeApi() at module top —
+    // stub it so the module initializes.
+    globalThis.acquireVsCodeApi = () => ({ postMessage: () => {}, getState: () => null, setState: () => {} })
+    await import("../webview/chat.js")
+  })
+
+  const post = (msg) => window.dispatchEvent(new window.MessageEvent("message", { data: msg }))
+
+  it("sub:eng-coder#1 and sub:eng-coder#2 each get their own block, titled by label", () => {
+    post({ type: "toolPanel", name: "sub:eng-coder#1", kind: "text", text: "child one says hi" })
+    post({ type: "toolPanel", name: "sub:eng-coder#2", kind: "text", text: "child two says yo" })
+    const blocks = document.querySelectorAll("#messages .sub-block")
+    assert.equal(blocks.length, 2, "two independent blocks (one per #subId channel)")
+    const titles = [...blocks].map((b) => b.querySelector("summary").textContent)
+    assert.deepEqual(titles, ["eng-coder#1", "eng-coder#2"], "titles show the per-call label")
+    assert.match(blocks[0].textContent, /child one says hi/, "chunk landed in block #1")
+    assert.match(blocks[1].textContent, /child two says yo/, "chunk landed in block #2")
+  })
+
+  it("later chunks reuse their own block — no third block, content stays separate", () => {
+    post({ type: "toolPanel", name: "sub:eng-coder#1", kind: "tool", text: "read x" })
+    const blocks = document.querySelectorAll("#messages .sub-block")
+    assert.equal(blocks.length, 2, "#1 reuse does not create a new block (_subBlocks keyed by name)")
+    assert.match(blocks[0].textContent, /read x/, "#1's chunk lands in block #1")
+    assert.doesNotMatch(blocks[1].textContent, /read x/, "#2's block untouched")
   })
 })

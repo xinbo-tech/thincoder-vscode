@@ -119,15 +119,20 @@ export const subagentTool = {
 
     // Subagent runs without MAIN-CONVERSATION callbacks — results are captured.
     // onQuestion: the child's question tool must surface in the panel like the parent's.
-    // onToolCall/onToolResult: forwarded to the toolPanel channel as a live activity stream
-    // (subagent visibility — the user watches WHAT the child reads/runs, not just a dot).
+    // onToolCall/onToolResult/onToken/onReasoning: forwarded to the toolPanel channel as a
+    // live activity stream (subagent visibility — the user watches WHAT the child
+    // reads/runs/thinks/says, not just a dot). The channel name carries #subId so each
+    // invocation gets its OWN block (webview _subBlocks keys by name). subId is fixed
+    // before the turn-cap continue loop below — a resume reuses it, so continuation
+    // chunks keep streaming into the SAME block instead of opening a new one.
     // stateSink receives the child's live mutation state (runAgent fills it every turn).
     let output = ""
     const sink = {}
-    const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:${role}`, chunk)
+    const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:${role}#${subId}`, chunk)
     const agentMod = await import("../agent.mjs")
     const baseOpts = {
       depth: 1, role, maxTurns,
+      streamOutput: true, // exempt from the agent.mjs onToken depth gate (escalate parity)
       engState: { enabled: parent.config?.agent?.engineering ?? false, engDesignToken: parent._engDesignToken },
       engDesignReviewed: role === "eng-coder", // token verified above → child may write files
       stateSink: sink,
@@ -139,7 +144,8 @@ export const subagentTool = {
     for (let resume = false; ; resume = true) {
       try {
         const result = await runAgent(provider, cwd, task, {
-          onToken: (t) => { output += t },
+          onToken: (t) => { output += t; panel({ kind: "text", text: t }) },
+          onReasoning: (r) => panel({ kind: "think", text: r }),
           onToolCall: (name, args) => panel({ kind: "tool", text: name + " " + (JSON.stringify(args) || "").slice(0, 120) }),
           onToolResult: (name, text) => panel({ kind: "tool", text: "→ " + String(text ?? "").slice(0, 80).replace(/\n/g, " ") }),
           onComplete: () => {},
