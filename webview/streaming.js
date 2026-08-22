@@ -72,9 +72,14 @@ function flushStreamRender() {
 }
 
 export function onReasoning(text) {
-  // Start a new block if tool results arrived or if there are tools in the current block
-  // (ensures reasoning always appears below tool calls, preserving session flow order)
-  if (ctx.hadToolResult || ctx.currentTools.length > 0) {
+  // Start a new block if tool results arrived, if there are tools in the current
+  // block, OR if content has already streamed into the current bubble. The last
+  // case closes the sub-turn boundary for machine-only pushbacks (advisor/verify
+  // guard `[System reminder]` + continue): the webview never sees that boundary,
+  // so "reasoning arriving after content" is the only reliable signal of a new
+  // provider turn. Within one stream reasoning ALWAYS precedes content, so a
+  // reasoning chunk after a content bubble can only be a fresh sub-turn.
+  if (ctx.hadToolResult || ctx.currentTools.length > 0 || ctx.currentBubble) {
     ctx.currentBubble = null; ctx.currentBlock = null; ctx.currentReasoning = null; ctx.currentReasoningRaw = ""; ctx.hadToolResult = false
   }
   if (!ctx.currentBlock) newBlock(ctx)
