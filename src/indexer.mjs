@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSy
 import { join, relative } from "node:path"
 import { execSync } from "node:child_process"
 import { embed, cosine } from "./embedding.mjs"
+import { encodeVectors, decodeVectors } from "./index-bin.mjs"
 
 const INDEX_DIR = ".thincoder/index"
 const CODE_EXTS = new Set([".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".h", ".hpp"])
@@ -39,12 +40,13 @@ export async function buildIndex(cwd, embedder, { onProgress, signal } = {}) {
   mkdirSync(indexDir, { recursive: true })
 
   // 1) Discover files
-  const files = discoverFiles(cwd)
+  const files = discoverFiles(cwd, signal)
   onProgress?.({ phase: "scan", done: 0, total: files.length })
 
   // 2) Chunk them
   const allChunks = [] // [{ fileIdx, startLine, endLine, text }]
   for (let i = 0; i < files.length; i++) {
+    signal?.throwIfAborted()
     const chunks = chunkFile(cwd, files[i])
     for (const c of chunks) allChunks.push({ fileIdx: i, ...c })
   }
@@ -124,6 +126,17 @@ export function needsRebuild(cwd) {
   if (head && idx.manifest.indexed_commit !== head) {
     return { needed: true, reason: "new-commits", head, indexed: idx.manifest.indexed_commit }
   }
+  // Uncommitted edits: compare per-file mtime so search never serves stale line ranges
+  // against freshly-edited files (snippet text is re-read live, line spans are not).
+  for (const [relPath, info] of Object.entries(idx.manifest.files ?? {})) {
+    try {
+      if (statSync(join(cwd, relPath)).mtimeMs !== info.mtime) {
+        return { needed: true, reason: "file-changes", file: relPath }
+      }
+    } catch {
+      return { needed: true, reason: "file-missing", file: relPath }
+    }
+  }
   return { needed: false, reason: "up-to-date" }
 }
 
@@ -175,12 +188,13 @@ export async function searchIndex(cwd, embedder, query, { kind, limit = 10, sign
 
 // ─── Internal: file discovery ──────────────────────────────────
 
-function discoverFiles(cwd) {
+function discoverFiles(cwd, signal) {
   const files = []
   function walk(dir) {
     let entries
     try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
     for (const e of entries) {
+      signal?.throwIfAborted()
       if (e.isDirectory()) {
         if (SKIP_DIRS.has(e.name) || e.name.startsWith(".")) continue
         walk(join(dir, e.name))
@@ -265,48 +279,4 @@ function chunkDoc(lines) {
     chunks.push({ startLine: start + 1, endLine: lines.length, text: lines.slice(start).join("\n") })
   }
   return chunks
-}
-
-// ─── Internal: binary I/O ──────────────────────────────────────
-
-function encodeVectors(dim, vectors) {
-  // Header: [4B dim][4B count]
-  // Offset table: [count × 4B offsets]
-  // Data: [all vectors concatenated]
-  const count = vectors.length
-  const headerSize = 8 + count * 4
-  const dataSize = count * dim * 4
-  const buf = Buffer.alloc(headerSize + dataSize)
-
-  buf.writeUInt32LE(dim, 0)
-  buf.writeUInt32LE(count, 4)
-
-  let offset = headerSize
-  for (let i = 0; i < count; i++) {
-    buf.writeUInt32LE(offset, 8 + i * 4)
-    const vec = vectors[i]
-    for (let j = 0; j < dim; j++) {
-      buf.writeFloatLE(vec[j], offset + j * 4)
-    }
-    offset += dim * 4
-  }
-
-  return buf
-}
-
-function decodeVectors(buf) {
-  const dim = buf.readUInt32LE(0)
-  const count = buf.readUInt32LE(4)
-
-  const vectors = []
-  for (let i = 0; i < count; i++) {
-    const offset = buf.readUInt32LE(8 + i * 4)
-    const vec = new Float32Array(dim)
-    for (let j = 0; j < dim; j++) {
-      vec[j] = buf.readFloatLE(offset + j * 4)
-    }
-    vectors.push(vec)
-  }
-
-  return { dim, vectors }
 }

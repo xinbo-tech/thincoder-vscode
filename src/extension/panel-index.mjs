@@ -126,9 +126,9 @@ export async function buildIndex(panel) {
         const result = await runBuildIndex(cwd, embedder, {
           onProgress: (p) => {
             if (p.phase === "embed") {
-              progress.report({ message: `Embedding chunks ${p.done}/${p.total}`, increment: 0 })
+              progress.report({ message: `Embedding chunks ${p.done}/${p.total}` })
             } else if (p.phase === "done") {
-              progress.report({ message: "Done", increment: 100 })
+              progress.report({ message: "Done" })
             }
           },
           signal: ctrl.signal,
