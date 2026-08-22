@@ -3,6 +3,7 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import { join } from "node:path"
 import { resolvePath, formatSize, getOpenDoc, applyEditorRangeEdit, refreshMarkdownPreview } from "./shared.mjs"
@@ -75,12 +76,91 @@ export const insertAfterTool = {
   },
 }
 
+export function parsePatch(patch) {
+  // Patch text often comes from CRLF terminals/model output; strip uniformly.
+  const lines = patch.replace(/\r(?=\n|$)/g, "").split("\n")
+  const files = []
+  let cur = null
+  let i = 0
+  const stripPrefix = (p) => p.replace(/^[ab]\//, "")
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.startsWith("--- ")) {
+      const oldPath = line.slice(4).trim()
+      const plus = lines[i + 1]
+      if (!plus?.startsWith("+++ ")) throw new Error(`Malformed patch: expected "+++" after "${line}"`)
+      const newPath = plus.slice(4).trim()
+      if (newPath === "/dev/null") throw new Error("Deleting files via patch is not supported — use the delete tool")
+      cur = { path: stripPrefix(newPath), isNew: oldPath === "/dev/null", hunks: [] }
+      files.push(cur)
+      i += 2
+      continue
+    }
+    if (line.startsWith("@@")) {
+      if (!cur) throw new Error("Malformed patch: hunk header before any file header")
+      const m = line.match(/^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/)
+      if (!m) throw new Error(`Malformed patch: bad hunk header "${line}"`)
+      let oldNeed = m[1] == null ? 1 : Number(m[1])
+      let newNeed = m[2] == null ? 1 : Number(m[2])
+      const hunk = { ops: [] }
+      i++
+      while (oldNeed > 0 || newNeed > 0) {
+        if (i >= lines.length) throw new Error("Malformed patch: hunk truncated (line counts in @@ header not satisfied)")
+        const hl = lines[i]
+        if (hl.startsWith("\\")) { i++; continue } // "\ No newline at end of file"
+        const tag = hl === "" ? " " : hl[0]
+        const text = hl === "" ? "" : hl.slice(1)
+        if (tag === " ") { hunk.ops.push({ type: " ", text }); oldNeed--; newNeed-- }
+        else if (tag === "-") { hunk.ops.push({ type: "-", text }); oldNeed-- }
+        else if (tag === "+") { hunk.ops.push({ type: "+", text }); newNeed-- }
+        else throw new Error(`Malformed patch: unexpected line "${hl.slice(0, 60)}" inside hunk`)
+        i++
+      }
+      cur.hunks.push(hunk)
+      continue
+    }
+    i++
+  }
+  if (files.length === 0) throw new Error("No file changes found in patch (need --- / +++ headers)")
+  return files
+}
+
+/** Apply hunks sequentially onto a line array, re-scanning each hunk's context
+ *  against the ALREADY-mutated lines — earlier hunks shifting line numbers can
+ *  never misalign later hunks (the bug the line-number approach had). */
+export function applyHunks(fileLines, hunks, eol, path) {
+  const cr = eol === "\r\n" ? "\r" : ""
+  for (let h = 0; h < hunks.length; h++) {
+    const oldSeq = hunks[h].ops.filter((o) => o.type !== "+").map((o) => o.text)
+    if (oldSeq.length === 0) throw new Error(`Hunk ${h + 1} in ${path} has no context/removed lines to locate`)
+    const matches = []
+    for (let pos = 0; pos + oldSeq.length <= fileLines.length; pos++) {
+      let ok = true
+      for (let j = 0; j < oldSeq.length; j++) {
+        if (fileLines[pos + j].replace(/\r$/, "") !== oldSeq[j]) { ok = false; break }
+      }
+      if (ok) matches.push(pos)
+    }
+    if (matches.length === 0) throw new Error(`Hunk ${h + 1} in ${path} does not apply — context not found. Read the file first and regenerate the patch.`)
+    if (matches.length > 1) throw new Error(`Hunk ${h + 1} in ${path} matches ${matches.length} locations — add more context lines to make it unique`)
+    const pos = matches[0]
+    const out = []
+    let src = pos
+    for (const op of hunks[h].ops) {
+      if (op.type === " ") out.push(fileLines[src++])
+      else if (op.type === "-") src++
+      else out.push(op.text + cr)
+    }
+    fileLines.splice(pos, oldSeq.length, ...out)
+  }
+}
+
 export const applyPatchTool = {
   name: "apply_patch",
   description:
     "Apply a unified diff to one or more files. Use for multi-file changes.\n" +
     "Parameters:\n" +
-    "- patch (required): Unified diff text",
+    "- patch (required): Unified diff text (--- / +++ headers per file, @@ hunks; --- /dev/null creates a file)",
   parameters: {
     type: "object",
     properties: {
@@ -89,83 +169,28 @@ export const applyPatchTool = {
     required: ["patch"],
   },
   async execute({ patch }, ctx) {
-    // Parse sections — support both git diff format AND standard unified diff.
-    // Git diff uses "diff --git a/path b/path" headers; standard unified uses "--- a/path\n+++ b/path".
-    let sections
-    if (/^diff --git /m.test(patch)) {
-      sections = patch.split(/^diff --git /gm).filter(Boolean)
-    } else {
-      // Standard unified diff — split on "--- a/" headers (first char on line is "---")
-      sections = patch.split(/^(?=--- (?:a\/|\/dev\/null))/m).filter(Boolean)
-    }
-    if (sections.length === 0) return "Error: no diff sections found"
+    let files
+    try { files = parsePatch(patch) } catch (e) { return `Error: ${e.message}` }
     const results = []
-
-    for (const section of sections) {
-      // Try git diff header first: "a/path b/path" on first line
-      let filePath
-      let headerMatch = section.match(/^a\/(.+?) b\/(.+?)$/m)
-      if (headerMatch) {
-        filePath = headerMatch[2]
-      } else {
-        // Standard unified diff: "--- a/path" line followed by "+++ b/path"
-        const stdMatch = section.match(/^--- (?:a\/|\/dev\/null\s*\n\+\+\+ b\/)(.+?)$/m)
-        if (stdMatch) filePath = stdMatch[1]
-      }
-      if (!filePath) continue
-      // /dev/null means new file — skip header-only sections
-      if (filePath === "/dev/null") continue
-
-      const abs = resolvePath(filePath, ctx.cwd)
-
-      // Extract hunks
-      const hunkRe = /@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@(.*?)(?=@@|$)/gs
-      let content
-      try { content = await readFile(abs, "utf8") } catch { content = "" }
-      const lines = content.split("\n")
-      let match, applied = 0
-
-      while ((match = hunkRe.exec(section)) !== null) {
-        const oldStart = parseInt(match[1]) - 1
-        const hunkBody = match[5]
-        const hunkLines = hunkBody.split("\n").filter((l) => l !== "")
-
-        const result = []
-        let srcIdx = oldStart
-        for (const l of hunkLines) {
-          if (l.startsWith(" ")) {
-            if (srcIdx < lines.length && lines[srcIdx] === l.slice(1)) {
-              result.push(lines[srcIdx])
-            } else {
-              result.push(l.slice(1))
-            }
-            srcIdx++
-          } else if (l.startsWith("-")) {
-            if (srcIdx < lines.length && lines[srcIdx] === l.slice(1)) {
-              srcIdx++ // skip
-            } else {
-              srcIdx++
-            }
-          } else if (l.startsWith("+")) {
-            result.push(l.slice(1))
-          }
-        }
-        // Replace the affected range
-        const before = lines.slice(0, oldStart)
-        const after = lines.slice(srcIdx)
-        const newContent = [...before, ...result, ...after]
-        lines.length = 0
-        lines.push(...newContent)
-        applied++
-      }
-
+    for (const f of files) {
+      const abs = resolvePath(f.path, ctx.cwd)
       const dirtyErr = getOpenDoc(abs)?.isDirty ? `File has unsaved changes in the editor: ${abs}. Save or discard first.` : null
       if (dirtyErr) return `Error: ${dirtyErr}`
-      await writeFile(abs, lines.join("\n"), "utf8")
+      let content
+      if (f.isNew) {
+        if (existsSync(abs)) throw new Error(`Cannot create ${f.path}: file already exists`)
+        content = f.hunks.flatMap((h) => h.ops.filter((o) => o.type === "+").map((o) => o.text)).join("\n") + "\n"
+      } else {
+        const raw = getOpenDoc(abs)?.getText() ?? await readFile(abs, "utf8").catch(() => { throw new Error(`File not found: ${f.path}`) })
+        const eol = raw.includes("\r\n") ? "\r\n" : "\n"
+        const lines = raw.split("\n")
+        applyHunks(lines, f.hunks, eol, f.path)
+        content = lines.join("\n")
+      }
+      await writeFile(abs, content, "utf8")
       refreshMarkdownPreview(abs)
-      results.push(`Patched ${filePath}: ${applied} hunk(s) applied`)
+      results.push(`Patched ${f.path} (${f.isNew ? "created" : "modified"})`)
     }
-
     return results.join("\n") || "No files patched"
   },
 }

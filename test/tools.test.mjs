@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
@@ -595,6 +595,40 @@ describe("ops tools — file_ops / process / get_current_time / sleep", () => {
     const ls = await lsTool.execute({ filter: "*.js", path: "." }, ctx())
     assert.match(ls, /a\.js/, "ls filter keeps matching entry")
     assert.doesNotMatch(ls, /b\.txt/, "ls filter excludes non-matching entry")
+  })
+
+  it("apply_patch: multiple hunks stay aligned after line-count drift", async () => {
+    const { parsePatch, applyHunks } = await import("../src/tools/more-file.mjs")
+    // hunk 1 inserts a line (shifts downstream), so hunk 2's @@ line number is stale
+    const patch = `--- a/f.txt
++++ b/f.txt
+@@ -1,3 +1,4 @@
+ one
++oneAndHalf
+ two
+ three
+@@ -5,3 +5,3 @@
+ five
+-six
++sixX
+ seven
+`
+    const files = parsePatch(patch)
+    assert.equal(files.length, 1)
+    const lines = ["one", "two", "three", "four", "five", "six", "seven"].slice()
+    applyHunks(lines, files[0].hunks, "\n", "f.txt")
+    assert.deepStrictEqual(lines, ["one", "oneAndHalf", "two", "three", "four", "five", "sixX", "seven"])
+  })
+
+  it("tree: depth-limited directory tree", async () => {
+    const { treeTool } = await import("../src/tools/tree.mjs")
+    mkdirSync(join(cwd, "src/nested/deep"), { recursive: true })
+    writeFileSync(join(cwd, "src/a.js"), "x")
+    writeFileSync(join(cwd, "root.txt"), "x")
+    const out = await treeTool.execute({ depth: 2 }, ctx())
+    assert.match(out, /src\//, "lists directory with trailing slash")
+    assert.match(out, /root\.txt/)
+    assert.doesNotMatch(out, /deep/, "depth limit excludes deeper levels")
   })
 })
 
