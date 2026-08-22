@@ -93,7 +93,7 @@ consult_start
       （原始报错无需粘贴——会诊子 agent 用 main_history 自行拉取）
   - models (optional): 子集选择器——["provider:model" | 裸 provider | 裸 model]（大小写不敏感），
       只从 agent.consultModels 里筛出子集跑；缺省/空 = 全池。选择器匹配不到任何池成员 → 报错并列出可选值
-  → { id, models: ["deepseek-v4-pro", ...] }   // 非阻塞，立即返回
+  → { id, models: ["deepseek:deepseek-v4-pro", ...] }   // 非阻塞，立即返回
       // 子 provider 按条目 effort 注入 reasoning_effort（MODEL-PICKER-UNIFY.md §3.3）
 
 consult_check
