@@ -6,6 +6,11 @@ import * as vscode from "vscode"
 import { readFile } from "node:fs/promises"
 import { resolvePath } from "./shared.mjs"
 
+/** Escape a string for literal regex matching (grep literal=true). */
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
 export const globTool = {
   name: "glob",
   readonly: true,
@@ -39,22 +44,27 @@ export const grepTool = {
   description:
     "Search file contents with a regex. Returns matching lines.\n" +
     "Parameters:\n" +
-    "- pattern (required): JavaScript regular expression\n" +
+    "- pattern (required): JavaScript regular expression, or a literal string when literal=true\n" +
     "- path: Directory or file to search (default workspace root)\n" +
-    "- glob: Only search files matching this glob",
+    "- glob: Only search files matching this glob\n" +
+    "- ignoreCase: Case-insensitive match (default false)\n" +
+    "- literal: Literal string match — no regex interpretation (default false)",
   parameters: {
     type: "object",
     properties: {
-      pattern: { type: "string", description: "Regular expression" },
+      pattern: { type: "string", description: "Regular expression, or a literal string when literal=true" },
       path: { type: "string", description: "Directory or file to search" },
       glob: { type: "string", description: "File glob filter" },
+      ignoreCase: { type: "boolean", description: "Case-insensitive match (default false)" },
+      literal: { type: "boolean", description: "Literal string match — no regex interpretation (default false)" },
     },
     required: ["pattern"],
   },
-  async execute({ pattern, path: dir, glob: fileGlob }, ctx) {
+  async execute({ pattern, path: dir, glob: fileGlob, ignoreCase, literal }, ctx) {
     const base = dir ? resolvePath(dir, ctx.cwd) : ctx.cwd
     try {
-      const re = new RegExp(pattern, "g")
+      const flags = (ignoreCase ? "i" : "") + "g"
+      const re = new RegExp(literal ? escapeRegExp(String(pattern)) : pattern, flags)
       // Use ripgrep via child_process for speed if available, otherwise fallback
       const files = fileGlob
         ? await vscode.workspace.findFiles(new vscode.RelativePattern(base, fileGlob), "**/node_modules/**")

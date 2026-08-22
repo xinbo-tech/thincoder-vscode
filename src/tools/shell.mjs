@@ -20,6 +20,15 @@ function stripAnsi(s) {
   return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
 }
 
+/** Keep only output lines matching a regex (bash filter, case-insensitive). */
+function applyLineFilter(output, filter) {
+  let re
+  try { re = new RegExp(filter, "i") } catch (e) { return `Error: filter regex invalid: ${e.message}` }
+  const lines = output.split("\n").filter((l) => re.test(l))
+  if (lines.length === 0) return `(no output lines matched filter "${filter}")`
+  return truncate(lines.join("\n"))
+}
+
 /** Mode B — inject: fill the command into the user's terminal WITHOUT running it.
  *  The user reviews and presses Enter. Output is not captured. */
 function injectToTerminal(command) {
@@ -185,17 +194,19 @@ export const bashTool = {
     "Parameters:\n" +
     "- command (required): Shell command to execute\n" +
     "- timeout: Timeout in milliseconds (default 120000)\n" +
+    "- filter: Optional — only return output lines matching this regex (case-insensitive)\n" +
     "- terminal: \"visible\" runs the command in the user's OWN visible terminal via shell integration — it inherits the user's shell state (current dir, activated venv/conda, env vars) that an isolated child process lacks. \"inject\" fills the command into the terminal WITHOUT running it — the user reviews and presses Enter (use for commands the user should inspect first). Omit for the default isolated child process.",
   parameters: {
     type: "object",
     properties: {
       command: { type: "string", description: "Shell command" },
       timeout: { type: "number", description: "Timeout in ms" },
+      filter: { type: "string", description: "Optional — only return output lines matching this regex (case-insensitive)" },
       terminal: { type: "string", enum: ["visible", "inject"], description: "Run in / inject into the user's terminal" },
     },
     required: ["command"],
   },
-  async execute({ command, timeout, terminal }, ctx) {
+  async execute({ command, timeout, terminal, filter }, ctx) {
     // inject: hand the command to the user's terminal WITHOUT running it — the
     // user reviews and presses Enter. No guard snapshot (nothing executes yet;
     // the user's review IS the guard).
@@ -214,7 +225,10 @@ export const bashTool = {
     // shell integration is unavailable.
     if (terminal === "visible") {
       const out = await runInVisibleTerminal(command, timeout, ctx)
-      if (out != null) return guard ? `${guard.notice}\n\n${out}` : out
+      if (out != null) {
+        const final = filter ? applyLineFilter(out, filter) : out
+        return guard ? `${guard.notice}\n\n${final}` : final
+      }
       // null = shell integration unavailable → fall through to child process
     }
 
@@ -226,7 +240,8 @@ export const bashTool = {
         // Output shows in the in-conversation tool card (finishTool auto-expands
         // it) — NOT the side tool panel (that duplication read as an intrusive
         // overlay; reported as jarring).
-        resolve(guard ? `${guard.notice}\n\n${out}` : out)
+        const final = filter ? applyLineFilter(out, filter) : out
+        resolve(guard ? `${guard.notice}\n\n${final}` : final)
       }
       // Shell override from config (CLI parity). Windows + default cmd: force UTF-8
       // code page for this child — cmd emits GBK bytes otherwise, which the UTF-8

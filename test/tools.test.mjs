@@ -586,6 +586,16 @@ describe("ops tools — file_ops / process / get_current_time / sleep", () => {
     const procs = await processTool.execute({ name: "node" }, ctx())
     assert.match(procs, /PID/, "process listing returns PID rows")
   })
+
+  it("ls filter", async () => {
+    const { lsTool } = await import("../src/tools/more-file.mjs")
+    writeFileSync(join(cwd, "a.js"), "x")
+    writeFileSync(join(cwd, "b.txt"), "nothing")
+
+    const ls = await lsTool.execute({ filter: "*.js", path: "." }, ctx())
+    assert.match(ls, /a\.js/, "ls filter keeps matching entry")
+    assert.doesNotMatch(ls, /b\.txt/, "ls filter excludes non-matching entry")
+  })
 })
 
 

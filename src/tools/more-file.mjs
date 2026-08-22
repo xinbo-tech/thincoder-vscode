@@ -176,20 +176,24 @@ export const lsTool = {
   description:
     "List directory contents with type and size.\n" +
     "Parameters:\n" +
-    "- path: Directory path (default workspace root)",
+    "- path: Directory path (default workspace root)\n" +
+    "- filter: Only list entries matching this wildcard (e.g. '*.mjs', '*test*')",
   parameters: {
     type: "object",
     properties: {
       path: { type: "string", description: "Directory path" },
+      filter: { type: "string", description: "Only list entries matching this wildcard (e.g. '*.mjs', '*test*')" },
     },
   },
-  async execute({ path }, ctx) {
+  async execute({ path, filter }, ctx) {
     const dir = path ? resolvePath(path, ctx.cwd) : ctx.cwd
     const { readdir, stat: fsStat } = await import("node:fs/promises")
+    const filterRe = filter ? wildcardToRegex(filter) : null
     try {
       const entries = await readdir(dir, { withFileTypes: true })
       const items = []
       for (const e of entries.slice(0, 500)) {
+        if (filterRe && !filterRe.test(e.name)) continue
         const full = join(dir, e.name)
         let size = ""
         try { const s = await fsStat(full); size = s.isDirectory() ? "" : ` (${formatSize(s.size)})` } catch { /* */ }
@@ -201,6 +205,14 @@ export const lsTool = {
       return `ls error: ${e.message}`
     }
   },
+}
+
+function wildcardToRegex(pattern) {
+  const re = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".")
+  return new RegExp(`^${re}$`, "i")
 }
 
 export const deleteTool = {

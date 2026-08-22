@@ -13,16 +13,21 @@ export const verifyTool = {
   description:
     "Run a pre-completion self-check. Runs syntax checks and reads editor diagnostics on changed files.\n" +
     "Parameters:\n" +
-    "- full: Also run the full test suite (default false)",
+    "- full: Also run the full test suite (default false)\n" +
+    "- workdir: Optional — run the test suite in this subdirectory (for monorepos)\n" +
+    "- filter: Optional — limit the test run to matching test names (node --test-name-pattern)",
   parameters: {
     type: "object",
     properties: {
       full: { type: "boolean", description: "Run full test suite" },
+      workdir: { type: "string", description: "Optional — run the test suite in this subdirectory (for monorepos)" },
+      filter: { type: "string", description: "Optional — limit the test run to matching test names (node --test-name-pattern)" },
     },
   },
-  async execute({ full }, ctx) {
+  async execute({ full, workdir, filter }, ctx) {
     const files = ctx.agent._touchedFiles || []
     if (files.length === 0) return "(no files modified — nothing to verify)"
+    const testCwd = workdir ? resolvePath(workdir, ctx.cwd) : ctx.cwd
 
     let anyFailure = false
     const results = []
@@ -87,7 +92,7 @@ export const verifyTool = {
         // same pattern as linter's NPX_CLI). execSync froze the host event loop and a
         // Stop click could not even be DELIVERED until the command finished.
         const npmCli = join(process.execPath.replace(/[\\/][^\\/]+$/, ""), "node_modules", "npm", "bin", "npm-cli.js")
-        const testResult = await runInterruptible(process.execPath, [npmCli, "test"], { cwd: ctx.cwd, timeout: 60000, signal: ctx.signal })
+        const testResult = await runInterruptible(process.execPath, [npmCli, "test", ...(filter ? ["--", `--test-name-pattern=${filter}`] : [])], { cwd: testCwd, timeout: 60000, signal: ctx.signal })
         results.push(`\n=== Test suite ===\n${testResult.slice(0, 3000)}`)
       } catch (e) {
         if (e.name === "AbortError") throw e  // propagate Stop
