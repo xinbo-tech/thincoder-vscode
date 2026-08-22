@@ -246,9 +246,25 @@ describe("consult mechanism", () => {
     await sleep(50)
     const names = [...new Set(panels.map((p) => p.name))]
     assert.equal(names.length, 3, "one stream per consultant")
-    for (const n of names) assert.ok(n.startsWith("sub:consult "), `stream name, got ${n}`)
+    for (const n of names) assert.ok(/^sub:consult .+ #\d+$/.test(n), `stream name, got ${n}`)
     assert.ok(panels.some((p) => p.chunk.text.includes("read")), "tool calls streamed")
     assert.ok(panels.some((p) => p.chunk.text.startsWith("→ ")), "tool results streamed")
+    await cleanupConsultSessions(agent)
+  })
+
+  it("two consult sessions with the same model open distinct stream blocks", async () => {
+    const agent = makeAgent(MODELS)
+    const panels = []
+    const ctx = makeCtx(agent, async (p, c, t, cb) => { cb.onToolCall?.("read", { path: "a" }); return "x" })
+    ctx.callbacks = { onToolPanel: (name) => panels.push(name) }
+    await consultStartTool.execute({ problem: "one" }, ctx)
+    await sleep(60)
+    await consultStartTool.execute({ problem: "two" }, ctx)
+    await sleep(60)
+    const names = panels
+    const deepseekNames = names.filter((n) => n.startsWith("sub:consult deepseek:m-a "))
+    assert.equal(deepseekNames.length, 2, `deepseek streamed in both sessions: ${deepseekNames}`)
+    assert.notEqual(deepseekNames[0], deepseekNames[1], "distinct stream name across sessions")
     await cleanupConsultSessions(agent)
   })
 

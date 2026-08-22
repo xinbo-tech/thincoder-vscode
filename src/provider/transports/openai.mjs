@@ -65,6 +65,50 @@ export function normalizeUsageCache(u) {
   }
   return u
 }
+/** Defensive tool-call merge (parity with CLI PROVIDER.md §10): skip null/malformed and
+ *  count, merge slots by index / id / name / tail, accumulate arguments. */
+function mergeToolCalls(result, delta) {
+  for (const tc of delta.tool_calls ?? []) {
+    if (!tc || typeof tc !== "object") { result.droppedToolCalls++; continue }
+    let slot
+    if (Number.isInteger(tc.index) && tc.index >= 0) {
+      slot = (result.toolCalls[tc.index] ??= { id: "", name: "", arguments: "" })
+    } else if (tc.id) {
+      slot = result.toolCalls.find((s) => s && s.id === tc.id)
+      if (!slot) { slot = { id: tc.id, name: "", arguments: "" }; result.toolCalls.push(slot) }
+    } else if (tc.function?.name) {
+      slot = { id: "", name: "", arguments: "" }
+      result.toolCalls.push(slot)
+    } else {
+      slot = result.toolCalls[result.toolCalls.length - 1]
+      if (!slot) { result.droppedToolCalls++; continue }
+    }
+    if (tc.id && !slot.id) slot.id = tc.id
+    if (tc.function?.name && !slot.name) slot.name = tc.function.name
+    const arg = tc.function?.arguments
+    if (typeof arg === "string") slot.arguments += arg
+    else if (arg != null) slot.arguments += JSON.stringify(arg)
+  }
+}
+
+/** Finalize tool calls: drop nameless slots, synthesize missing ids, count drops.
+ *  The machine-line warning is surfaced upstream in agent.mjs (ARCHITECTURE.md §279-313). */
+function finalizeToolCalls(result) {
+  const entries = result.toolCalls.filter((tc) => tc) // drop sparse holes (rule-1 index jumps)
+  const kept = entries.filter((tc) => tc.name) // drop nameless slots
+  result.droppedToolCalls = (result.droppedToolCalls ?? 0) + (entries.length - kept.length)
+  result.toolCalls = kept
+  const used = new Set(kept.map((tc) => tc.id).filter(Boolean))
+  let seq = 0
+  for (const tc of kept) {
+    if (!tc.id) {
+      let id
+      do { id = `call_${seq++}` } while (used.has(id))
+      tc.id = id
+      used.add(id)
+    }
+  }
+}
 
 /**
  * Parse OpenAI SSE stream. Returns { content, reasoning, toolCalls, usage, finishReason }.
@@ -74,7 +118,7 @@ export function normalizeUsageCache(u) {
  * (server accepted, no data — the for-await would otherwise hang).
  */
 export async function parseStream(response, { onToken, onReasoning, signal }) {
-  const result = { content: "", reasoning: "", toolCalls: [], usage: null, finishReason: null }
+  const result = { content: "", reasoning: "", toolCalls: [], droppedToolCalls: 0, usage: null, finishReason: null }
   const decoder = new TextDecoder()
   let buffer = ""
   let hasChoices = false
@@ -109,12 +153,7 @@ export async function parseStream(response, { onToken, onReasoning, signal }) {
         result.content += delta.content
         onToken?.(delta.content)
       }
-      for (const tc of delta.tool_calls ?? []) {
-        const slot = (result.toolCalls[tc.index] ??= { id: "", name: "", arguments: "" })
-        if (tc.id) slot.id = tc.id
-        if (tc.function?.name && !slot.name) slot.name = tc.function.name
-        if (tc.function?.arguments) slot.arguments += tc.function.arguments
-      }
+      mergeToolCalls(result, delta)
     }
   }
 
@@ -179,5 +218,6 @@ export async function parseStream(response, { onToken, onReasoning, signal }) {
     if (errorMsg) throw new Error(`API error: ${errorMsg}`)
   }
 
+  finalizeToolCalls(result)
   return result
 }

@@ -72,7 +72,7 @@ describe("escalate (飞刀)", () => {
       assert.ok(String(r).includes("only available at depth 0"))
     })
 
-    it("activity stream flows under sub:escalate <label>", async () => {
+    it("activity stream flows under sub:escalate <label> with a unique #id per invocation", async () => {
       const panels = []
       const runner = async (provider, cwd, task, callbacks) => {
         callbacks.onToolCall?.("read", { path: "src/a.mjs" })
@@ -82,8 +82,15 @@ describe("escalate (飞刀)", () => {
       const ctx = makeCtx(makeAgent(CONSULTS), runner)
       ctx.callbacks = { onToolPanel: (name, chunk) => panels.push({ name, chunk }) }
       await escalateTool.execute({ task: "x" }, ctx)
-      assert.ok(panels.every((p) => p.name === "sub:escalate kimi:kimi-k3"))
+      assert.ok(panels.every((p) => p.name.startsWith("sub:escalate kimi:kimi-k3 #")))
       assert.ok(panels.some((p) => p.chunk.text.includes("read")))
+
+      // A second invocation must open its OWN stream name — not reuse the first's block.
+      const panels2 = []
+      ctx.callbacks = { onToolPanel: (name, chunk) => panels2.push({ name, chunk }) }
+      await escalateTool.execute({ task: "y" }, ctx)
+      assert.ok(panels2[0]?.name.startsWith("sub:escalate kimi:kimi-k3 #"))
+      assert.notEqual(panels2[0]?.name, panels[0]?.name, "distinct stream name per escalate invocation")
     })
 
     it("a single consult model is enough — no hook needed", async () => {

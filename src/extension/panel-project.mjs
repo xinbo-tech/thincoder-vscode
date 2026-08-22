@@ -1,0 +1,84 @@
+/**
+ * panel-project.mjs — ChatPanel multi-root current-project switcher (split out of
+ * chat-panel.mjs). Every function takes the ChatPanel instance as `panel`.
+ */
+import * as vscode from "vscode"
+import { t } from "../i18n.mjs"
+import { listSlots, newSlot, activeSlot } from "./session-io.mjs"
+import { _cwd, setProjectFolder } from "./panel-messages.mjs"
+import { loadSession } from "./panel-session.mjs"
+import { pushIndexStatus, maybePromptIndex } from "./panel-index.mjs"
+
+  /** Snapshot for the webview's project button: { folders, current, multi, followActive }. */
+export function projectInfo(_panel) {
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => ({
+      name: f.name, path: f.uri.fsPath,
+    }))
+    const follow = vscode.workspace.getConfiguration("thincoder.project").get("followActiveEditor", false)
+    return { folders, current: _cwd(), multi: folders.length > 1, followActive: !!follow }
+  }
+
+export function pushProject(panel) {
+    panel._panel?.webview.postMessage({ type: "project", ...panel._projectInfo() })
+  }
+
+  /** Apply a project switch (validated): rebind the slot and reload everything per-cwd. */
+export async function applyProjectSwitch(panel, fsPath) {
+    if (panel._turnActive) {
+      vscode.window.showWarningMessage("ThinCoder: a task is running — stop it before switching projects.")
+      return
+    }
+    const r = setProjectFolder(fsPath)
+    if (!r.ok) {
+      vscode.window.showErrorMessage(`ThinCoder: ${r.error}`)
+      return
+    }
+    await onProjectChanged(panel)
+  }
+
+  /** After the cwd changed: rebind to the new project's session and refresh per-cwd UI. */
+export async function onProjectChanged(panel) {
+    panel._slot = null
+    const cwd = _cwd()
+    const slots = listSlots(cwd)
+    panel._slot = slots.length === 0 ? newSlot(cwd) : activeSlot(cwd)
+    pushProject(panel)
+    loadSession(panel)   // clearMessages + new project's history + sessions + autoApprove/planMode
+    pushIndexStatus(panel)
+    maybePromptIndex(panel)
+  }
+
+  /** Native picker over the workspace roots (fixed options) + the follow-active toggle. */
+export async function pickProject(panel) {
+    const folders = vscode.workspace.workspaceFolders ?? []
+    if (folders.length < 2) {
+      vscode.window.showInformationMessage("Only one workspace folder is open.")
+      return
+    }
+    const cfg = vscode.workspace.getConfiguration("thincoder.project")
+    for (;;) {
+      const followActive = !!cfg.get("followActiveEditor", false)
+      const items = folders.map((f) => ({
+        label: f.uri.fsPath === _cwd() ? `$(check) ${f.name}` : `$(folder) ${f.name}`,
+        description: f.uri.fsPath,
+        folder: f,
+      }))
+      items.push({
+        label: (followActive ? "$(check) " : "") + t("project.followActive"),
+        description: t("project.followActiveHint"),
+        toggle: true,
+      })
+      const sel = await vscode.window.showQuickPick(items, {
+        placeHolder: t("project.pickPlaceholder"),
+        matchOnDescription: true,
+      })
+      if (!sel) return
+      if (sel.toggle) {
+        await cfg.update?.("followActiveEditor", !followActive, vscode.ConfigurationTarget?.Global)
+        continue  // re-open the picker so the new toggle state is visible
+      }
+      if (sel.folder.uri.fsPath === _cwd()) return
+      await applyProjectSwitch(panel, sel.folder.uri.fsPath)
+      return
+    }
+  }

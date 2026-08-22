@@ -80,17 +80,17 @@ function settleChild(ctx, session, id, label, ok, payload) {
     session.replies.push({ model: label, reply: payload })
     // Panel visibility (review D10): the user sees WHAT each consultant concluded, not just
     // a status dot — first ~8KB of the reply travels with the answered event.
-    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "answered", replyPreview: String(payload ?? "").slice(0, 8000) })
+    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, sessionId: id, status: "answered", replyPreview: String(payload ?? "").slice(0, 8000) })
   } else if (session.stopped) {
     // consult_stop already ran: an aborted child settles as TERMINATED — counted, never
     // enqueued (a "(consultation failed: Aborted)" note after an intentional stop is pure
     // noise the main agent would have to drain; consult_check done still fires via pending--).
     session.terminated = (session.terminated ?? 0) + 1
-    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "terminated", error: payload })
+    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, sessionId: id, status: "terminated", error: payload })
   } else {
     session.failed++
     session.replies.push({ model: label, reply: `(consultation failed: ${payload})`, failed: true })
-    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "failed", error: payload })
+    ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, sessionId: id, status: "failed", error: payload })
   }
   session.pending--
   wakeWaiters(session)
@@ -134,7 +134,7 @@ async function runConsultChild(ctx, session, id, m, problem, ctrl) {
     const runner = ctx.runAgent ?? agentMod.runAgent
     // Activity stream: the consultant's tool calls stream to the panel under its own
     // label (subagent visibility — same channel the subagent tool uses).
-    const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:consult ${label}`, chunk)
+    const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:consult ${label} #${id}`, chunk)
     const sink = {}
     // Turn-cap continue loop (TURN-CAP-CONTINUE.md): hitting the cap asks the user through
     // the panel's question card — unlimited continues, each with a fresh turn budget AND a
@@ -256,7 +256,7 @@ export const consultStartTool = {
         else ctx.signal.addEventListener("abort", () => ctrl.abort(), { once: true })
       }
       const label = consultLabel(m)
-      ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, status: "started", startedAt: Date.now() })
+      ctx.callbacks?.onSubagent?.({ id: `consult-${id}-${label}`, role: "consult", model: label, sessionId: id, status: "started", startedAt: Date.now() })
       // Fire and forget — each child settles itself into the session queue.
       runConsultChild(ctx, session, id, m, problem, ctrl)
     }

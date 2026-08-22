@@ -182,6 +182,62 @@ describe("OpenAI SSE parsing", () => {
     )
     assert.equal(result.content, "x")
   })
+  it("defensive tool_calls: null element skipped + counted (GitHub#2)", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const sse = [
+      'data: {"id":"1","choices":[{"delta":{"tool_calls":[null,{"index":0,"id":"a","function":{"name":"read","arguments":"{}"}}]}}]}\n',
+      "data: [DONE]\n",
+    ]
+    const result = await parseStream(createMockResponse(sse), { onToken: () => {}, onReasoning: () => {} })
+    assert.equal(result.toolCalls.length, 1)
+    assert.equal(result.toolCalls[0].name, "read")
+    assert.equal(result.droppedToolCalls, 1)
+  })
+
+  it("defensive tool_calls: missing function/name dropped + counted", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const sse = [
+      'data: {"id":"1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"a"}]}}]}\n',
+      "data: [DONE]\n",
+    ]
+    const result = await parseStream(createMockResponse(sse), { onToken: () => {}, onReasoning: () => {} })
+    assert.equal(result.toolCalls.length, 0)
+    assert.equal(result.droppedToolCalls, 1)
+  })
+
+  it("defensive tool_calls: missing id synthesized, function:null safe", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const sse = [
+      'data: {"id":"1","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read","arguments":"{}"}},{"index":1,"id":"b","function":null}]}}]}\n',
+      "data: [DONE]\n",
+    ]
+    const result = await parseStream(createMockResponse(sse), { onToken: () => {}, onReasoning: () => {} })
+    assert.equal(result.toolCalls.length, 1)
+    assert.equal(result.toolCalls[0].name, "read")
+    assert.equal(result.toolCalls[0].id, "call_0")
+    assert.equal(result.droppedToolCalls, 1)
+  })
+
+  it("defensive tool_calls: non-string arguments JSON.stringify'd", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const sse = [
+      'data: {"id":"1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"read","arguments":{"path":"x"}}}]}}]}\n',
+      "data: [DONE]\n",
+    ]
+    const result = await parseStream(createMockResponse(sse), { onToken: () => {}, onReasoning: () => {} })
+    assert.equal(result.toolCalls[0].arguments, '{"path":"x"}')
+  })
+  it("defensive tool_calls: synthesized id avoids explicit call_N collision", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const sse = [
+      'data: {"id":"1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"a","arguments":"{}"}},{"index":1,"function":{"name":"b","arguments":"{}"}}]}}]}\n',
+      "data: [DONE]\n",
+    ]
+    const result = await parseStream(createMockResponse(sse), { onToken: () => {}, onReasoning: () => {} })
+    assert.equal(result.toolCalls.length, 2)
+    assert.equal(result.toolCalls[0].id, "call_1")
+    assert.equal(result.toolCalls[1].id, "call_0")
+  })
 })
 
 // ─── Model transport dispatch ───────────────────────────────────

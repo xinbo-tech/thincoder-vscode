@@ -65,7 +65,7 @@ class ChatPanel {
 
 **LLM 标题生成**：
 - 触发：会话第一条用户消息后，agent 完成回复
-- 策略：用任意已配置的 provider 发送简短 prompt（"Generate a concise title"），限制输出 30 tokens
+- 策略：用任意已配置的 provider 发送简短 prompt（"Generate a concise title"），限制输出 100 tokens；openai 格式显式带 `thinking:{type:"disabled"}`（思考型模型禁用思考，否则 reasoning_content 吃光输出预算——IK9UZ8，需求/设计见 CLI `docs/design/SESSION.md` 变更段）
 - 失败静默降级（使用首条消息截断作为标题）
 
 ### 2. src/agent.mjs — Agent 主循环
@@ -243,7 +243,7 @@ user input
 | 方面 | CLI | VS Code |
 |------|-----|---------|
 | 用户界面 | 裸 ANSI TUI (~24 模块) | Webview (iframe) |
-| 会话存储 | `~/.thincoder/sessions/`（共享，5 槽位轮转） | 同上（共享同一目录） |
+| 会话存储 | `~/.thincoder/sessions/`（共享，槽位按需递增、无上限） | 同上（共享同一目录） |
 | 工具目录约束 | 工作目录 (`process.cwd()`) | 第一个 workspace 文件夹 |
 | 文件打开 | TUI 内显示 | VS Code 编辑器标签页 |
 | 权限审批 | TUI 内交互式（y/n/a；a = approve + AUTO ON） | webview 逐工具弹窗（approve / deny / approve-all）；autoApprove 会话级槽位字段，两端语义一致 |
@@ -252,3 +252,62 @@ user input
 | MCP | ✅ | ✅ stdio + HTTP（`~/.thincoder/config.json` 的 `mcp.servers[]`） |
 
 > **字段往返完整（已落地）**：共享槽位文件是全量覆盖写。`chat-panel._saveLines` 现以 `...existing` 展开式透传（不认识的字段原样保留），仅覆盖扩展自己拥有的字段——CLI 写入的 `activeModel`/`engineering`/`engDesignToken` 等字段在 VS Code 侧往返不丢。契约详见 CLI `docs/design/ARCHITECTURE.md`「会话存储统一 → 字段往返完整」。
+
+
+## 变更段（2026-08-22 · 需求层）
+
+> 来源：GitHub thincoder#2、Gitee #IK9UZ8（同修引用）。
+
+### GitHub thincoder#2 · GLM 5.3 畸形 tool_calls 解析崩溃（LLM 调用层）
+
+**总体需求**：OpenAI 兼容 SSE 流中畸形 `tool_calls`（数组含 null 元素、缺 `function`/`name`/`id`/`index`）不再导致扩展崩溃或静默丢工具；防御性解析 + 可读告警。现状：`transports/openai.mjs` `parseStream` 循环零防御——`tc.index`/`tc.id` 对 null 元素直接抛异常；空 name 向下游传播（`execute-tools.mjs` 静默丢工具、`compact.mjs:185` `tc.function.name` 二次崩溃）。
+
+**功能性需求**：
+- F1 自定义 provider（如一步 GLM 5.3）用户，模型返回非标准 tool_calls 时扩展不崩溃，其余正常工具调用继续执行。
+- F2 修复（parseStream 单点防御）：跳过 null/非对象元素；缺 `id` 合成 `call_N`；缺 `name`（function 缺失或 name 空）的调用丢弃并记录；缺 `index` 追加到数组尾部；结果过滤 name 为空的 slot。
+- F3 下游安全审计：`execute-tools.mjs`、`compact.mjs` 对缺 name 调用保持安全（现状部分防御，一并审计补齐）。
+- **范围边界**：仅防御与降级，不替模型修复语义；告警形式（机读线提示）设计层定。
+
+**非功能性需求**：
+- NF1 性能：解析热路径无新增开销（O(n) 过滤）。
+- NF2 测试：单测锁定 4 种畸形负载（null 元素、缺 id、缺 name、function 为 null）。
+
+### IK9UZ8 · 标题生成同修（引用）
+
+需求与设计见 CLI `docs/design/SESSION.md` 变更段（单一权威源，本文件不复制）。本仓库改动点：`src/extension/generate-title.mjs`（§模块详解·1 "LLM 标题生成" 段的机制描述随设计层同步更新）。
+
+### GitHub thincoder#2-D · 设计层
+
+**方案**：parseStream 单点防御（跳过/补缺/过滤）+ 流结束收尾。**两端同修**：CLI `src/provider/sse.mjs` 解析循环（line 54-58 非流式 JSON 分支、line 99-103 流式分支）同病——CLI 侧权威设计见 `thincoder/docs/design/PROVIDER.md` §10 变更段（本文件不复制）。
+
+**防御算法**：与 CLI 端同一规格（独立仓库不共享代码），完整算法与收尾逻辑见 CLI `thincoder/docs/design/PROVIDER.md` §10——本仓库 `src/provider/transports/openai.mjs` 的 `parseStream` 按同规格实现（跳过 null/非对象元素并计数、缺 id 收尾合成 `call_N`、缺 name 丢弃、缺 index 追加尾部、非字符串 arguments 走 JSON.stringify、返回 `droppedToolCalls`）。
+
+**告警通道**（本仓库，**两端统一策略：告警进机读线、不进人读线**——模型需知道其工具调用未执行）：
+- `response.droppedToolCalls > 0` 时 `agent.mjs` 在 pushReal assistant 消息后向 `history`（机读线）push 一条 user 角色提示 `[System reminder: N malformed tool_calls from the provider response were dropped (non-standard provider format).]`（与 CLI 端 `_warnings` 注入同语义；人读线不写）；`panel-chat.mjs` 不改
+- CLI 侧告警通道见 CLI `PROVIDER.md` §10
+
+**F3 下游安全审计结论**（本仓库）：
+- `execute-tools.mjs:27-28`：parseStream 过滤后 `tc.name` 恒有值；未知工具名 `toolByName.get()` 返回 undefined，后续 `tool?.readonly` 已安全——**无需改**
+- `compact.mjs:185` `tc.function.name`：history 内 tool_calls 由 `agent.mjs:575` 构造（完整对象）——安全；顺手加 `tc.function?.name ?? tc.name` 守卫（一行，防御未来输入源变化）
+- `provider.mjs:182-188` 续跑合并：输入来自 parseStream 已过滤结果——安全，无需改
+
+**受影响文件**（本仓库；CLI 侧文件清单见 CLI `PROVIDER.md` §10）：
+- `src/provider/transports/openai.mjs`（parseStream + 收尾）
+- `src/agent.mjs`（droppedToolCalls 机读线告警注入）
+- `src/compact.mjs`（一行守卫，可选）
+- 修改 `test/provider.test.mjs`（已有 tool_calls 解析用例区追加）
+
+**关键决策**：过滤丢弃而非报错——畸形调用无法可靠执行（缺 name 无从路由），静默崩溃/空转更差；合成 id 而非复用 index——保证 `tool_call_id` 配对唯一性；两端同修（CLI parity 是既定纪律，sse.mjs 同病）。决策记录统一在 CLI `PROVIDER.md` §10。
+
+**测试用例表**（映射 F1/F2 + NF2）：
+
+| # | 输入 | 预期输出 | 对应需求 |
+|---|---|---|---|
+| T1 | `delta.tool_calls: [null, {index:0,id:"a",function:{name:"read"}}]` | 不抛异常；null 跳过计数 1；read 正常入列 | F2 |
+| T2 | 正常 tc 但无 `function`（`{index:0,id:"a"}`） | 丢弃该 slot（name 空），计数 1 | F2 |
+| T3 | tc 无 `index`：第一段 `{id:"call_1",function:{name:"read",arguments:"{\"a\":"}}`、第二段 `{function:{arguments:"1}"}}`（纯增量） | 按 id 归并 + 尾槽延续：单槽、arguments 拼接正确 | F2 |
+| T4 | tc 无 `id` | 收尾合成 `call_N`，与 tool 消息配对不 400 | F2 |
+| T5 | `function: null` 的 tc | 不抛异常，丢弃计数 | F2 |
+| T6 | `arguments` 为对象（非字符串） | JSON.stringify 追加，不产生 `[object Object]` | F2 防御 |
+| T7 | 混合负载：1 正常 + 2 畸形 | 正常执行；`droppedToolCalls=2`；机读线 1 条告警 | F1 |
+| T8 | 回归：现有 provider.test.mjs 的 tool_calls 解析用例全过 | 无破坏 | 范围边界 |

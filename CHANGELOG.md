@@ -1,4 +1,21 @@
 # Changelog
+## [0.1.42] — 2026-08-22
+
+### Fixed
+
+- **advisor 标签还原**：工具栏按钮 "GUARD" → "ADVISOR"（title/aria-label 同步），i18n `toolbar.guard` → `toolbar.advisor`
+- **i18n 占位符修复**：`advisor.round` 与 `settings.connOk` 由单括号 `{round}`/`{count}` 改为 `${round}`/`${count}`（`t()` 仅做 `${name}` 插值，此前原样显示 `{round}`）
+- **飞刀/会诊串块修复**：escalate/consult 流式块名加 per-invocation id（`#${subId}`/`#${id}`），第二次调用不再续接上一次建的块；consult 的 collapse 查找同步带 `#${sessionId}`
+
+### Refactor
+
+- **文件超限清零**：chat.js（1654→247）、settings.js（1079→87）、chat-panel.mjs（656→275）拆分为多模块，共享状态集中到 `webview/state.js`；agent.mjs 抽 `setup.mjs`
+- **SSE tool_calls 防御性合并**：openai transport + compact.mjs 与 CLI 对齐（PROVIDER.md §10）
+
+### Prompt
+
+- **确认纪律 carve-out**：system.md 补 doc/code 一致性例外（与 CLI 同步）
+
 ## [0.1.40] — 2026-08-21
 
 ### Fixed

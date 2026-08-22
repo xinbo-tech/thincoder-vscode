@@ -182,7 +182,7 @@ export async function compactHistory(history, systemPrompt, provider, explicitTh
   const serialized = oldMessages
     .map((m) => {
       let prefix = `[${m.role}]`
-      if (m.tool_calls) prefix += ` [called tools: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}]`
+      if (m.tool_calls) prefix += ` [called tools: ${m.tool_calls.map((tc) => tc.function?.name ?? tc.name).join(", ")}]`
       const cap = m.role === "user" ? 8000 : 2000
       // Multimodal messages (array content): extract the TEXT parts — the image itself
       // can't be summarized, but accompanying text must not be silently lost (CLI parity).

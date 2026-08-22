@@ -723,13 +723,16 @@ describe("prompt borrowing increments (kimi-code comparison)", () => {
 // ─── Pre-work plan confirmation discipline (2026-08-21) ───
 
 describe("pre-work plan confirmation discipline", () => {
-  it("system.md: no-exemption confirmation discipline — file-writing tool list + explicit confirmation gate", () => {
+  it("system.md: confirmation discipline — file-writing tool list + explicit gate + doc/code consistency carve-out", () => {
     const text = readFileSync(join(PROMPTS_DIR, "system.md"), "utf8")
     assert.ok(/write \/ edit \/ apply_patch \/ insert_after \/ delete \/ hashline_edit/.test(text), "file-writing tool list present")
-    assert.ok(/no exemptions/i.test(text), "no-exemption wording present")
+    assert.ok(text.includes("For the changes you propose, there are no exemptions"), "gate is exemption-free for proposed changes")
     assert.ok(text.includes("obvious enough to skip"), "self-exemption excuse explicitly blocked")
     assert.ok(text.includes("a new question from the user is not a confirmation"), "a new user question is not a confirmation")
     assert.ok(text.includes("Re-confirm when the requirement changes"), "re-confirm on requirement change present")
+    assert.ok(text.includes("outranks this gate"), "doc/code consistency carve-out present")
+    assert.ok(text.includes("standing obligations you already owe"), "carve-out covers existing obligations only")
+    assert.ok(text.includes("the user already confirmed"), "carve-out limited to already-confirmed work")
   })
 
   it("engineering.md: plan confirmation before writing docs (no exemptions)", () => {

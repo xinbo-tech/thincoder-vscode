@@ -22,3 +22,9 @@
 - [ ] §4 模型能力表补 thinkEnabledValue / noUsageStream（advisor #10）
 - [ ] advisor 子代理工具集补 lsp（原文档 T19 遗留）
 - [ ] 跨端文档漂移（2026-08-21 评审 advisory）：checkpoint 机制两端语义差异待明确（CLI v2 全量副本快照 vs VS Code git stash）、preset 计数 16/17、TUI 模块数 ~24/45、12 位旧 hash 改名侧未标注
+
+## Issue 批量（2026-08-22，来源：Gitee/GitHub issue 巡检）
+
+- [ ] GitHub thincoder#2 GLM 5.3 畸形 tool_calls 解析崩溃——需求层已入 `docs/design/ARCHITECTURE.md` 变更段
+- [ ] IK9UZ8 标题生成同修（扩展端 generate-title.mjs）——权威源 CLI `docs/design/SESSION.md` §7
+- [ ] 巡检登记：GitHub #1 embedding 三件套、IK9IXD 公式渲染、IK9UWM 中文粘贴——CLI 侧待办见 `thincoder/docs/TODO.md`

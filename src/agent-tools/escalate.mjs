@@ -111,7 +111,7 @@ export const escalateTool = {
 
     let output = ""
     const sink = {}
-    const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:escalate ${tag}`, chunk)
+    const panel = (chunk) => ctx.callbacks?.onToolPanel?.(`sub:escalate ${tag} #${subId}`, chunk)
 
     // No wall-clock watchdog — turn cap only (CLI parity, 2026-08-16): a fixed wall-clock
     // aborts NORMAL-but-slow surgery (two max-effort consultants hit a 10min wall just
