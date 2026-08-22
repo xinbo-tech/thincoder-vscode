@@ -3,7 +3,7 @@
  * Renders a directory tree (default depth 3), skipping dotfiles, build/vendor
  * dirs and binary files, so the model sees the structure without shelling out.
  */
-import { readdir } from "node:fs/promises"
+import { readdir, stat } from "node:fs/promises"
 import { join, basename, extname } from "node:path"
 import { resolvePath, truncate } from "./shared.mjs"
 
@@ -31,15 +31,20 @@ export const treeTool = {
   readonly: true,
   async execute({ path, depth }, ctx) {
     const root = path ? resolvePath(path, ctx.cwd) : ctx.cwd
-    const maxDepth = Math.min(Math.max(1, Math.floor(depth ?? DEFAULT_DEPTH)), 6)
+    let st
+    try { st = await stat(root) } catch { return `Error: directory not found: ${path ?? "."}` }
+    if (!st.isDirectory()) return `Error: not a directory: ${path ?? "."}`
+    const d = Number(depth)
+    const maxDepth = Number.isInteger(d) && d > 0 ? Math.min(d, 6) : DEFAULT_DEPTH
     const lines = [basename(root) + "/"]
-    const state = { count: 1 }
+    const state = { count: 1, capped: false }
     await walk(root, 0, maxDepth, "", lines, state)
     return truncate(lines.join("\n"))
   },
 }
 
 async function walk(dir, depth, maxDepth, prefix, lines, state) {
+  if (state.capped) return
   let entries
   try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
   const items = []
@@ -52,7 +57,8 @@ async function walk(dir, depth, maxDepth, prefix, lines, state) {
   items.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
 
   for (let i = 0; i < items.length; i++) {
-    if (state.count >= MAX_ENTRIES) { lines.push(prefix + "…（更多项已省略）"); return }
+    if (state.capped) return
+    if (state.count >= MAX_ENTRIES) { state.capped = true; lines.push(prefix + "…（更多项已省略）"); return }
     const { name, isDir } = items[i]
     const isLast = i === items.length - 1
     lines.push(prefix + (isLast ? "└── " : "├── ") + (isDir ? name + "/" : name))

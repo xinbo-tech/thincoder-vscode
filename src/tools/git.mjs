@@ -123,7 +123,8 @@ export const gitTool = {
         return truncate(applyFilter(parts.join("\n\n")))
       }
       case "log": {
-        const n = Math.min(Math.max(1, args.count ?? 10), 200)
+        const parsed = Number.parseInt(args.count, 10)
+        const n = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 200) : 10
         const isOneline = args.oneline
         const cmdArgs = isOneline
           ? ["log", "-" + n, "--oneline"]

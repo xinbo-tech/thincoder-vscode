@@ -6,7 +6,7 @@ import { readFile, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import { join } from "node:path"
-import { resolvePath, formatSize, getOpenDoc, applyEditorRangeEdit, refreshMarkdownPreview } from "./shared.mjs"
+import { resolvePath, formatSize, getOpenDoc, applyEditorEdit, applyEditorRangeEdit, refreshMarkdownPreview } from "./shared.mjs"
 
 export const insertAfterTool = {
   name: "insert_after",
@@ -174,21 +174,25 @@ export const applyPatchTool = {
     const results = []
     for (const f of files) {
       const abs = resolvePath(f.path, ctx.cwd)
-      const dirtyErr = getOpenDoc(abs)?.isDirty ? `File has unsaved changes in the editor: ${abs}. Save or discard first.` : null
-      if (dirtyErr) return `Error: ${dirtyErr}`
+      const doc = getOpenDoc(abs)
+      if (doc?.isDirty) return `Error: File has unsaved changes in the editor: ${abs}. Save or discard first.`
       let content
       if (f.isNew) {
-        if (existsSync(abs)) throw new Error(`Cannot create ${f.path}: file already exists`)
+        if (existsSync(abs)) return `Error: Cannot create ${f.path}: file already exists`
         content = f.hunks.flatMap((h) => h.ops.filter((o) => o.type === "+").map((o) => o.text)).join("\n") + "\n"
       } else {
-        const raw = getOpenDoc(abs)?.getText() ?? await readFile(abs, "utf8").catch(() => { throw new Error(`File not found: ${f.path}`) })
+        let raw = doc ? doc.getText() : null
+        if (raw === null) {
+          raw = await readFile(abs, "utf8").catch(() => null)
+          if (raw === null) return `Error: File not found: ${f.path}`
+        }
         const eol = raw.includes("\r\n") ? "\r\n" : "\n"
         const lines = raw.split("\n")
         applyHunks(lines, f.hunks, eol, f.path)
         content = lines.join("\n")
       }
-      await writeFile(abs, content, "utf8")
-      refreshMarkdownPreview(abs)
+      if (doc) await applyEditorEdit(doc, content)
+      else { await writeFile(abs, content, "utf8"); refreshMarkdownPreview(abs) }
       results.push(`Patched ${f.path} (${f.isNew ? "created" : "modified"})`)
     }
     return results.join("\n") || "No files patched"
@@ -254,7 +258,7 @@ export const deleteTool = {
       filePath: { type: "string", description: "Alias for path" },
       force: { type: "boolean", description: "Force delete git-tracked files" },
     },
-    required: ["path"],
+    required: [],
   },
   async execute({ path, force, filePath }, ctx) {
     path = path || filePath
