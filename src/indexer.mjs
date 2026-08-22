@@ -11,16 +11,14 @@
  *   memory — one chunk per file
  */
 
-import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync } from "node:fs"
-import { join, relative } from "node:path"
+import { readFileSync, writeFileSync, statSync, mkdirSync, existsSync } from "node:fs"
+import { join } from "node:path"
 import { execSync } from "node:child_process"
 import { embed, cosine } from "./embedding.mjs"
 import { encodeVectors, decodeVectors } from "./index-bin.mjs"
+import { discoverFiles, kindFor } from "./index-discover.mjs"
 
 const INDEX_DIR = ".thincoder/index"
-const CODE_EXTS = new Set([".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".h", ".hpp"])
-const DOC_EXTS = new Set([".md", ".markdown", ".txt", ".rst", ".adoc"])
-const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".turbo", "coverage", "__pycache__", ".next"])
 const CHUNK_LINES_CODE = 30
 const CHUNK_LINES_DOC = 20
 const CHUNK_OVERLAP = 3
@@ -118,25 +116,30 @@ export function loadIndexManifest(cwd) {
 export function loadIndex(cwd) {
   const manifest = loadIndexManifest(cwd)
   if (!manifest) return null
-  const { dim, vectors } = decodeVectors(readFileSync(join(cwd, INDEX_DIR, "vectors.bin")))
-  return { manifest, dim, vectors }
+  try {
+    const { dim, vectors } = decodeVectors(readFileSync(join(cwd, INDEX_DIR, "vectors.bin")))
+    return { manifest, dim, vectors }
+  } catch {
+    // corrupt/truncated vectors.bin — treat like a missing index (caller rebuilds)
+    return null
+  }
 }
 
 /**
  * Check if index needs rebuild (new commit or missing index).
  */
 export function needsRebuild(cwd) {
-  const idx = loadIndex(cwd)
-  if (!idx) return { needed: true, reason: "no-index" }
+  const manifest = loadIndexManifest(cwd)
+  if (!manifest) return { needed: true, reason: "no-index" }
 
   let head = null
   try { head = execSync("git rev-parse HEAD", { cwd, encoding: "utf8", timeout: 5000 }).trim() } catch {}
-  if (head && idx.manifest.indexed_commit !== head) {
-    return { needed: true, reason: "new-commits", head, indexed: idx.manifest.indexed_commit }
+  if (head && manifest.indexed_commit !== head) {
+    return { needed: true, reason: "new-commits", head, indexed: manifest.indexed_commit }
   }
   // File-set drift (added/removed) — the per-file mtime loop below can't see NEW files
   // (they aren't in the manifest), so compare the current discovery set against keys.
-  const indexed = new Set(Object.keys(idx.manifest.files ?? {}))
+  const indexed = new Set(Object.keys(manifest.files ?? {}))
   const discovered = new Set(discoverFiles(cwd))
   for (const f of discovered) if (!indexed.has(f)) return { needed: true, reason: "file-added", file: f }
   for (const f of indexed) if (!discovered.has(f)) return { needed: true, reason: "file-removed", file: f }
@@ -144,7 +147,7 @@ export function needsRebuild(cwd) {
   // Uncommitted edits: per-file mtime (truncated to ms — coarse/抖动 timestamps don't
   // trip a spurious "needs rebuild" prompt).
   for (const relPath of indexed) {
-    const info = idx.manifest.files[relPath]
+    const info = manifest.files[relPath]
     if (Math.trunc(statSync(join(cwd, relPath)).mtimeMs) !== Math.trunc(info.mtime)) {
       return { needed: true, reason: "file-changes", file: relPath }
     }
@@ -161,7 +164,7 @@ export function needsRebuild(cwd) {
  */
 export async function searchIndex(cwd, embedder, query, { kind, limit = 10, signal } = {}) {
   const idx = loadIndex(cwd)
-  if (!idx) return []
+  if (!idx || idx.vectors.length === 0) return []
 
   // Embed query
   const [qvec] = await embed(embedder, [query.slice(0, MAX_CHUNK_TEXT)], { signal })
@@ -198,39 +201,6 @@ export async function searchIndex(cwd, embedder, query, { kind, limit = 10, sign
   return results
 }
 
-// ─── Internal: file discovery ──────────────────────────────────
-
-function discoverFiles(cwd, signal) {
-  const files = []
-  function walk(dir) {
-    let entries
-    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
-    for (const e of entries) {
-      signal?.throwIfAborted()
-      if (e.isDirectory()) {
-        if (SKIP_DIRS.has(e.name) || e.name.startsWith(".")) continue
-        walk(join(dir, e.name))
-      } else if (e.isFile()) {
-        const ext = e.name.includes(".") ? e.name.slice(e.name.lastIndexOf(".")).toLowerCase() : ""
-        if (CODE_EXTS.has(ext) || DOC_EXTS.has(ext)) {
-          files.push(relative(cwd, join(dir, e.name)).replaceAll("\\", "/"))
-        }
-      }
-    }
-  }
-  walk(cwd)
-  return files
-}
-
-function kindFor(filePath) {
-  const ext = filePath.includes(".") ? filePath.slice(filePath.lastIndexOf(".")).toLowerCase() : ""
-  if (CODE_EXTS.has(ext)) return "code"
-  if (DOC_EXTS.has(ext)) return "doc"
-  // memory files live in .thincoder/memory/
-  if (filePath.startsWith(".thincoder/memory/")) return "memory"
-  return "doc"
-}
-
 // ─── Internal: chunking ────────────────────────────────────────
 
 function chunkFile(cwd, relPath) {
@@ -262,11 +232,11 @@ function chunkCode(lines) {
         break
       }
     }
-    const startLine = i + 1
-    if (end > i) {
-      const chunkLines = lines.slice(i, end)
-      chunks.push({ startLine, endLine: end, text: chunkLines.join("\n") })
-    }
+    // A boundary keyword exactly at the window start (near EOF) would otherwise drop that
+    // line — force at least one line into the chunk.
+    if (end <= i) end = i + 1
+    const chunkLines = lines.slice(i, end)
+    chunks.push({ startLine: i + 1, endLine: end, text: chunkLines.join("\n") })
     i = Math.max(i + 1, end - CHUNK_OVERLAP)
   }
   return chunks

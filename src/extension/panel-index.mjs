@@ -69,13 +69,14 @@ export async function resolveEmbedder(_panel) {
 
 export async function saveEmbeddingConfig(panel, { apiKey }) {
     if (apiKey) {
-      saveEmbeddingConfigToFile({
-        apiKey,
-        baseURL: "https://api.siliconflow.cn/v1",
-        model: "BAAI/bge-m3",
-      })
+      // Preserve an existing custom embedding endpoint/model (e.g. local Ollama); only
+      // default to SiliconFlow when nothing is configured yet.
+      const existing = loadEmbeddingConfig() ?? {}
+      const baseURL = existing.baseURL || "https://api.siliconflow.cn/v1"
+      const model = existing.model || "BAAI/bge-m3"
+      saveEmbeddingConfigToFile({ apiKey, baseURL, model })
       resetEmbedder()
-      setVSCodeEmbedder({ baseURL: "https://api.siliconflow.cn/v1", model: "BAAI/bge-m3", apiKey })
+      setVSCodeEmbedder({ baseURL, model, apiKey })
     } else {
       // Delete key — remove from shared config.json and reset the cached embedder
       saveEmbeddingConfigToFile({ apiKey: "" })
