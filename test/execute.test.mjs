@@ -148,3 +148,39 @@ describe("execute — error handling and limits", () => {
     assert(out.includes("File not found"))
   })
 })
+
+describe("execute — async / import / console / workdir / filter", () => {
+  before(() => {
+    writeFileSync(join(tmpDir, "mod.mjs"), 'export const name = "mod"; export default 7\n')
+  })
+
+  it("supports top-level await + dynamic import() of project ESM", async () => {
+    const out = await run('const m = await import("./mod.mjs"); log(m.name, m.default)')
+    assert.equal(out, "mod 7")
+  })
+
+  it("console.log writes to output", async () => {
+    const out = await run('console.log("c1", 2)')
+    assert.equal(out, "c1 2")
+  })
+
+  it("throws sync errors and surfaces them via stderr", async () => {
+    const out = await run('throw new Error("sync-boom")')
+    assert(out.includes("Error: sync-boom"))
+  })
+
+  it("workdir runs in a subdirectory", async () => {
+    const out = await run('log(readFile("b.js").trim())', { workdir: "sub" })
+    assert.equal(out, "export const x = 1")
+  })
+
+  it("workdir escaping the workspace is rejected", async () => {
+    const out = await run('log("x")', { workdir: ".." })
+    assert(out.includes("escapes the workspace"))
+  })
+
+  it("filter keeps only matching output lines", async () => {
+    const out = await run('log("alpha")\nlog("beta")\nlog("gamma")', { filter: "beta" })
+    assert.equal(out, "beta")
+  })
+})
