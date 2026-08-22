@@ -3,7 +3,7 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises"
-import { execSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
 import { join } from "node:path"
 import { resolvePath, formatSize, getOpenDoc, applyEditorRangeEdit, refreshMarkdownPreview } from "./shared.mjs"
 
@@ -191,15 +191,15 @@ export const lsTool = {
     const filterRe = filter ? wildcardToRegex(filter) : null
     try {
       const entries = await readdir(dir, { withFileTypes: true })
+      const matched = filterRe ? entries.filter((e) => filterRe.test(e.name)) : entries
       const items = []
-      for (const e of entries.slice(0, 500)) {
-        if (filterRe && !filterRe.test(e.name)) continue
+      for (const e of matched.slice(0, 500)) {
         const full = join(dir, e.name)
         let size = ""
         try { const s = await fsStat(full); size = s.isDirectory() ? "" : ` (${formatSize(s.size)})` } catch { /* */ }
         items.push(`${e.isDirectory() ? "d" : " "} ${e.name}${size}`)
       }
-      if (entries.length > 500) items.push(`... (${entries.length - 500} more entries)`)
+      if (matched.length > 500) items.push(`... (${matched.length - 500} more entries)`)
       return items.join("\n") || "(empty directory)"
     } catch (e) {
       return `ls error: ${e.message}`
@@ -236,10 +236,10 @@ export const deleteTool = {
     if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
     const abs = resolvePath(path, ctx.cwd)
     const { unlink } = await import("node:fs/promises")
-    // Check if git-tracked — normalize to forward slashes for git (Windows compat)
-    const gitPath = abs.replace(/\\/g, "/")
+    // Check if git-tracked — execFileSync (array args, no shell) so a path with
+    // shell metacharacters can't inject.
     try {
-      execSync(`git ls-files --error-unmatch "${gitPath}"`, { cwd: ctx.cwd, encoding: "utf8", timeout: 5000, stdio: "pipe" })
+      execFileSync("git", ["ls-files", "--error-unmatch", abs.replace(/\\/g, "/")], { cwd: ctx.cwd, encoding: "utf8", timeout: 5000, stdio: "pipe" })
       if (!force) return `Error: ${path} is git-tracked. Set force=true to delete anyway.`
     } catch { /* not git-tracked or not a git repo */ }
     await unlink(abs)
