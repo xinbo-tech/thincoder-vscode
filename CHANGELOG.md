@@ -1,4 +1,9 @@
 # Changelog
+
+All notable changes to ThinCoder VS Code are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
 ## [0.1.42] — 2026-08-22
 
 ### Fixed
@@ -15,6 +20,16 @@
 ### Prompt
 
 - **确认纪律 carve-out**：system.md 补 doc/code 一致性例外（与 CLI 同步）
+
+## [0.1.41] — 2026-08-22
+
+### Fixed
+
+- **subagent 活动流唯一块**：同一 turn 多次调用同一角色时，后续调用的活动流不再续接第一个块（panel 通道名 `sub:${role}` → `sub:${role}#${subId}`）；eng-coder 块补 token/reasoning 流式输出
+
+### Docs & advisor
+
+- **文档归属纪律 + advisor 设计评审增强**（doc map、design 提示词硬加载、citation rules）
 
 ## [0.1.40] — 2026-08-21
 
@@ -71,6 +86,15 @@
 
 - **question 工具 options 防御** — LLM 误传对象（{label,description}）时取 label/text/title 字段兜底，不再渲染成 [object Object]（panel 内联卡 + QuickPick 回退两处）
 
+
+## [0.1.34] — 2026-08-17
+
+### Changed
+
+- **撞轮数墙可无限继续**：主 agent 改循环（修第二次撞墙静默异常）+ subagent/飞刀/会诊统一弹继续提示（unlimited，resume 保留 history，会诊继续重置墙钟）
+- **MiMo 预置 provider**：按量付费(api.xiaomimimo.com/v1) + Token Plan(token-plan-cn.xiaomimimo.com/v1)，mimo-v2.5-pro/mimo-v2.5 规格
+- **多根工作区「当前项目」切换**：会话栏 📁 按钮 + QuickPick 选择工作区根，会话/索引/@补全/agent cwd 全跟随，可选跟随活动文件，运行中禁止切换
+- **环境变量配置源彻底移除**：resolveProviders/resolveKey 不再读 THINCODER_* 环境变量，config.json 唯一配置源
 
 ## [0.1.33] — 2026-08-17
 
@@ -248,9 +272,6 @@
 - Consult/advisor effort dropdowns missing on panel open (the enum depended on network-probe timing)
 
 
-All notable changes to ThinCoder VS Code are documented here.
-
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.1.19] — 2026-08-15
 
 ### Added

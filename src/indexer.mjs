@@ -32,9 +32,9 @@ const MAX_CHUNK_TEXT = 2000
  * Build or rebuild the full vector index.
  * @param {string} cwd - project root
  * @param {object} embedder - from createEmbedder()
- * @param {{ onProgress?: (p: {phase:string, done:number, total:number}) => void }} opts
+ * @param {{ onProgress?: (p: {phase:string, done:number, total:number}) => void, signal?: AbortSignal }} opts
  */
-export async function buildIndex(cwd, embedder, { onProgress } = {}) {
+export async function buildIndex(cwd, embedder, { onProgress, signal } = {}) {
   const indexDir = join(cwd, INDEX_DIR)
   mkdirSync(indexDir, { recursive: true })
 
@@ -54,8 +54,9 @@ export async function buildIndex(cwd, embedder, { onProgress } = {}) {
   const texts = allChunks.map((c) => c.text.slice(0, MAX_CHUNK_TEXT))
   const allVectors = []
   for (let i = 0; i < texts.length; i += EMBED_BATCH) {
+    if (signal?.aborted) signal.throwIfAborted()
     const batch = texts.slice(i, i + EMBED_BATCH)
-    const vecs = await embed(embedder, batch)
+    const vecs = await embed(embedder, batch, { signal })
     allVectors.push(...vecs)
     onProgress?.({ phase: "embed", done: Math.min(i + EMBED_BATCH, texts.length), total: texts.length })
   }

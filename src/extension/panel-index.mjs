@@ -4,6 +4,7 @@
  * instance as `panel`.
  */
 import * as vscode from "vscode"
+import { relative } from "node:path"
 import { getEmbedder as getSharedEmbedder, setVSCodeEmbedder, resetEmbedder } from "../embed-config.mjs"
 import { loadEmbeddingConfig, saveEmbeddingConfig as saveEmbeddingConfigToFile } from "../config-io.mjs"
 import { buildIndex as runBuildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../indexer.mjs"
@@ -39,8 +40,9 @@ export async function atComplete(panel, query, cwd) {
         20,
       )
       const matches = uris.slice(0, 20).map((u) => {
-        const abs = u.fsPath
-        const rel = abs.slice(base.length + 1).replace(/\\/g, "/")
+        // path.relative (not slice) — multi-root workspaces can resolve files OUTSIDE
+        // `base`, where slice would corrupt the prefix; cross-drive returns the abs path.
+        const rel = relative(base, u.fsPath).replace(/\\/g, "/")
         const parts = rel.split("/")
         return { name: parts[parts.length - 1], path: rel }
       })
@@ -118,6 +120,8 @@ export async function buildIndex(panel) {
       title: "Building search index...",
       cancellable: true,
     }, async (progress, token) => {
+      const ctrl = new AbortController()
+      const sub = token.onCancellationRequested(() => ctrl.abort())
       try {
         const result = await runBuildIndex(cwd, embedder, {
           onProgress: (p) => {
@@ -127,6 +131,7 @@ export async function buildIndex(panel) {
               progress.report({ message: "Done", increment: 100 })
             }
           },
+          signal: ctrl.signal,
         })
         vscode.window.showInformationMessage(
           `Index built: ${result.files} files, ${result.chunks} chunks. Semantic search is now active.`
@@ -137,6 +142,8 @@ export async function buildIndex(panel) {
         } else {
           vscode.window.showErrorMessage(`Index build failed: ${e.message}`)
         }
+      } finally {
+        sub.dispose()
       }
     })
     // The panel set "Building…" + disabled the button — refresh its index status
