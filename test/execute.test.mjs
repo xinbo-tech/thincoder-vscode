@@ -183,4 +183,14 @@ describe("execute — async / import / console / workdir / filter", () => {
     const out = await run('log("alpha")\nlog("beta")\nlog("gamma")', { filter: "beta" })
     assert.equal(out, "beta")
   })
+
+  it("filter never swallows an error", async () => {
+    const out = await run('throw new Error("boom")', { filter: "zzz-no-match" })
+    assert(out.includes("Error: boom"))
+  })
+
+  it("non-numeric / zero timeoutMs falls back to default", async () => {
+    assert.equal(await run('log("fast")', { timeoutMs: "abc" }), "fast")
+    assert.equal(await run('log("fast2")', { timeoutMs: 0 }), "fast2")
+  })
 })
