@@ -5,6 +5,7 @@
  */
 
 import * as vscode from "vscode"
+import { relative } from "node:path"
 import { getEmbedder } from "../embed-config.mjs"
 import { searchIndex, loadIndexManifest } from "../indexer.mjs"
 
@@ -71,7 +72,7 @@ export const codeSearchTool = {
 
       for (const uri of uris) {
         if (results.length >= maxResults) break
-        const relPath = uri.fsPath.slice(ctx.cwd.length + 1).replace(/\\/g, "/")
+        const relPath = relative(ctx.cwd, uri.fsPath).replace(/\\/g, "/")
         try {
           const raw = await vscode.workspace.fs.readFile(uri)
           const text = new TextDecoder().decode(raw)
@@ -138,7 +139,7 @@ export const docSearchTool = {
 
       for (const uri of uris) {
         if (results.length >= maxResults) break
-        const relPath = uri.fsPath.slice(ctx.cwd.length + 1).replace(/\\/g, "/")
+        const relPath = relative(ctx.cwd, uri.fsPath).replace(/\\/g, "/")
         try {
           const raw = await vscode.workspace.fs.readFile(uri)
           const text = new TextDecoder().decode(raw)

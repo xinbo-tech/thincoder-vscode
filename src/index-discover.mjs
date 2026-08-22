@@ -48,3 +48,14 @@ export function kindFor(filePath) {
   if (DOC_EXTS.has(ext)) return "doc"
   return "doc"
 }
+
+export function listMemoryFiles(cwd) {
+  const memDir = join(cwd, ".thincoder/memory")
+  try {
+    return readdirSync(memDir, { withFileTypes: true })
+      .filter((e) => e.isFile())
+      .map((e) => ".thincoder/memory/" + e.name)
+  } catch {
+    return []
+  }
+}

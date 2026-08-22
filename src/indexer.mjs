@@ -16,7 +16,7 @@ import { join } from "node:path"
 import { execSync } from "node:child_process"
 import { embed, cosine } from "./embedding.mjs"
 import { encodeVectors, decodeVectors } from "./index-bin.mjs"
-import { discoverFiles, kindFor, isIndexableFile } from "./index-discover.mjs"
+import { discoverFiles, kindFor, isIndexableFile, listMemoryFiles } from "./index-discover.mjs"
 
 const INDEX_DIR = ".thincoder/index"
 const CHUNK_LINES_CODE = 30
@@ -167,6 +167,18 @@ export function needsRebuild(cwd) {
   if (dirty) {
     for (const rel of dirty) if (indexed.has(rel)) return { needed: true, reason: "file-changed", file: rel }
     for (const rel of dirty) if (isIndexableFile(rel)) return { needed: true, reason: "file-added", file: rel }
+    // Memory files under .thincoder/memory/ may be gitignored, so `git status` never reports
+    // them — check that one (small) directory directly so they still trigger a rebuild.
+    const mem = new Set(listMemoryFiles(cwd))
+    for (const f of mem) if (!indexed.has(f)) return { needed: true, reason: "file-added", file: f }
+    for (const f of indexed) {
+      if (!f.startsWith(".thincoder/memory/")) continue
+      if (!mem.has(f)) return { needed: true, reason: "file-removed", file: f }
+      let cur = -1
+      try { cur = Math.trunc(statSync(join(cwd, f)).mtimeMs) } catch {}
+      if (cur < 0) return { needed: true, reason: "file-missing", file: f }
+      if (cur !== Math.trunc(manifest.files[f].mtime)) return { needed: true, reason: "file-changed", file: f }
+    }
     return { needed: false, reason: "up-to-date" }
   }
 
