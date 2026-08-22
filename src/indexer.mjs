@@ -167,8 +167,20 @@ export function needsRebuild(cwd) {
   } catch {}
 
   if (dirty) {
-    for (const rel of dirty) if (indexed.has(rel)) return { needed: true, reason: "file-changed", file: rel }
-    for (const rel of dirty) if (shouldIndexFile(rel)) return { needed: true, reason: "file-added", file: rel }
+    for (const rel of dirty) {
+      if (indexed.has(rel)) {
+        // "dirty" means "differs from HEAD", which stays true across a rebuild — the correct
+        // baseline is the manifest mtime. A vanished file → file-removed.
+        let cur = -1
+        try { cur = Math.trunc(statSync(join(cwd, rel)).mtimeMs) } catch {}
+        if (cur < 0) return { needed: true, reason: "file-removed", file: rel }
+        if (cur !== Math.trunc(manifest.files[rel]?.mtime)) return { needed: true, reason: "file-changed", file: rel }
+        continue
+      }
+      // Not in the manifest: a genuinely new file (only if it still exists and is indexable —
+      // otherwise it's a deleted/renamed-away path that must not read as "added").
+      if (shouldIndexFile(rel) && existsSync(join(cwd, rel))) return { needed: true, reason: "file-added", file: rel }
+    }
     // Memory files under .thincoder/memory/ may be gitignored, so `git status` never reports
     // them — check that one (small) directory directly so they still trigger a rebuild.
     const mem = new Set(listMemoryFiles(cwd))
@@ -284,7 +296,7 @@ function chunkCode(lines) {
     if (end <= i) end = i + 1
     const chunkLines = lines.slice(i, end)
     chunks.push({ startLine: i + 1, endLine: end, text: chunkLines.join("\n") })
-    i = Math.max(i + 1, end - CHUNK_OVERLAP)
+    i = end >= lines.length ? lines.length : Math.max(i + 1, end - CHUNK_OVERLAP)
   }
   return chunks
 }
