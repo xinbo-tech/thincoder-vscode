@@ -56,7 +56,7 @@ export async function buildIndex(cwd, embedder, { onProgress, signal } = {}) {
   const texts = allChunks.map((c) => c.text.slice(0, MAX_CHUNK_TEXT))
   const allVectors = []
   for (let i = 0; i < texts.length; i += EMBED_BATCH) {
-    if (signal?.aborted) signal.throwIfAborted()
+    signal?.throwIfAborted()
     const batch = texts.slice(i, i + EMBED_BATCH)
     const vecs = await embed(embedder, batch, { signal })
     allVectors.push(...vecs)
@@ -92,25 +92,33 @@ export async function buildIndex(cwd, embedder, { onProgress, signal } = {}) {
     files: fileMap,
   }
 
-  // 6) Write files
-  writeFileSync(join(indexDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8")
+  // 6) Write files — vectors first, manifest last: the manifest is the commit point, so a
+  //    reader that sees a fresh manifest is guaranteed the vectors were fully written.
   writeFileSync(join(indexDir, "vectors.bin"), encodeVectors(dim, allVectors))
+  writeFileSync(join(indexDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8")
 
   onProgress?.({ phase: "done", done: allChunks.length, total: allChunks.length })
   return { files: files.length, chunks: allChunks.length }
 }
 
 /**
+ * Load just the manifest (skips the vectors decode — cheap existence/status check).
+ * Returns null if the index is missing or incomplete.
+ */
+export function loadIndexManifest(cwd) {
+  const indexDir = join(cwd, INDEX_DIR)
+  const mfPath = join(indexDir, "manifest.json")
+  if (!existsSync(mfPath) || !existsSync(join(indexDir, "vectors.bin"))) return null
+  try { return JSON.parse(readFileSync(mfPath, "utf8")) } catch { return null }
+}
+
+/**
  * Load index from disk. Returns null if no index exists.
  */
 export function loadIndex(cwd) {
-  const indexDir = join(cwd, INDEX_DIR)
-  const mfPath = join(indexDir, "manifest.json")
-  const vPath = join(indexDir, "vectors.bin")
-  if (!existsSync(mfPath) || !existsSync(vPath)) return null
-
-  const manifest = JSON.parse(readFileSync(mfPath, "utf8"))
-  const { dim, vectors } = decodeVectors(readFileSync(vPath))
+  const manifest = loadIndexManifest(cwd)
+  if (!manifest) return null
+  const { dim, vectors } = decodeVectors(readFileSync(join(cwd, INDEX_DIR, "vectors.bin")))
   return { manifest, dim, vectors }
 }
 
@@ -126,15 +134,19 @@ export function needsRebuild(cwd) {
   if (head && idx.manifest.indexed_commit !== head) {
     return { needed: true, reason: "new-commits", head, indexed: idx.manifest.indexed_commit }
   }
-  // Uncommitted edits: compare per-file mtime so search never serves stale line ranges
-  // against freshly-edited files (snippet text is re-read live, line spans are not).
-  for (const [relPath, info] of Object.entries(idx.manifest.files ?? {})) {
-    try {
-      if (statSync(join(cwd, relPath)).mtimeMs !== info.mtime) {
-        return { needed: true, reason: "file-changes", file: relPath }
-      }
-    } catch {
-      return { needed: true, reason: "file-missing", file: relPath }
+  // File-set drift (added/removed) — the per-file mtime loop below can't see NEW files
+  // (they aren't in the manifest), so compare the current discovery set against keys.
+  const indexed = new Set(Object.keys(idx.manifest.files ?? {}))
+  const discovered = new Set(discoverFiles(cwd))
+  for (const f of discovered) if (!indexed.has(f)) return { needed: true, reason: "file-added", file: f }
+  for (const f of indexed) if (!discovered.has(f)) return { needed: true, reason: "file-removed", file: f }
+
+  // Uncommitted edits: per-file mtime (truncated to ms — coarse/抖动 timestamps don't
+  // trip a spurious "needs rebuild" prompt).
+  for (const relPath of indexed) {
+    const info = idx.manifest.files[relPath]
+    if (Math.trunc(statSync(join(cwd, relPath)).mtimeMs) !== Math.trunc(info.mtime)) {
+      return { needed: true, reason: "file-changes", file: relPath }
     }
   }
   return { needed: false, reason: "up-to-date" }
@@ -251,8 +263,10 @@ function chunkCode(lines) {
       }
     }
     const startLine = i + 1
-    const chunkLines = lines.slice(i, end)
-    chunks.push({ startLine, endLine: end, text: chunkLines.join("\n") })
+    if (end > i) {
+      const chunkLines = lines.slice(i, end)
+      chunks.push({ startLine, endLine: end, text: chunkLines.join("\n") })
+    }
     i = Math.max(i + 1, end - CHUNK_OVERLAP)
   }
   return chunks

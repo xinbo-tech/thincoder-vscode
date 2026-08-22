@@ -7,7 +7,7 @@ import * as vscode from "vscode"
 import { relative } from "node:path"
 import { getEmbedder as getSharedEmbedder, setVSCodeEmbedder, resetEmbedder } from "../embed-config.mjs"
 import { loadEmbeddingConfig, saveEmbeddingConfig as saveEmbeddingConfigToFile } from "../config-io.mjs"
-import { buildIndex as runBuildIndex, needsRebuild, loadIndex as loadVectorIndex } from "../indexer.mjs"
+import { buildIndex as runBuildIndex, needsRebuild, loadIndexManifest } from "../indexer.mjs"
 import { _cwd } from "./panel-messages.mjs"
 
 export function pushIndexStatus(panel) {
@@ -17,10 +17,10 @@ export function pushIndexStatus(panel) {
     let status = null
     if (embedder) {
       try {
-        const idx = loadVectorIndex(cwd)
-        if (idx) {
-          const files = Object.keys(idx.manifest.files).length
-          const chunks = Object.values(idx.manifest.files).reduce((sum, f) => sum + f.chunks.length, 0)
+        const manifest = loadIndexManifest(cwd)
+        if (manifest) {
+          const files = Object.keys(manifest.files).length
+          const chunks = Object.values(manifest.files).reduce((sum, f) => sum + f.chunks.length, 0)
           status = { built: true, files, chunks }
         } else {
           status = { built: false }
@@ -63,7 +63,6 @@ export async function resolveEmbedder(_panel) {
     const emb = loadEmbeddingConfig()
     if (emb?.apiKey && emb.baseURL && emb.model) {
       setVSCodeEmbedder(emb)
-      return getSharedEmbedder()
     }
     return getSharedEmbedder()
   }
