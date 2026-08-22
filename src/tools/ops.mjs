@@ -4,8 +4,7 @@
  * for the same operation (parity with thinworker's programming tool set).
  */
 import { cp, rename, rm } from "node:fs/promises"
-import { execFileSync } from "node:child_process"
-import { resolvePath, truncate } from "./shared.mjs"
+import { resolvePath, truncate, runInterruptible } from "./shared.mjs"
 
 // ─── file_ops ──────────────────────────────────────────────────
 
@@ -71,7 +70,7 @@ export const processTool = {
     const filter = typeof name === "string" && name.trim() ? name.trim().toLowerCase() : null
     let rows
     try {
-      rows = process.platform === "win32" ? listWindows() : listPosix()
+      rows = process.platform === "win32" ? await listWindows(ctx?.signal) : await listPosix(ctx?.signal)
     } catch (e) {
       return `process listing failed: ${e?.message ?? String(e)}`
     }
@@ -81,8 +80,9 @@ export const processTool = {
   },
 }
 
-function listWindows() {
-  const out = execFileSync("tasklist", ["/FO", "CSV", "/NH"], { encoding: "utf8", timeout: 10000 })
+async function listWindows(signal) {
+  // non-blocking (runInterruptible) — execFileSync would freeze the extension host
+  const out = await runInterruptible("tasklist", ["/FO", "CSV", "/NH"], { timeout: 10000, signal })
   const rows = []
   for (const line of out.split("\n")) {
     const parts = line.split('","')
@@ -96,8 +96,8 @@ function listWindows() {
   return rows
 }
 
-function listPosix() {
-  const out = execFileSync("ps", ["-eo", "pid=,comm="], { encoding: "utf8", timeout: 10000 })
+async function listPosix(signal) {
+  const out = await runInterruptible("ps", ["-eo", "pid=,comm="], { timeout: 10000, signal })
   const rows = []
   for (const line of out.split("\n")) {
     const m = line.trim().match(/^(\d+)\s+(.+)$/)
@@ -117,7 +117,8 @@ export const getCurrentTimeTool = {
   async execute() {
     const now = new Date()
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "unknown"
-    return `Date: ${now.toISOString()} (UTC)\nTimezone: ${tz}\nLocal: ${now.toLocaleString()}`
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    return `Date: ${now.toISOString()} (UTC)\nTimezone: ${tz}\nWeekday: ${days[now.getDay()]}\nLocal: ${now.toLocaleString()}`
   },
 }
 
@@ -140,7 +141,8 @@ export const sleepTool = {
   },
   readonly: true,
   async execute({ seconds, reason }, ctx) {
-    const n = Math.min(Math.max(Math.round(seconds ?? 1), 1), 300)
+    const raw = Number(seconds)
+    const n = Number.isFinite(raw) ? Math.min(Math.max(Math.round(raw), 1), 300) : 1
     await new Promise((resolve, reject) => {
       const t = setTimeout(resolve, n * 1000)
       if (ctx?.signal) {
