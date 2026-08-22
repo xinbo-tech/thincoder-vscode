@@ -28,3 +28,12 @@
 - [ ] GitHub thincoder#2 GLM 5.3 畸形 tool_calls 解析崩溃——需求层已入 `docs/design/ARCHITECTURE.md` 变更段
 - [ ] IK9UZ8 标题生成同修（扩展端 generate-title.mjs）——权威源 CLI `docs/design/SESSION.md` §7
 - [ ] 巡检登记：GitHub #1 embedding 三件套、IK9IXD 公式渲染、IK9UWM 中文粘贴——CLI 侧待办见 `thincoder/docs/TODO.md`
+## 语义索引 needsRebuild 的 git 快路径盲区（2026-08-23 六轮 advisor 收敛后暂缓，来源：indexer.mjs 评审）
+
+- [ ] git 快路径 gitignore 盲区：`discoverFiles` 不感知 `.gitignore`，gitignored 的非 memory 可索引文件（`generated/*.ts`、`*.gen.js` 等）增删改不触发重建 → 索引静默过期
+- [ ] `listMemoryFiles` 只看 `.thincoder/memory/` 顶层，而 `discoverFiles` 递归子目录 → 嵌套 memory 文件被索引却反复判 `file-removed`（死循环）。二选一：递归，或限定只扫一层
+- [ ] `indexer.mjs` 326 行超 300 建议线 → 拆 `chunk`/`rebuild` 到 `index-chunk.mjs` / `index-rebuild.mjs`
+- [ ] reason 串失配：`file-changed`（git 路径）vs `file-changes`（fallback），另 `file-added/removed/missing` 未统一
+- [ ] `loadIndex`/`searchIndex` 不校验 `manifest.vector_dim === decode.dim` 与 `embed_model`，切换 embedding 模型（维度不同）时静默产出全 0 得分
+- [ ] 方向决策（A/B 待定）：A=放弃 porcelain 快路径，改为「commit 预筛 + indexed∪discoverFiles 完整 mtime 对比」，一次性消除上面两个盲区并统一 reason（正确性/简单性优先，推荐）；B=保留快路径只做最小外科补丁
+- [ ] 版本 0.1.43 待办：为已提交但未进 changelog 的 indexer 系列修复（c45f1fe → 66ea83f 区间，约 7 个 commit）补一条 changelog 条目
