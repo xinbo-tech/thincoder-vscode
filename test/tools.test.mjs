@@ -561,4 +561,31 @@ describe("focus — agent-driven cursor/editor navigation", () => {
   })
 })
 
+describe("ops tools — file_ops / process / get_current_time / sleep", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("file_ops moves / copies / renames", async () => {
+    const { fileOpsTool } = await import("../src/tools/ops.mjs")
+    writeFileSync(join(cwd, "a.txt"), "hello")
+    assert.match(await fileOpsTool.execute({ action: "copy", source: "a.txt", dest: "b.txt" }, ctx()), /Copied/)
+    assert.equal(readFileSync(join(cwd, "b.txt"), "utf8"), "hello")
+    assert.match(await fileOpsTool.execute({ action: "move", source: "b.txt", dest: "c.txt" }, ctx()), /Moved/)
+    assert.equal(existsSync(join(cwd, "b.txt")), false)
+    assert.match(await fileOpsTool.execute({ action: "rename", source: "c.txt", dest: "d.txt" }, ctx()), /Renamed/)
+    assert.match(await fileOpsTool.execute({ action: "nuke", source: "a.txt", dest: "x.txt" }, ctx()), /action must be/)
+  })
+
+  it("get_current_time / sleep / process behave", async () => {
+    const { getCurrentTimeTool, sleepTool, processTool } = await import("../src/tools/ops.mjs")
+    const now = await getCurrentTimeTool.execute({}, {})
+    assert.match(now, /Date:/)
+    const t0 = Date.now()
+    await sleepTool.execute({ seconds: 1 }, {})
+    assert.ok(Date.now() - t0 >= 900, "sleeps ~1s")
+    const procs = await processTool.execute({ name: "node" }, ctx())
+    assert.match(procs, /PID/, "process listing returns PID rows")
+  })
+})
+
 
