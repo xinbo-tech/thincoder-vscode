@@ -16,7 +16,7 @@ import { join } from "node:path"
 import { execSync } from "node:child_process"
 import { embed, cosine } from "./embedding.mjs"
 import { encodeVectors, decodeVectors } from "./index-bin.mjs"
-import { discoverFiles, kindFor, isIndexableFile, listMemoryFiles } from "./index-discover.mjs"
+import { discoverFiles, kindFor, shouldIndexFile, listMemoryFiles } from "./index-discover.mjs"
 
 const INDEX_DIR = ".thincoder/index"
 const CHUNK_LINES_CODE = 30
@@ -41,11 +41,13 @@ export async function buildIndex(cwd, embedder, { onProgress, signal } = {}) {
   const files = discoverFiles(cwd, signal)
   onProgress?.({ phase: "scan", done: 0, total: files.length })
 
-  // 2) Chunk them — skip empty-text chunks (empty files would otherwise send an empty
-  //    string to the embedder, which some providers reject outright).
+  // 2) Chunk them — skip empty-text chunks. Capture each file's mtime BEFORE reading so a
+  //    change during the (slow) embed pass still registers as "needs rebuild", not stale.
   const allChunks = [] // [{ fileIdx, startLine, endLine, text }]
+  const fileMtimes = new Array(files.length)
   for (let i = 0; i < files.length; i++) {
     signal?.throwIfAborted()
+    try { fileMtimes[i] = statSync(join(cwd, files[i])).mtimeMs } catch { /* leave undefined */ }
     const chunks = chunkFile(cwd, files[i])
     for (const c of chunks) {
       if (c.text && c.text.trim()) allChunks.push({ fileIdx: i, ...c })
@@ -75,7 +77,7 @@ export async function buildIndex(cwd, embedder, { onProgress, signal } = {}) {
   }
   for (let fi = 0; fi < files.length; fi++) {
     fileMap[files[fi]] = {
-      mtime: statSync(join(cwd, files[fi])).mtimeMs,
+      mtime: fileMtimes[fi] ?? 0,
       kind: kindFor(files[fi]),
       chunks: chunkIdxByFile.get(fi) || [],
     }
@@ -166,7 +168,7 @@ export function needsRebuild(cwd) {
 
   if (dirty) {
     for (const rel of dirty) if (indexed.has(rel)) return { needed: true, reason: "file-changed", file: rel }
-    for (const rel of dirty) if (isIndexableFile(rel)) return { needed: true, reason: "file-added", file: rel }
+    for (const rel of dirty) if (shouldIndexFile(rel)) return { needed: true, reason: "file-added", file: rel }
     // Memory files under .thincoder/memory/ may be gitignored, so `git status` never reports
     // them — check that one (small) directory directly so they still trigger a rebuild.
     const mem = new Set(listMemoryFiles(cwd))

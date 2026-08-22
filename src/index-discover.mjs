@@ -39,6 +39,19 @@ export function isIndexableFile(filePath) {
   return CODE_EXTS.has(ext) || DOC_EXTS.has(ext)
 }
 
+/** Full predicate: is this relative path a file the index tracks? (extension + the same
+ *  directory exclusions discoverFiles applies — SKIP_DIRS and hidden dirs, except the
+ *  .thincoder/memory/ special case). Used by needsRebuild so "discovery" and "rebuild
+ *  decision" can never disagree. */
+export function shouldIndexFile(relPath) {
+  const p = relPath.replaceAll("\\", "/")
+  if (p.startsWith(".thincoder/memory/")) return isIndexableFile(p)
+  for (const d of p.split("/").slice(0, -1)) {
+    if (SKIP_DIRS.has(d) || d.startsWith(".")) return false
+  }
+  return isIndexableFile(p)
+}
+
 export function kindFor(filePath) {
   // memory files live in .thincoder/memory/ — check FIRST: they're .md, DOC_EXTS would
   // otherwise classify them as docs.
@@ -53,7 +66,7 @@ export function listMemoryFiles(cwd) {
   const memDir = join(cwd, ".thincoder/memory")
   try {
     return readdirSync(memDir, { withFileTypes: true })
-      .filter((e) => e.isFile())
+      .filter((e) => e.isFile() && isIndexableFile(e.name))
       .map((e) => ".thincoder/memory/" + e.name)
   } catch {
     return []
