@@ -16,7 +16,7 @@ import { join } from "node:path"
 import { execSync } from "node:child_process"
 import { embed, cosine } from "./embedding.mjs"
 import { encodeVectors, decodeVectors } from "./index-bin.mjs"
-import { discoverFiles, kindFor } from "./index-discover.mjs"
+import { discoverFiles, kindFor, isIndexableFile } from "./index-discover.mjs"
 
 const INDEX_DIR = ".thincoder/index"
 const CHUNK_LINES_CODE = 30
@@ -41,12 +41,15 @@ export async function buildIndex(cwd, embedder, { onProgress, signal } = {}) {
   const files = discoverFiles(cwd, signal)
   onProgress?.({ phase: "scan", done: 0, total: files.length })
 
-  // 2) Chunk them
+  // 2) Chunk them — skip empty-text chunks (empty files would otherwise send an empty
+  //    string to the embedder, which some providers reject outright).
   const allChunks = [] // [{ fileIdx, startLine, endLine, text }]
   for (let i = 0; i < files.length; i++) {
     signal?.throwIfAborted()
     const chunks = chunkFile(cwd, files[i])
-    for (const c of chunks) allChunks.push({ fileIdx: i, ...c })
+    for (const c of chunks) {
+      if (c.text && c.text.trim()) allChunks.push({ fileIdx: i, ...c })
+    }
   }
   onProgress?.({ phase: "chunk", done: 0, total: allChunks.length })
 
@@ -107,7 +110,11 @@ export function loadIndexManifest(cwd) {
   const indexDir = join(cwd, INDEX_DIR)
   const mfPath = join(indexDir, "manifest.json")
   if (!existsSync(mfPath) || !existsSync(join(indexDir, "vectors.bin"))) return null
-  try { return JSON.parse(readFileSync(mfPath, "utf8")) } catch { return null }
+  try {
+    const m = JSON.parse(readFileSync(mfPath, "utf8"))
+    if (!m || m.version !== 1 || typeof m.files !== "object" || m.files === null) return null
+    return m
+  } catch { return null }
 }
 
 /**
@@ -137,19 +144,45 @@ export function needsRebuild(cwd) {
   if (head && manifest.indexed_commit !== head) {
     return { needed: true, reason: "new-commits", head, indexed: manifest.indexed_commit }
   }
-  // File-set drift (added/removed) — the per-file mtime loop below can't see NEW files
-  // (they aren't in the manifest), so compare the current discovery set against keys.
+
   const indexed = new Set(Object.keys(manifest.files ?? {}))
+
+  // Uncommitted changes: `git status --porcelain` is index-cached (one subprocess) and far
+  // cheaper than a full synchronous tree walk + per-file stat on the host thread. Fall back
+  // to a walk + mtime only when git is unavailable.
+  let dirty = null
+  try {
+    dirty = new Set(
+      execSync("git status --porcelain", { cwd, encoding: "utf8", timeout: 5000 })
+        .split("\n").filter(Boolean)
+        .map((l) => {
+          // "XY path" (2-char code + space) or "XY old -> new" (rename → take the new side)
+          let p = l.slice(3)
+          if (p.includes(" -> ")) p = p.slice(p.lastIndexOf(" -> ") + 4)
+          return p.replace(/^"|"$/g, "").replaceAll("\\", "/")
+        }),
+    )
+  } catch {}
+
+  if (dirty) {
+    for (const rel of dirty) if (indexed.has(rel)) return { needed: true, reason: "file-changed", file: rel }
+    for (const rel of dirty) if (isIndexableFile(rel)) return { needed: true, reason: "file-added", file: rel }
+    return { needed: false, reason: "up-to-date" }
+  }
+
+  // No git — full discovery + per-file mtime fallback.
   const discovered = new Set(discoverFiles(cwd))
   for (const f of discovered) if (!indexed.has(f)) return { needed: true, reason: "file-added", file: f }
   for (const f of indexed) if (!discovered.has(f)) return { needed: true, reason: "file-removed", file: f }
-
-  // Uncommitted edits: per-file mtime (truncated to ms — coarse/抖动 timestamps don't
-  // trip a spurious "needs rebuild" prompt).
   for (const relPath of indexed) {
     const info = manifest.files[relPath]
-    if (Math.trunc(statSync(join(cwd, relPath)).mtimeMs) !== Math.trunc(info.mtime)) {
-      return { needed: true, reason: "file-changes", file: relPath }
+    try {
+      if (Math.trunc(statSync(join(cwd, relPath)).mtimeMs) !== Math.trunc(info.mtime)) {
+        return { needed: true, reason: "file-changes", file: relPath }
+      }
+    } catch {
+      // deleted/unreadable since discovery — treat as changed so the index rebuilds
+      return { needed: true, reason: "file-missing", file: relPath }
     }
   }
   return { needed: false, reason: "up-to-date" }

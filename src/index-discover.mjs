@@ -24,8 +24,7 @@ export function discoverFiles(cwd, signal) {
         if (e.name.startsWith(".") && e.name !== ".thincoder") continue
         walk(join(dir, e.name), e.name === ".thincoder")
       } else if (e.isFile()) {
-        const ext = e.name.includes(".") ? e.name.slice(e.name.lastIndexOf(".")).toLowerCase() : ""
-        if (CODE_EXTS.has(ext) || DOC_EXTS.has(ext)) {
+        if (isIndexableFile(e.name)) {
           files.push(relative(cwd, join(dir, e.name)).replaceAll("\\", "/"))
         }
       }
@@ -33,6 +32,11 @@ export function discoverFiles(cwd, signal) {
   }
   walk(cwd, false)
   return files
+}
+
+export function isIndexableFile(filePath) {
+  const ext = filePath.includes(".") ? filePath.slice(filePath.lastIndexOf(".")).toLowerCase() : ""
+  return CODE_EXTS.has(ext) || DOC_EXTS.has(ext)
 }
 
 export function kindFor(filePath) {

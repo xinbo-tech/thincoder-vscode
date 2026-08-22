@@ -23,7 +23,7 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { getEmbedder } from "./embed-config.mjs"
-import { loadIndex, searchIndex } from "./indexer.mjs"
+import { loadIndexManifest, searchIndex } from "./indexer.mjs"
 
 const VALID_TYPES = new Set(["rule", "knowledge", "decision", "pattern"])
 
@@ -317,8 +317,8 @@ export const memorySearchTool = {
     // Try vector search first if embedder + index available
     try {
       const embedder = getEmbedder()
-      const idx = embedder ? loadIndex(ctx.cwd) : null
-      if (idx) {
+      const manifest = embedder ? loadIndexManifest(ctx.cwd) : null
+      if (manifest) {
         return (async () => {
           try {
             const vecResults = await searchIndex(ctx.cwd, embedder, query, { kind: "memory", limit: limit || 5 })

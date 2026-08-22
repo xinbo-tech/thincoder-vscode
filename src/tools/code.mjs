@@ -6,7 +6,7 @@
 
 import * as vscode from "vscode"
 import { getEmbedder } from "../embed-config.mjs"
-import { searchIndex, loadIndex } from "../indexer.mjs"
+import { searchIndex, loadIndexManifest } from "../indexer.mjs"
 
 // ─── Vector search helper ──────────────────────────────────────
 
@@ -15,8 +15,8 @@ async function vectorSearch(cwd, query, kind, limit) {
   if (!embedder) return null
 
   try {
-    // Quick check: index exists?
-    if (!loadIndex(cwd)) return null
+    // Quick check: index exists? (manifest-only — avoids decoding vectors twice)
+    if (!loadIndexManifest(cwd)) return null
 
     const results = await searchIndex(cwd, embedder, query, { kind, limit })
     if (results.length === 0) return null
