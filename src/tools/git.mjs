@@ -7,7 +7,19 @@
  * is a tracked follow-up.
  */
 import { runGit, truncate } from "./shared.mjs"
-import { execSync } from "node:child_process"
+import { execSync, execFileSync } from "node:child_process"
+
+/** Run git and report failure (stderr + exit code) instead of swallowing it.
+ *  Used by write ops (commit/push/rm) where runGit's silent "" would masquerade
+ *  as success (CLI parity: runGitStrict). */
+function runGitStrict(cwd, cmdArgs) {
+  try {
+    const out = execFileSync("git", cmdArgs, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim().replace(/\r/g, "")
+    return { ok: true, out }
+  } catch (e) {
+    return { ok: false, out: String(e.stdout || "").trim(), err: String(e.stderr || e.message || "").trim() }
+  }
+}
 
 export const gitTool = {
   name: "git",
@@ -141,18 +153,20 @@ export const gitTool = {
       }
       case "rm": {
         if (!args.path) return "Error: rm requires path (file to remove from tracking)"
-        runGit(ctx.cwd, ["rm", "--cached", "-r", "--", args.path])
-        return `Removed from tracking: ${args.path} (file kept on disk)`
+        const r = runGitStrict(ctx.cwd, ["rm", "--cached", "-r", "--", args.path])
+        return r.ok ? `Removed from tracking: ${args.path} (file kept on disk)` : `git rm failed: ${r.err || r.out}`
       }
       case "commit": {
         if (!args.message) return "Error: commit requires message"
-        runGit(ctx.cwd, ["add", "-A"])
-        const out = runGit(ctx.cwd, ["commit", "-m", args.message])
-        return out || "(commit done)"
+        const add = runGitStrict(ctx.cwd, ["add", "-A"])
+        if (!add.ok) return `git add failed: ${add.err || add.out || "(no output)"}`
+        const commit = runGitStrict(ctx.cwd, ["commit", "-m", args.message])
+        if (!commit.ok) return `git commit failed: ${commit.err || "(no output)"}`
+        return commit.out || "(commit done)"
       }
       case "push": {
-        const out = runGit(ctx.cwd, ["push"])
-        return out || "(push done)"
+        const r = runGitStrict(ctx.cwd, ["push"])
+        return r.ok ? (r.out || "(push done)") : `git push failed: ${r.err || r.out || "(no output)"}`
       }
       case "checkpoint": {
         return await checkpointExecute(args, ctx)
