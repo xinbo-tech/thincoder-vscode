@@ -37,7 +37,6 @@ describe("model specs", () => {
     assert.equal(specForModel("gpt-4.1").context, 1_000_000)
     assert.equal(specForModel("qwen3.8-max").context, 1_000_000)
     assert.equal(specForModel("MiniMax-M3").context, 1_000_000)
-    assert.equal(specForModel("grok-4").context, 1_000_000)
   })
 
   it("qwen3.7-max is text-only (DashScope 400 on images — CLI parity)", () => {
@@ -51,8 +50,9 @@ describe("model specs", () => {
     assert.equal(specForModel("gemini-2.5-pro").context, 2_000_000)
   })
 
-  it("200K-256K context models", () => {
+  it("200K-500K context models", () => {
     assert.equal(specForModel("claude-sonnet-4").context, 200_000)
+    assert.equal(specForModel("grok-4").context, 500_000) // grok-4.x family: 500K (xAI Grok 4.6 spec; was 1M, corrected 2026-08)
     assert.equal(specForModel("kimi-k2-retired-fallback").context, 128_000) // unknown ids → 128K default
   })
 

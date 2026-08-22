@@ -20,22 +20,33 @@ const MODEL_SPECS = [
   // thinking default-on with effort low/high/max, automatic disk cache)
   ["deepseek-v4-pro",   { context: 1_000_000, maxOutput: 384_000, thinking: true,  prefixMode: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "required", reasoningEffortEnum: ["low", "high", "max"], reasoningEffortDefault: "high", tempRange: [0, 2] }],
   ["deepseek-v4-flash", { context: 1_000_000, maxOutput: 384_000, thinking: true,  prefixMode: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "required", reasoningEffortEnum: ["low", "high", "max"], reasoningEffortDefault: "high", tempRange: [0, 2] }],
+  // DeepSeek V4 Flash Vision (experimental) — image input on top of the full V4-Flash stack
+  ["deepseek-v4-flash-vision-exp", { context: 1_000_000, maxOutput: 384_000, thinking: true,  prefixMode: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "required", reasoningEffortEnum: ["low", "high", "max"], reasoningEffortDefault: "high", tempRange: [0, 2], multimodal: true }],
   // Kimi series
   ["kimi-k3",           { context: 1_000_000, maxOutput: 131_072, thinking: true,  partialMode: true, multimodal: true, cacheMode: "auto", thinkApi: "effort", reasoningEcho: "required", reasoningEffortEnum: ["low", "high", "max"], reasoningEffortDefault: "max" }],
+  ["kimi/kimi-k3",      { context: 1_000_000, maxOutput: 131_072, thinking: true,  partialMode: true, multimodal: true, cacheMode: "auto", thinkApi: "effort", reasoningEcho: "required", reasoningEffortEnum: ["low", "high", "max"], reasoningEffortDefault: "max" }],
   // Kimi For Coding endpoint uses the short model ID "k3" (same specs as kimi-k3) — IK5VGJ
   ["k3",                { context: 1_000_000, maxOutput: 131_072, thinking: true,  partialMode: true, multimodal: true, cacheMode: "auto", thinkApi: "effort", reasoningEcho: "required", reasoningEffortEnum: ["low", "high", "max"], reasoningEffortDefault: "max" }],
   // GLM series
+  // GLM-5.3: thinking always-on (no "disabled"); effort converges to low/high/max — NOT the
+  //          7-level glm-5.2 enum (verified vs docs.bigmodel.cn GLM-5.3 page, 2026-08)
+  ["glm-5.3",           { context: 1_000_000, maxOutput: 128_000, thinking: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "optional", reasoningEffortEnum: ["low", "high", "max"], reasoningEffortDefault: "max", tempRange: [0, 1], noUsageStream: true }],
   ["glm-5.2",           { context: 1_000_000, maxOutput: 128_000, thinking: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "optional", reasoningEffortEnum: ["max", "xhigh", "high", "medium", "low", "minimal", "none"], reasoningEffortDefault: "max", tempRange: [0, 1], noUsageStream: true }],
   ["glm-5",             { context: 1_000_000, maxOutput: 128_000, thinking: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "optional", reasoningEffortEnum: ["max", "xhigh", "high", "medium", "low", "minimal", "none"], reasoningEffortDefault: "max", tempRange: [0, 1], noUsageStream: true }],
   ["glm-4",             { context: 128_000,   maxOutput: 32_000,  thinking: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "optional", tempRange: [0, 1], noUsageStream: true }],
   // GPT series
+  ["gpt-5.6-sol",       { context: 1_050_000, maxOutput: 128_000, thinking: true,  multimodal: true, cacheMode: "prompt" }],
+  ["gpt-5.6",           { context: 1_050_000, maxOutput: 128_000, thinking: true,  multimodal: true, cacheMode: "prompt" }],
   ["gpt-4.1",           { context: 1_000_000, maxOutput: 128_000, thinking: false, cacheMode: "prompt" }],
   ["gpt-4o",            { context: 128_000,   maxOutput: 16_000,  thinking: false, multimodal: true, cacheMode: "prompt" }],
   // Claude series (Anthropic)
+  ["claude-opus-5",     { context: 1_000_000, maxOutput: 128_000, thinking: true,  multimodal: true, cacheMode: "none", format: "anthropic" }],
+  ["claude-sonnet-5",   { context: 1_000_000, maxOutput: 128_000, thinking: true,  multimodal: true, cacheMode: "none", format: "anthropic" }],
   ["claude-opus-4",     { context: 200_000,   maxOutput: 32_000,  thinking: false, multimodal: true, cacheMode: "none", format: "anthropic" }],
   ["claude-sonnet-4",   { context: 200_000,   maxOutput: 32_000,  thinking: false, multimodal: true, cacheMode: "none", format: "anthropic" }],
   ["claude-3.5-haiku",  { context: 200_000,   maxOutput: 8_192,   thinking: false, cacheMode: "none", format: "anthropic" }],
   // Gemini series (Google)
+  ["gemini-3-pro",      { context: 1_000_000, maxOutput: 64_000,  thinking: false, multimodal: true, cacheMode: "none", format: "google", noUsageStream: true }],
   ["gemini-2.5-pro",    { context: 2_000_000, maxOutput: 64_000,  thinking: false, multimodal: true, cacheMode: "none", format: "google", noUsageStream: true }],
   ["gemini-2.5-flash",  { context: 1_000_000, maxOutput: 64_000,  thinking: false, multimodal: true, cacheMode: "none", format: "google", noUsageStream: true }],
   // Qwen series
@@ -57,7 +68,9 @@ const MODEL_SPECS = [
   ["minimax-m3",        { context: 1_000_000, maxOutput: 128_000, thinking: true,  multimodal: true, cacheMode: "auto", thinkApi: "type", thinkEnabledValue: "adaptive", tempRange: [0, 2], noUsageStream: true }],
   ["minimax-m1",        { context: 256_000,   maxOutput: 128_000, thinking: false, cacheMode: "auto", noUsageStream: true }],
   // Grok series (xAI — OpenAI-compatible)
-  ["grok-4",            { context: 1_000_000, maxOutput: 64_000,  thinking: false, multimodal: true, tempRange: [0, 2] }],
+  ["grok-4.6",          { context: 500_000,   maxOutput: 64_000,  thinking: false, multimodal: true, tempRange: [0, 2] }],
+  ["grok-4.5",          { context: 500_000,   maxOutput: 64_000,  thinking: false, multimodal: true, tempRange: [0, 2] }],
+  ["grok-4",            { context: 500_000,   maxOutput: 64_000,  thinking: false, multimodal: true, tempRange: [0, 2] }],
   ["grok-4-mini",       { context: 128_000,   maxOutput: 16_000,  thinking: false, tempRange: [0, 2] }],
   // Mistral series (OpenAI-compatible)
   ["mistral-large",     { context: 128_000,   maxOutput: 32_000,  thinking: false, multimodal: true, tempRange: [0, 2] }],
