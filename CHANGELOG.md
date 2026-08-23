@@ -4,6 +4,13 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.45] — 2026-08-23
+
+### Fixed
+
+- 轮末探索蒸馏边界只在压缩**真重建**时重置（shrink 路径误重置 → 长度检测区分重建/收缩）
+- `keepCount` 去掉冗余双重 40% cap
+
 ## [0.1.44] — 2026-08-23
 
 ### Added
