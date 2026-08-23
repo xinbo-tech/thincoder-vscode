@@ -4,6 +4,20 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.46] — 2026-08-23
+
+### Added
+
+- **git 工具最全扩充** + `workdir`（对齐 CLI）
+- **execute `scriptFile` + `nodeArgs`**：跑 workspace `.mjs` 文件
+- **子agent/advisor 显示使用的模型**（webview 面板 + advisor 块标题）
+- **工具调用参数 hover 完整显示**（title 属性 = 完整 args）
+- 反向路由 + discipline「Tool routing」全工具总表
+
+### Fixed
+
+- `runGit` trim 剥 porcelain 前导空格（status 误分类）；`snapshotBefore` 破坏性 stash → 非破坏
+
 ## [0.1.45] — 2026-08-23
 
 ### Fixed
