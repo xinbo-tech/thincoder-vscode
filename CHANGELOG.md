@@ -4,6 +4,26 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.43] — 2026-08-23
+
+### Added
+
+- **对齐 thinworker 编程工具集**：新增 `file_ops`/`process`/`get_current_time`/`sleep`/`tree` 内置工具；`grep` 加 `literal`/`ignoreCase`，`ls` 加 `filter`，`bash` 加 `filter`，`verify` 加 `filter`/`workdir`
+- **`execute` 工具重做**：由同步 vm 沙箱改为 `node --input-type=module --eval` 子进程——支持顶层 `await`、动态 `import()`（加载项目 `.mjs`）、原生 `console`，新增 `workdir`/`filter`，保留 killable 超时；`exec-prelude.mjs` 提供 readFile/writeFile/glob/grep/log/require（路径隔离 workspace）
+- **consult 指定子集模型** + **模型规格更新**（glm-5.3 等；gpt-5.6/claude-5 `thinking=false`）
+
+### Fixed
+
+- **advisor 推回渲染错位**：机器推回（advisor/verify/pending-task guard）后，下一子回合的 reasoning/内容不再串进上一块——host 新增显式 `turnBreak` 子回合边界（覆盖思考/非思考模型），webview 复位前先 flush 防丢尾巴
+- **apply_patch 多 hunk 错位**：移植 CLI 重扫上下文算法（原按 `@@` 行号定位会错位、静默损坏）
+- **delete 命令注入**：`git ls-files` 改 `execFileSync` 数组参数（路径不再拼进 shell）
+- **git 写操作假成功**：`commit`/`push`/`rm` 改用 `runGitStrict` 返回错误，不再伪装成功
+- **ls filter 顺序**、**process 非阻塞**（`runInterruptible`）、tree 深度/计数校验等
+
+### Changed
+
+- **语义索引系列修复**：索引重建按 mtime、git 状态漂移检测、空 chunk 过滤、manifest-only 重建、multi-root 路径、memory 语义索引接线、chunk 重叠 EOF 尾部、嵌入端点保留等
+
 ## [0.1.42] — 2026-08-22
 
 ### Fixed
