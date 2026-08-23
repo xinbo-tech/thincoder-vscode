@@ -115,7 +115,7 @@ export const subagentTool = {
     parent._subIdCounter = (parent._subIdCounter ?? 0) + 1
     const subId = parent._subIdCounter
 
-    ctx.callbacks?.onSubagent?.({ id: subId, role, status: "started", startedAt: Date.now() })
+    ctx.callbacks?.onSubagent?.({ id: subId, role, status: "started", startedAt: Date.now(), model: provider.model ?? null })
 
     // Subagent runs without MAIN-CONVERSATION callbacks — results are captured.
     // onQuestion: the child's question tool must surface in the panel like the parent's.

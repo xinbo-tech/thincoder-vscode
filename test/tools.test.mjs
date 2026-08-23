@@ -349,6 +349,90 @@ describe("git — unified tool (CLI parity: action subcommands)", () => {
     assert.ok(!gitTool.isReadonlyAction({ action: "checkpoint", checkpointAction: "rewind" }))
     assert.ok(!gitTool.isReadonlyAction({ action: "nope" }))
   })
+
+  it("扩充 action：add/commit 分文件、tag、branch、checkout/restore、stash、reset、revert、merge、cherry-pick、参数校验", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const { execSync, execFileSync } = await import("node:child_process")
+    const g = (...a) => execFileSync("git", a, { cwd, encoding: "utf8" })
+    execSync("git init -q", { cwd })
+    execSync("git config user.email t@t && git config user.name t", { cwd })
+    execSync("git config core.autocrlf false", { cwd })
+    writeFileSync(join(cwd, "a.js"), "1\n")
+    execSync("git add a.js && git commit -qm first", { cwd })
+    const main = g("branch", "--show-current").trim()
+
+    // add 分文件 + commit path
+    writeFileSync(join(cwd, "b.js"), "2\n")
+    assert.doesNotMatch(await gitTool.execute({ action: "add", path: "b.js" }, ctx()), /failed/i)
+    assert.doesNotMatch(await gitTool.execute({ action: "commit", message: "add b", path: "b.js" }, ctx()), /failed/i)
+
+    // tag create/list/delete
+    assert.match(await gitTool.execute({ action: "tag", tagAction: "create", name: "v0.1" }, ctx()), /created/)
+    assert.match(await gitTool.execute({ action: "tag", tagAction: "list" }, ctx()), /v0\.1/)
+    assert.match(await gitTool.execute({ action: "tag", tagAction: "delete", name: "v0.1" }, ctx()), /deleted/)
+
+    // branch create/list/switch
+    assert.match(await gitTool.execute({ action: "branch", branchAction: "create", name: "feat" }, ctx()), /created/)
+    assert.match(await gitTool.execute({ action: "branch", branchAction: "list" }, ctx()), /feat/)
+    assert.match(await gitTool.execute({ action: "branch", branchAction: "switch", name: "feat" }, ctx()), /Switched/)
+    g("checkout", "-q", main)
+
+    // checkout -- file（还原工作区改动）
+    writeFileSync(join(cwd, "a.js"), "changed\n")
+    assert.doesNotMatch(await gitTool.execute({ action: "checkout", path: "a.js" }, ctx()), /failed/i)
+    assert.equal(readFileSync(join(cwd, "a.js"), "utf8"), "1\n")
+
+    // restore --staged
+    writeFileSync(join(cwd, "a.js"), "staged\n"); g("add", "a.js")
+    await gitTool.execute({ action: "restore", path: "a.js", staged: true }, ctx())
+    assert.match(await gitTool.execute({ action: "status" }, ctx()), /Unstaged/)
+
+    // stash push/list/pop
+    writeFileSync(join(cwd, "a.js"), "wip\n")
+    assert.doesNotMatch(await gitTool.execute({ action: "stash", stashAction: "push" }, ctx()), /failed/i)
+    assert.match(await gitTool.execute({ action: "stash", stashAction: "list" }, ctx()), /stash/)
+    assert.doesNotMatch(await gitTool.execute({ action: "stash", stashAction: "pop" }, ctx()), /failed/i)
+
+    // reset soft/hard + revert
+    g("checkout", "-q", "--", ".")
+    assert.doesNotMatch(await gitTool.execute({ action: "reset", mode: "soft" }, ctx()), /failed/i)
+    assert.doesNotMatch(await gitTool.execute({ action: "reset", mode: "hard" }, ctx()), /failed/i)
+    assert.doesNotMatch(await gitTool.execute({ action: "revert" }, ctx()), /failed/i)
+
+    // merge + cherry-pick（side 分支提交，main 干净应用）
+    g("checkout", "-q", main)
+    await gitTool.execute({ action: "branch", branchAction: "create", name: "side" }, ctx())
+    await gitTool.execute({ action: "branch", branchAction: "switch", name: "side" }, ctx())
+    writeFileSync(join(cwd, "side.js"), "s\n")
+    await gitTool.execute({ action: "commit", message: "side", path: "side.js" }, ctx())
+    const sideRef = g("rev-parse", "HEAD").trim()
+    await gitTool.execute({ action: "branch", branchAction: "switch", name: main }, ctx())
+    assert.doesNotMatch(await gitTool.execute({ action: "cherry-pick", ref: sideRef }, ctx()), /fatal|failed/i)
+    assert.doesNotMatch(await gitTool.execute({ action: "merge", ref: "side" }, ctx()), /fatal|failed/i)
+
+    // 参数校验
+    assert.match(await gitTool.execute({ action: "commit" }, ctx()), /requires message/)
+    assert.match(await gitTool.execute({ action: "merge" }, ctx()), /requires ref/)
+  })
+
+  it("workdir 在 workspace 子目录的 git 仓库运行；越界报错", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const { execFileSync } = await import("node:child_process")
+    const { mkdirSync } = await import("node:fs")
+    const sub = join(cwd, "sub")
+    mkdirSync(sub, { recursive: true })
+    execFileSync("git", ["init", "-q"], { cwd: sub })
+    execFileSync("git", ["config", "user.name", "t"], { cwd: sub })
+    execFileSync("git", ["config", "user.email", "t@t.dev"], { cwd: sub })
+    execFileSync("git", ["config", "core.autocrlf", "false"], { cwd: sub })
+    writeFileSync(join(sub, "x.js"), "1\n")
+    execFileSync("git", ["add", "x.js"], { cwd: sub })
+    execFileSync("git", ["commit", "-qm", "init"], { cwd: sub })
+
+    const log = await gitTool.execute({ action: "log", workdir: "sub" }, ctx())
+    assert.match(log, /init/)
+    await assert.rejects(() => gitTool.execute({ action: "status", workdir: "../escape" }, ctx()), /escapes the workspace/)
+  })
 })
 
 describe("bash — git destructive-command protection (CLI parity)", () => {

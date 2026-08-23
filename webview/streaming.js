@@ -199,7 +199,8 @@ export function attachCopyButtons(container) {
 export function advisorChunk(m) {
   if (m.kind === "start") {
     if (S._advisorBlock) S._advisorBlock.open = false // previous round collapses (stays readable)
-    const details = buildAdvisorBlock(t("advisor.round", { round: m.round ?? "?" }))
+    // Show the advisor's effective model in the block title (it may differ from the main agent's).
+    const details = buildAdvisorBlock(t("advisor.round", { round: m.round ?? "?" }) + (m.model ? " · " + m.model : ""))
     if (ctx.currentBlock) ctx.currentBlock.appendChild(details)
     else ctx.messagesEl.appendChild(details)
     S._advisorBlock = details

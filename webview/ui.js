@@ -153,7 +153,7 @@ export function addTool(ctx, name, args, id) {
   h.innerHTML =
     `<span class="tool-call-icon"></span>` +
     `<span class="tool-call-name">${esc(name)}</span>` +
-    `<span class="tool-call-args">${esc(args.slice(0, 80))}</span>` +
+    `<span class="tool-call-args" title="${esc(args)}">${esc(args.slice(0, 80))}</span>` +
     `<span class="tool-call-status">${t("tool.running")}</span>`
 
   const b = document.createElement("div")

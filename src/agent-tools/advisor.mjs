@@ -4,7 +4,7 @@
  * type="design" for design doc review, type="code" for code review (default).
  */
 import { randomUUID, createHmac } from "node:crypto"
-import { runAdvisorReview } from "../advisor/run.mjs"
+import { runAdvisorReview, resolveAdvisorProvider } from "../advisor/run.mjs"
 import { isDocFile } from "../advisor/repos.mjs"
 
 const TOKEN_EXPIRY_MS = 3600000 // 1 hour
@@ -124,7 +124,9 @@ export const advisorTool = {
     // contract as the CLI TUI (think / tool / text kinds). A "start" chunk first
     // opens the in-conversation advisor block tagged with the round number.
     const round = (agent._advisorRound || 0) + 1
-    ctx.callbacks?.onToolPanel?.("advisor", { kind: "start", text: "", round })
+    // Show the advisor's effective model in the block title (it may differ from the main agent's).
+    const advModel = (() => { try { return resolveAdvisorProvider(agent).model } catch { return null } })()
+    ctx.callbacks?.onToolPanel?.("advisor", { kind: "start", text: "", round, model: advModel })
     const result = await runAdvisorReview(agent, reviewType, {
       onOutput: (chunk) => ctx.callbacks?.onToolPanel?.("advisor", chunk),
       signal: ctx.signal,
