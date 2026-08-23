@@ -69,6 +69,7 @@ webview/index.html   Webview shell (referenced by ChatPanel._html())
 | webview → extension | `setAdvisorGuard` / `setEngineeringEnabled` | `{ value }` — toolbar quick switches (GUARD / ENG buttons), persisted to config.json `agent.advisor.guard` / `agent.engineering` (guard = require advisor review after code changes; advisor reviews themselves are always available) |
 | extension → webview | `token` | `{ text }` |
 | extension → webview | `reasoning` | `{ text }` (model's thinking process, shown in collapsible block) |
+| extension → webview | `turnBreak` | — (machine-only sub-turn boundary: advisor/verify/pending-task guard pushback → the webview resets its block pointers so the next reasoning/content starts a fresh block; covers non-thinking models) |
 | extension → webview | `toolCall` / `toolResult` | `{ name, args? / text }` |
 | extension → webview | `complete` / `loading` / `aborted` / `error` | `{ text? }` |
 | extension → webview | `providerInfo` | `{ text, keyOk, needsSetup?, settings? }` |

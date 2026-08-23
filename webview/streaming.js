@@ -123,6 +123,10 @@ export function onTurnBreak() {
   // The webview otherwise cannot see that boundary — no toolCall/toolResult
   // fires — so the onReasoning heuristic (reasoning-after-content) is the only
   // backup. This explicit reset covers BOTH thinking and non-thinking models.
+  // Paint any pending throttled chunks first (flushStreamRender) — resetting the
+  // bubble pointers with unrendered tail would silently drop the last rendered
+  // chunk (same guard as finish()).
+  flushStreamRender()
   ctx.currentBubble = null
   ctx.currentBlock = null
   ctx.currentReasoning = null
