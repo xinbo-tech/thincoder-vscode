@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync, readFileSync
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { tmpdir } from "node:os"
-import { compactHistory, truncateFallback, shrinkOversized } from "../src/compact.mjs"
+import { compactHistory, truncateFallback, shrinkOversized, summarizeRunExplorations, SUMMARIZE_PROMPT, EXPLORE_TOOLS } from "../src/compact.mjs"
 import { specForModel, ctxPercentForModel, contextWindowForModel } from "../src/config.mjs"
 import { _setConfigPathForTest } from "../src/config-io.mjs"
 import { MAX_ADVISOR_PUSHBACKS } from "../src/agent/run-helpers.mjs"
@@ -741,5 +741,279 @@ describe("pre-work plan confirmation discipline", () => {
     assert.ok(text.includes("before writing the requirements doc"), "confirmation before writing requirements/design docs")
     assert.ok(text.includes("no exemptions"), "no-exemption wording present")
     assert.ok(text.includes("obvious enough to skip"), "self-exemption excuse explicitly blocked")
+  })
+})
+// ─── Workflow/Debugging 必须用 task（2026-08-23）───
+// discipline.md 内容级断言：不能只靠「两端 byte-identical」漂绿——副本内容未改时必须能失败。
+
+describe("discipline.md: workflow/debugging require `task` (content-level)", () => {
+  it("Workflow 总规 + 各层追踪工具断言", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "discipline.md"), "utf8")
+    const lines = text.split("\n")
+
+    // 关键短语全文断言（不受两端比对影响——内容一旦回退即失败）
+    assert.ok(/every tier/i.test(text), "全英文短语 every tier 在（文件为 EVERY tier，大小写不敏感）")
+    assert.ok(text.includes("one in_progress"), "短语 one in_progress 在")
+
+    // Workflow 总规句：use `task` … every tier … one (item) in_progress
+    const rule = lines.find((l) => /every tier/i.test(l))
+    assert.ok(rule, "Workflow 总规行存在")
+    assert.ok(/use `task`/i.test(rule), "总规含 use `task`")
+    assert.ok(/one .*in_progress/i.test(rule), "总规含 one … in_progress（原文为 one item in_progress）")
+
+    // 分层追踪工具断言
+    const complex = lines.find((l) => /Complex \(3\+ steps/.test(l.trim()))
+    assert.ok(complex, "Complex 层存在")
+    assert.ok(complex.includes("`checklist`"), "Complex 层仍含 checklist 双轨")
+    const medium = lines.find((l) => /Medium \(2-3 steps/.test(l.trim()))
+    assert.ok(medium, "Medium 层存在")
+    assert.ok(medium.includes("`task`"), "Medium 层含 task")
+    const small = lines.find((l) => /Small \(typo, one-line fix\)/.test(l.trim()))
+    assert.ok(small, "Small 层存在")
+    assert.ok(small.includes("`task`"), "Small 层含 task（单行小改也要 task）")
+  })
+
+  it("Debugging 段含四步 + task + one in_progress", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "discipline.md"), "utf8")
+    const lines = text.split("\n")
+    assert.ok(text.includes("reproduce → locate root cause → fix → verify"), "Debugging 段含调试四步")
+    const debugLine = lines.find((l) => l.includes("reproduce → locate root cause → fix → verify"))
+    assert.ok(debugLine, "Debugging 调试句存在")
+    assert.ok(debugLine.includes("`task`"), "调试句含 task")
+    assert.ok(debugLine.includes("one in_progress"), "调试句含 one in_progress")
+  })
+})
+// ─── 读/更新文档嵌入 Workflow 箭头序列（2026-08-23）───
+// discipline.md 内容级断言：不能只靠「两端 byte-identical」漂绿——副本内容未改时必须能失败。
+
+describe("discipline.md: read/update docs embedded in Workflow arrows (no standalone Documentation section)", () => {
+  it("无独立 Documentation 段 + 读文档总规句 + 各层箭头 + 归属句", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "discipline.md"), "utf8")
+    const lines = text.split("\n")
+
+    // 无独立 Documentation 段头（上版「Documentation — read before you write」已删除）
+    assert.ok(
+      !lines.some((l) => l.trim().startsWith("Documentation —")),
+      "不存在 Documentation — 段头（读/更新文档已嵌入 Workflow）",
+    )
+
+    // 读文档总规句（Workflow 段首）：read the relevant docs + document map + ANY tier
+    const readLine = lines.find((l) => /read the relevant docs before changing code/i.test(l))
+    assert.ok(readLine, "读文档总规句存在")
+    assert.ok(readLine.includes("at ANY tier"), "范围标记 ANY tier 在")
+    assert.ok(readLine.includes("the document map"), "the document map（文档地图）在")
+    assert.ok(readLine.includes("docs/design/README.md"), "文档地图路径 docs/design/README.md 在")
+    assert.ok(readLine.includes("AGENTS.md if present"), "AGENTS.md if present 在")
+
+    // Complex 层箭头：Read the docs → Requirements → Design → Development → Testing（不加 update the owning doc——已写设计文档）
+    const complex = lines.find((l) => /Complex \(3\+ steps/.test(l.trim()))
+    assert.ok(complex, "Complex 层存在")
+    assert.ok(complex.includes("Read the docs → Requirements → Design → Development → Testing"), "Complex 箭头完整")
+    assert.ok(!complex.includes("update the owning doc"), "Complex 层不含 update the owning doc")
+
+    // Medium 层箭头：Read the docs → Plan → Change → update the owning doc if you spotted a gap
+    const medium = lines.find((l) => /Medium \(2-3 steps/.test(l.trim()))
+    assert.ok(medium, "Medium 层存在")
+    assert.ok(medium.includes("Read the docs → Plan → Change"), "Medium 箭头含 Read the docs → Plan → Change")
+    assert.ok(medium.includes("update the owning doc if you spotted a gap"), "Medium 箭头含 update the owning doc if you spotted a gap")
+
+    // Small 层箭头：Read the docs → Change → Verify → update the owning doc if you spotted a gap
+    const small = lines.find((l) => /Small \(typo, one-line fix\)/.test(l.trim()))
+    assert.ok(small, "Small 层存在")
+    assert.ok(small.includes("Read the docs → Change → Verify"), "Small 箭头含 Read the docs → Change → Verify")
+    assert.ok(small.includes("update the owning doc if you spotted a gap"), "Small 箭头含 update the owning doc if you spotted a gap")
+
+    // 归属句（Workflow 段末）：Never create a new doc + find the owner and amend
+    const ownLine = lines.find((l) => l.includes("Never create a new doc"))
+    assert.ok(ownLine, "归属句存在")
+    assert.ok(ownLine.includes("find the owner and amend"), "归属句含 find the owner and amend")
+  })
+})
+// ─── 委托策略 A（AGENT-LOOP §13）与历史卫生 C（CONTEXT-COMPACTION §5）───
+
+describe("Delegate well rewrite + exploration distillation", () => {
+  /** One assistant(tool_calls)→tool-result pair for an exploration tool. */
+  const explorePair = (name, id, content) => [
+    { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name, arguments: "{}" } }] },
+    { role: "tool", tool_call_id: id, name, content },
+  ]
+  const makeRun = (n, final = "investigation done") => {
+    const run = []
+    for (let i = 0; i < n; i++) run.push(...explorePair(i % 2 === 0 ? "read" : "grep", `call_${i}`, `exploration result ${i}`))
+    run.push({ role: "assistant", content: final })
+    return run
+  }
+  const countNotes = (h) => h.filter((m) => typeof m.content === "string" && m.content.startsWith("[Exploration summary]")).length
+  const assertNoOrphans = (h, label) => {
+    const byId = new Set()
+    for (const m of h) if (m.role === "assistant" && m.tool_calls) for (const tc of m.tool_calls) byId.add(tc.id)
+    for (const m of h) if (m.role === "tool") assert.ok(byId.has(m.tool_call_id), `${label}: orphan tool message ${m.tool_call_id}`)
+  }
+
+  it("main.md: 收益句 + 委托规则句 + 精度例外 + 验证句；其余条保留", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "main.md"), "utf8")
+    assert.match(text, /isolated context/, "收益句点破子 agent 隔离上下文")
+    assert.match(text, /only their final report comes back/, "收益句：只有最终报告回到主历史")
+    assert.match(text, /floods? your own window/, "收益句：内联探索会淹没自己的窗口")
+    assert.match(text, /Breadth-first exploration[\s\S]*?`explore` subagent/, "广度探索下沉 explore 的规则句")
+    assert.match(text, /Read a file yourself only when you are about to edit it immediately/, "即时编辑例外触发句")
+    assert.match(text, /precision exception, not a token-saving trick/, "精度例外不是省 token 技巧")
+    assert.match(text, /When a coder subagent finishes, verify its work/, "coder 完成后的验证句")
+    assert.match(text, /do NOT redo the whole exploration/, "不重做已委托的整段探索")
+    assert.match(text, /Never give parallel subagents tasks that edit the same files/, "并行不编辑同一文件条款保留")
+    assert.match(text, /When multiple subagent reports conflict, read the relevant code yourself/, "冲突仲裁条款保留")
+  })
+
+  it("SUMMARIZE_PROMPT 区分已完成/进行中 + 两清单：已改动文件 + 未决点/待办", () => {
+    assert.ok(
+      SUMMARIZE_PROMPT.includes("Distinguish COMPLETED vs IN-PROGRESS work"),
+      "区分 COMPLETED vs IN-PROGRESS 指令句在"
+    )
+    assert.ok(
+      SUMMARIZE_PROMPT.includes("completed tasks get a ONE-LINE recap each"),
+      "已完成任务一行回述在"
+    )
+    assert.ok(
+      SUMMARIZE_PROMPT.includes("spend the detail budget on unresolved issues, next steps, and the CURRENT task"),
+      "细节预算留给未决项/下一步/当前任务在"
+    )
+    assert.ok(
+      SUMMARIZE_PROMPT.includes("The user's most recent request defines the current task"),
+      "以用户最近请求为当前任务锚点在"
+    )
+    assert.match(SUMMARIZE_PROMPT, /Explicitly list FILES CHANGED/, "已改动文件清单在")
+    assert.match(SUMMARIZE_PROMPT, /Explicitly list UNRESOLVED ISSUES \/ TODOs/, "未决点/待办清单在")
+  })
+
+  it("EXPLORE_TOOLS 只含只读知识型（execute 不计入）", () => {
+    for (const name of ["read", "grep", "glob", "ls", "code_search", "doc_search", "repo_outline"]) {
+      assert.ok(EXPLORE_TOOLS.has(name), `${name} 属于探索类`)
+    }
+    assert.ok(!EXPLORE_TOOLS.has("execute"), "execute 写文件，不属于探索类")
+  })
+
+  it("≥3 探索结果 → 收缩为一条 note、无孤儿、原数组不变", async () => {
+    const { server, port, requests } = await mockLLMServer("found the config and call sites")
+    try {
+      const pre = [
+        { role: "user", content: "earlier task" },
+        { role: "assistant", content: "earlier done" },
+        { role: "user", content: "investigate the wiring" },
+      ]
+      const run = makeRun(3)
+      const history = [...pre, ...run]
+
+      const shrunk = await summarizeRunExplorations(history, pre.length, mockProvider("unknown-model", port), undefined)
+
+      assert.ok(shrunk, "应返回收缩后的新数组")
+      assert.equal(countNotes(shrunk), 1, "整体替换为一条 note")
+      assert.equal(shrunk.findIndex((m) => typeof m.content === "string" && m.content.startsWith("[Exploration summary]")), pre.length)
+      assertNoOrphans(shrunk, "收缩结果")
+      assert.ok(shrunk.some((m) => m.role === "assistant" && m.content === "investigation done"), "最终回复保留")
+      assert.equal(history.length, pre.length + run.length, "原数组不被就地改动")
+      assert.equal(requests.length, 1, "恰好一次静默摘要调用")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("<3 探索结果 → 返回 null（不发 LLM 调用）", async () => {
+    const { server, port, requests } = await mockLLMServer("should not be called")
+    try {
+      const pre = [{ role: "user", content: "investigate" }]
+      const history = [...pre, ...makeRun(2)]
+      assert.equal(await summarizeRunExplorations(history, pre.length, mockProvider("unknown-model", port), undefined), null)
+      assert.equal(requests.length, 0, "<3 条不应发起摘要请求")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("LLM 摘要失败 → 返回 null（静默跳过、不丢历史）", async () => {
+    const http = await import("node:http")
+    const server = http.createServer((req, res) => {
+      req.resume()
+      req.on("end", () => {
+        res.writeHead(401, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: { message: "invalid api key" } }))
+      })
+    })
+    await new Promise((r) => server.listen(0, "127.0.0.1", r))
+    const port = server.address().port
+    try {
+      const pre = [{ role: "user", content: "investigate" }]
+      const history = [...pre, ...makeRun(3)]
+      assert.equal(await summarizeRunExplorations(history, pre.length, mockProvider("unknown-model", port), undefined), null, "失败返回 null（N3）")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("混合配对（read+edit 同一回合）不被拆分、无孤儿", async () => {
+    const { server, port } = await mockLLMServer("mixed summary")
+    try {
+      const history = [
+        { role: "user", content: "go" },
+        ...explorePair("read", "r1", "pure read"),
+        { role: "assistant", content: null, tool_calls: [
+          { id: "c1", type: "function", function: { name: "read", arguments: "{}" } },
+          { id: "c2", type: "function", function: { name: "write", arguments: "{}" } },
+        ] },
+        { role: "tool", tool_call_id: "c1", name: "read", content: "file content" },
+        { role: "tool", tool_call_id: "c2", name: "write", content: "ok" },
+        ...explorePair("grep", "r2", "pure grep"),
+        ...explorePair("glob", "r3", "pure glob"),
+        { role: "assistant", content: "done" },
+      ]
+      const shrunk = await summarizeRunExplorations(history, 1, mockProvider("unknown-model", port), undefined)
+      assert.ok(shrunk, "应返回收缩结果")
+      assert.ok(shrunk.some((m) => m.role === "tool" && m.tool_call_id === "c2"), "write 工具结果保留")
+      assertNoOrphans(shrunk, "收缩结果")
+      assert.equal(countNotes(shrunk), 1, "纯探索块仍被收缩为一条 note")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("中途压缩重建机器线 → stale 边界静默跳过，重置到 tail 起点(2) 后蒸馏恢复", async () => {
+    const { server, port } = await mockLLMServer("post-compaction exploration summary")
+    try {
+      const provider = mockProvider("unknown-model", port)
+      // 40 条前序消息（run 起点 = 40）→ 压缩后数组大幅缩短，原始边界下标比数组还长（stale）
+      const pre = Array.from({ length: 40 }, (_, i) =>
+        i % 2 === 0 ? { role: "user", content: `prompt ${i}` } : { role: "assistant", content: `reply ${i}` }
+      )
+      const history = [...pre, ...makeRun(3)]
+      const staleStart = pre.length // 40
+
+      // 中途确定性压缩（fallback，无 LLM 调用）→ 重建为 [note, "Understood", ...verbatim tail]
+      const rebuilt = truncateFallback(history, provider)
+      assert.ok(rebuilt, "fallback 压缩应发生")
+      assert.ok(rebuilt.length < staleStart, "重建后的数组比 run 起点还短（旧边界已失效）")
+
+      // 形状：index 0 = 摘要 note、index 1 = "Understood" 占位、index 2 = verbatim tail 起点
+      // （等价 CLI 的 head.length + 2，head 恒空 KEEP_HEAD = 0）
+      assert.match(rebuilt[0].content, /Context was truncated/, "index 0 = 摘要 note")
+      assert.match(rebuilt[1].content, /^Understood\. I'll continue/, "index 1 = Understood 占位")
+
+      // 压缩后继续探索：追加新一轮纯探索配对
+      const combined = [...rebuilt, ...makeRun(3, "second investigation done")]
+
+      // bug 表现：旧边界下标超过重建后数组长度 → distillExplorations 静默跳过（返回 null）
+      assert.equal(
+        await summarizeRunExplorations(combined, staleStart, provider, undefined),
+        null,
+        "stale 边界导致静默跳过",
+      )
+
+      // 修复后边界 = verbatim tail 起点 2 → 蒸馏恢复
+      const shrunk = await summarizeRunExplorations(combined, 2, provider, undefined)
+      assert.ok(shrunk, "重置边界后蒸馏恢复")
+      assert.equal(countNotes(shrunk), 1, "tail 内 raw 探索 + 新增探索收缩为一条 note")
+      assert.ok(shrunk.some((m) => m.role === "assistant" && m.content === "second investigation done"), "压缩后最终回复保留")
+      assertNoOrphans(shrunk, "收缩结果")
+    } finally {
+      server.close()
+    }
   })
 })
