@@ -43,6 +43,7 @@ export const grepTool = {
   readonly: true,
   description:
     "Search file contents with a regex. Returns matching lines.\n" +
+    "Route to grep instead of bash: `findstr /c:\"pat\" file` / `grep -rn pat .` → grep. Searching file contents is a read — never shell out for it.\n" +
     "Parameters:\n" +
     "- pattern (required): JavaScript regular expression, or a literal string when literal=true\n" +
     "- path: Directory or file to search (default workspace root)\n" +

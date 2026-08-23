@@ -194,3 +194,23 @@ describe("execute — async / import / console / workdir / filter", () => {
     assert.equal(await run('log("fast2")', { timeoutMs: 0 }), "fast2")
   })
 })
+
+describe("execute — scriptFile (node <file> / nodeArgs)", () => {
+  it("runs a workspace script file", async () => {
+    writeFileSync(join(tmpDir, "hello.mjs"), 'console.log("hello from script")\n')
+    assert.equal(await executeTool.execute({ scriptFile: "hello.mjs" }, ctx()), "hello from script")
+  })
+
+  it("nodeArgs(--check): good file silent, bad file SyntaxError", async () => {
+    writeFileSync(join(tmpDir, "good.mjs"), "const x = 1\n")
+    assert.equal(await executeTool.execute({ scriptFile: "good.mjs", nodeArgs: ["--check"] }, ctx()), "(no output)")
+    writeFileSync(join(tmpDir, "bad.mjs"), "const x = \n")
+    assert.match(await executeTool.execute({ scriptFile: "bad.mjs", nodeArgs: ["--check"] }, ctx()), /SyntaxError|Unexpected/)
+  })
+
+  it("scriptFile escaping the workspace is rejected; missing code+scriptFile errors", async () => {
+    assert.match(await executeTool.execute({ scriptFile: "../escape.mjs" }, ctx()), /escapes the workspace/)
+    assert.match(await executeTool.execute({}, ctx()), /either code or scriptFile/)
+    assert.match(await executeTool.execute({ scriptFile: "hello.mjs", nodeArgs: ["--eval", "1"] }, ctx()), /not allowed/)
+  })
+})

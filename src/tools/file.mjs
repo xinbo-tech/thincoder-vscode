@@ -13,6 +13,7 @@ export const readTool = {
   readonly: true,
   description:
     "Read a text file. Returns numbered lines. Use offset/limit to page large files.\n" +
+    "Route to read instead of bash: `cat file` / `type file` / `node -e \"fs.readFileSync(...)\"` → read. Reading a file is a read — never shell out for it.\n" +
     "Parameters:\n" +
     "- path (required): File path, relative to cwd or absolute (alias: filePath)\n" +
     "- offset: 1-based line number to start reading from\n" +

@@ -204,6 +204,7 @@ export const lsTool = {
   readonly: true,
   description:
     "List directory contents with type and size.\n" +
+    "Route to ls instead of bash: `dir /b` / `ls` / `dir` → ls. Listing a directory is a read — never shell out for it.\n" +
     "Parameters:\n" +
     "- path: Directory path (default workspace root)\n" +
     "- filter: Only list entries matching this wildcard (e.g. '*.mjs', '*test*')",
@@ -248,6 +249,7 @@ export const deleteTool = {
   name: "delete",
   description:
     "Delete a file. Refuses to delete git-tracked files as a safety measure.\n" +
+    "Route to delete instead of bash: `del file` / `rm file` → delete (single files). Use bash `rm -rf` only for directories.\n" +
     "Parameters:\n" +
     "- path (required): File path, relative to cwd or absolute (alias: filePath)\n" +
     "- force: Allow deleting git-tracked files (default false)",

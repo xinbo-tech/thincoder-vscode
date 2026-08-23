@@ -12,6 +12,10 @@
  * The child `import()`-s exec-prelude.mjs first for readFile/writeFile/glob/
  * grep/log/require (paths confined to the workspace root). Full Node via
  * require()/process/import() is available — same boundary as bash.
+ *
+ * Two modes: inline `code` (prelude + eval) OR `scriptFile` (run a workspace
+ * .mjs/.js file with node [nodeArgs...], self-contained — for `node <script>` /
+ * `node --test <file>` / `node --check <file>`). Both confined to the workspace.
  */
 import { spawn } from "node:child_process"
 import { dirname, resolve, relative, isAbsolute, sep } from "node:path"
@@ -53,10 +57,9 @@ function applyFilter(output, filter) {
 
 /** Spawn node, run code + prelude, capture stdout/stderr, enforce timeout/abort.
  *  Resolves { text, ok } — ok=false on non-zero exit / timeout / abort. */
-function runNodeEval(code, baseDir, root, timeoutMs, signal) {
+function runNode(childArgs, baseDir, root, timeoutMs, signal) {
   return new Promise((resolvePromise) => {
-    const src = `await import(${JSON.stringify(PRELUDE_URL)});\n${code}`
-    const child = spawn(process.execPath, ["--input-type=module", "--eval", src], {
+    const child = spawn(process.execPath, childArgs, {
       cwd: baseDir,
       env: { ...process.env, THINCODER_EXEC_ROOT: root },
       stdio: ["ignore", "pipe", "pipe"],
@@ -110,21 +113,45 @@ function runNodeEval(code, baseDir, root, timeoutMs, signal) {
   })
 }
 
+/** Validate nodeArgs (extra node flags for scriptFile mode, e.g. --test / --check). Forbids
+ *  eval-like flags that would conflict with scriptFile mode or re-open inline injection. */
+function validateNodeArgs(nodeArgs) {
+  if (!nodeArgs) return []
+  const arr = Array.isArray(nodeArgs) ? nodeArgs : String(nodeArgs).split(/\s+/).filter(Boolean)
+  const forbidden = /^(--eval|-e|--input-type|--print|-p|--inspect|--inspect-brk)(=|$)/i
+  for (const a of arr) {
+    if (forbidden.test(a)) throw new Error(`nodeArgs flag not allowed: ${a}`)
+  }
+  return arr
+}
+
 export const executeTool = {
   name: "execute",
   description:
-    "Execute JavaScript code in a real node process with full Node access (top-level await and dynamic import() supported). Use this to compose multiple operations into one call — read, write, glob, grep, log, import, or require() — instead of shelling out to bash node -e.\n" +
+    "Execute JavaScript — either inline `code` or a workspace `scriptFile` — in a real node process with full Node access (top-level await and dynamic import() supported). Use inline code to compose multiple operations into one call — read, write, glob, grep, log, import, or require() — instead of shelling out to bash node -e.\n" +
+    "Route to execute instead of bash: `node -e \"…\"` → execute (inline code); `node <script.mjs>` → execute scriptFile; `node --test <file>` / `node --check <file>` → execute scriptFile + nodeArgs.\n" +
     "Parameters:\n" +
-    "- code (required): JavaScript to run. Top-level await and import('./x.mjs') work. Globals: readFile(path), writeFile(path, content), glob(pattern), grep(pattern, file), log(...args) — plus native require/process/console/fetch/import.\n" +
+    "- code: JavaScript to run inline. Top-level await and import('./x.mjs') work. Globals: readFile(path), writeFile(path, content), glob(pattern), grep(pattern, file), log(...args) — plus native require/process/console/fetch/import. Use this OR scriptFile.\n" +
+    "- scriptFile: run a workspace .mjs/.js file with node (self-contained, no prelude). Path relative to workdir, confined to the workspace. Use this OR code.\n" +
+    "- nodeArgs: (scriptFile) extra node flags before the script, e.g. [\"--test\"], [\"--check\"]. Eval-like flags rejected.\n" +
     "- workdir: run in this directory (relative to cwd, confined to the workspace)\n" +
     "- filter: optional — only return output lines matching this regex (case-insensitive)\n" +
-    "- timeoutMs: Timeout in milliseconds (default 30000, max 60000)",
+    "- timeoutMs: Timeout in milliseconds (default 30000, max 60000). Use bash for npm/CLI subprocesses, servers, interactive programs.",
   parameters: {
     type: "object",
     properties: {
       code: {
         type: "string",
-        description: "JavaScript code to execute (top-level await and dynamic import() supported). Globals: readFile/writeFile/glob/grep/log + native require/process/console/fetch/import.",
+        description: "JavaScript code to execute (top-level await and dynamic import() supported). Globals: readFile/writeFile/glob/grep/log + native require/process/console/fetch/import. Use this OR scriptFile.",
+      },
+      scriptFile: {
+        type: "string",
+        description: "Run a workspace .mjs/.js file with node (self-contained, no prelude). Path relative to workdir, confined to the workspace. Use this OR code. For `node <script>` / `node --test <file>` / `node --check <file>`.",
+      },
+      nodeArgs: {
+        type: "array",
+        items: { type: "string" },
+        description: "(scriptFile) Extra node flags before the script, e.g. [\"--test\"], [\"--check\"]. Eval-like flags (--eval/--input-type/--inspect) are rejected.",
       },
       workdir: {
         type: "string",
@@ -141,15 +168,11 @@ export const executeTool = {
         description: `Timeout in milliseconds (default ${DEFAULT_TIMEOUT}, max 60000)`,
       },
     },
-    required: ["code"],
+    required: [],
   },
   readonly: false,
 
   async execute(args, ctx) {
-    const code = args.code ?? ""
-    if (code.length > MAX_SCRIPT) {
-      return `Error: script too large (${code.length} > ${MAX_SCRIPT} bytes). Split into smaller scripts or use individual tools.`
-    }
     let baseDir
     try { baseDir = resolveBaseDir(ctx.cwd, args.workdir) }
     catch (e) { return `Error: ${e.message}` }
@@ -157,7 +180,27 @@ export const executeTool = {
     const t = Number(args.timeoutMs)
     const timeoutMs = Number.isFinite(t) && t > 0 ? Math.min(t, 60_000) : DEFAULT_TIMEOUT
 
-    const { text, ok } = await runNodeEval(code, baseDir, ctx.cwd, timeoutMs, ctx.signal)
+    let childArgs
+    if (args.scriptFile) {
+      if (args.code?.trim()) return "Error: pass code OR scriptFile, not both"
+      // scriptFile mode: run a workspace .mjs/.js file with node [nodeArgs...]. Self-contained —
+      // no prelude (a real node process imports what it needs). Confined to the workspace.
+      const scriptAbs = resolve(baseDir, args.scriptFile)
+      if (!isInside(ctx.cwd, scriptAbs)) return `Error: scriptFile escapes the workspace: ${args.scriptFile}`
+      let nodeArgs
+      try { nodeArgs = validateNodeArgs(args.nodeArgs) }
+      catch (e) { return `Error: ${e.message}` }
+      childArgs = [...nodeArgs, scriptAbs]
+    } else {
+      const code = args.code ?? ""
+      if (!code.trim()) return "Error: either code or scriptFile is required"
+      if (code.length > MAX_SCRIPT) {
+        return `Error: script too large (${code.length} > ${MAX_SCRIPT} bytes). Split into smaller scripts or use individual tools.`
+      }
+      childArgs = ["--input-type=module", "--eval", `await import(${JSON.stringify(PRELUDE_URL)});\n${code}`]
+    }
+
+    const { text, ok } = await runNode(childArgs, baseDir, ctx.cwd, timeoutMs, ctx.signal)
     // Only filter successful output — never swallow an error report behind a filter.
     if (!ok) return text
     return args.filter ? applyFilter(text, args.filter) : text
