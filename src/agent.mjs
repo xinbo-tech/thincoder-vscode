@@ -78,15 +78,16 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           usageAtLen: agent._usageAtLen,
         }, toolSchemas, signal)
         if (compacted) {
+          // Only reset the end-of-run distillation boundary when the machine line was REBUILT —
+          // a rebuild inserts a summary note + "Understood" placeholder and collapses the middle,
+          // so the array SHRINKS; the shrink path (shrinkOversized) keeps the SAME length (it only
+          // truncates bodies in place), so a same-length result means the boundary is still valid
+          // and must NOT be reset. Reset to 2 = the verbatim tail start ([head(empty), note,
+          // "Understood", ...tail] → tail begins after the two inserted messages).
+          const rebuilt = compacted.length !== history.length
           history.length = 0
           history.push(...compacted)
-          // Compaction REBUILDS the machine line → the pre-compaction _runStartHistoryLen index is
-          // stale (a longer array shrank beneath it, so end-of-run exploration distillation would
-          // silently skip or slice from the wrong offset). compactHistory returns [head(note-side),
-          // summary note, "Understood" placeholder, ...verbatim tail], and head is always empty
-          // (KEEP_HEAD = 0), so the verbatim tail starts at index 2 (== head.length + 2). Reset so
-          // distillation scans only the still-raw tail — the summarized middle needs no re-distilling.
-          agent._runStartHistoryLen = 2
+          if (rebuilt) agent._runStartHistoryLen = 2
           // Measured baseline is invalidated along with old history — fall back to estimation
           agent._lastPromptTokens = null
           agent._usageAtLen = null

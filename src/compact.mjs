@@ -123,12 +123,13 @@ export async function compactHistory(history, systemPrompt, provider, explicitTh
     : overhead + estimateTokens(history)
   if (total < threshold) return null
 
-  // Keep a model-aware number of recent messages — scales with context window, ≤40% of history
-  const keepCountBase = keepTailSize(provider, history.length)
-  let keepCount = Math.min(keepCountBase, Math.floor(history.length * 0.4))
+  // Keep a model-aware number of recent messages — keepTailSize already caps at 40% of history
+  const keepCount = keepTailSize(provider, history.length)
   if (history.length - keepCount <= 1) {
     // No middle section to summarize (history too short, typically one giant message) —
-    // degrade to deterministic per-message shrinking (CLI parity D6).
+    // degrade to deterministic per-message shrinking (CLI parity D6). Shrink keeps the array
+    // LENGTH unchanged (same indices, no note inserted) — the caller uses that to distinguish
+    // it from a rebuild and must NOT reset the end-of-run distillation boundary.
     return shrinkOversized(history)
   }
 
