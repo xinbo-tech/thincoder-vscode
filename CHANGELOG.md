@@ -4,6 +4,12 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.47] — 2026-08-24
+
+### Changed
+
+- **工程模式发起权归用户（对齐 CLI v0.12.42）**：设计评审仅用户发起（agent 只准备+提醒「设计就绪」，不自行调 advisor）；评审打回后每轮呈递发现+修复建议、用户逐条拍板；交付 code review 改为 eng-coder 返回后的自动流程节点
+
 ## [0.1.46] — 2026-08-23
 
 ### Added
