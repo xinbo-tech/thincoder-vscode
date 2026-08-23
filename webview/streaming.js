@@ -117,6 +117,21 @@ export function onToken(text) {
   scheduleStreamRender()
 }
 
+export function onTurnBreak() {
+  // Explicit sub-turn boundary sent by the host when the agent loop pushes a
+  // machine-only reminder and `continue`s (advisor/verify/pending-task guards).
+  // The webview otherwise cannot see that boundary — no toolCall/toolResult
+  // fires — so the onReasoning heuristic (reasoning-after-content) is the only
+  // backup. This explicit reset covers BOTH thinking and non-thinking models.
+  ctx.currentBubble = null
+  ctx.currentBlock = null
+  ctx.currentReasoning = null
+  ctx.currentReasoningRaw = ""
+  ctx.currentRaw = ""
+  ctx.currentTools = []
+  ctx.hadToolResult = false
+}
+
 export function finish(aborted) {
   // Paint any pending throttled chunks before the bubble pointers reset — otherwise
   // the tail of the reply/reasoning never renders.

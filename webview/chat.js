@@ -15,7 +15,7 @@ import { initSettings } from "./settings.js"
 import { closeModelMenu } from "./model-menu.js"
 import { applyI18nToDOM } from "./i18n-dom.js"
 import { send } from "./send.js"
-import { onToken, onReasoning, finish, attachCopyButtons, advisorChunk, subagentChunk } from "./streaming.js"
+import { onToken, onReasoning, onTurnBreak, finish, attachCopyButtons, advisorChunk, subagentChunk } from "./streaming.js"
 import { renderStatusBar, handleUsageMessage } from "./status-bar.js"
 import { handleTaskProgress, handleSubagentMessage, handleGoalMessage } from "./panels.js"
 import { updateSessionTitle, handleProjectMessage } from "./session-bar.js"
@@ -117,6 +117,7 @@ window.addEventListener("message", (e) => {
       break
     case "token":            onToken(m.text); break
     case "reasoning":        onReasoning(m.text); break
+    case "turnBreak":        onTurnBreak(); break
     case "toolCall":         S._currentTool = m.name; addTool(ctx, m.name, m.args, m.id); renderStatusBar(); break
     case "toolResult":       finishTool(ctx, m.name, m.id, m.text, m.links); S._currentTool = null; renderStatusBar(); break
     case "toolOutput": {

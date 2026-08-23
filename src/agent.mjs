@@ -170,6 +170,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
               role: "user",
               content: "[System reminder: your last response was empty — the provider returned no content (likely reasoning was exhausted or output was truncated). Respond again, continuing your work from where you left off.]",
             })
+            callbacks.onSubTurnBreak?.()
             continue
           }
           throw new Error("LLM returned empty response (likely reasoning exhausted or output truncated). Try lowering reasoning effort if this persists.")
@@ -188,6 +189,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
             role: "user",
             content: `[System reminder: you still have pending tasks: ${pending.map((t) => t.title).join(", ")}. Update their status before finishing — if done, mark done; if not applicable, remove them. (This is your only reminder — if you choose not to, finish anyway.)]`,
           })
+          callbacks.onSubTurnBreak?.()
           continue
         }
 
@@ -200,6 +202,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
             role: "user",
             content: "[System reminder: you modified files in this run but have not verified the changes. Before finishing: call the verify tool to run syntax checks and tests. If verify reports failures, fix them and run verify again. If verification is genuinely impossible here, say so explicitly in your reply.]",
           })
+          callbacks.onSubTurnBreak?.()
           continue
         }
         if (agent._verifiedThisRun && agent._verifyPassed === false) {
@@ -212,6 +215,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
               role: "user",
               content: `[System reminder: verify reported failures (retry ${retries}/${MAX_VERIFY_RETRIES}). Review the failures, fix the issues, then run verify again. If you cannot fix after ${MAX_VERIFY_RETRIES} attempts, explain honestly what's blocking you.]`,
             })
+            callbacks.onSubTurnBreak?.()
             continue
           }
           // Exhausted retries — inject honest-declaration reminder
@@ -225,6 +229,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
               role: "user",
               content: `[System reminder: ${MAX_VERIFY_RETRIES} verify attempts exhausted and tests are still failing. In your response to the user, you MUST state explicitly: (1) what tests are still failing, (2) what you tried, (3) what you believe the root cause is. Do not present this as complete — the user needs to know the work is unfinished.${consultHint}]`,
             })
+            callbacks.onSubTurnBreak?.()
             continue
           }
         }
@@ -248,6 +253,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
             role: "user",
             content: `[System reminder: you changed code in this run and MUST get an advisor review before finishing (round ${agent._advisorRound + 1}). Call the \`advisor\` tool now. This is required, not optional — do not skip it even if you believe the changes are trivial — the review will be quick either way. After the review, produce a response table for every issue found (see discipline rules for format).]`,
           })
+          callbacks.onSubTurnBreak?.()
           continue
         }
       }

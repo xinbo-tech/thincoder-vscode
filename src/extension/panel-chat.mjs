@@ -129,6 +129,11 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   const buildCallbacks = () => ({
     onToken: (tok) => { panel._panel?.webview.postMessage({ type: "token", text: tok }) },
     onReasoning: (r) => { panel._panel?.webview.postMessage({ type: "reasoning", text: r }) },
+    // Machine-only sub-turn boundary (advisor/verify/pending-task guard pushback
+    // + continue): the webview resets its block pointers so the next reasoning/
+    // content starts fresh — covers non-thinking models too (no reasoning stream
+    // to trigger the webview's heuristic).
+    onSubTurnBreak: () => { panel._panel?.webview.postMessage({ type: "turnBreak" }) },
     onTaskUpdate: (tasks) => {
       const done = tasks.filter((t) => t.status === "done").length
       const inProgress = tasks.filter((t) => t.status === "in_progress").length
