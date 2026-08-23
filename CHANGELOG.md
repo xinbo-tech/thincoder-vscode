@@ -4,6 +4,18 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.44] — 2026-08-23
+
+### Added
+
+- **主 agent 委托策略** + **历史卫生**（轮末探索摘要 + 压缩 `SUMMARIZE_PROMPT` 保真两清单）：与 CLI 0.12.39 同步
+- **编码纪律**：`discipline.md` 工作流程 + 调试策略要求 `task`；「改码前读文档」「中/小改后更新文档」嵌入 Workflow 箭头序列
+
+### Fixed
+
+- `SUMMARIZE_PROMPT` 补齐 D12 的「COMPLETED vs IN-PROGRESS」句（历史移植缺口）
+- 轮末探索摘要边界在压缩重建后 stale → 重置
+
 ## [0.1.43] — 2026-08-23
 
 ### Added
