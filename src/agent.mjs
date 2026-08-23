@@ -5,7 +5,7 @@
  */
 import { chat } from "./provider.mjs"
 import { specForModel } from "./specs.mjs"
-import { compactHistory, truncateFallback, COMPRESS_FAILURE_LIMIT } from "./compact.mjs"
+import { compactHistory, truncateFallback, COMPRESS_FAILURE_LIMIT, summarizeRunExplorations } from "./compact.mjs"
 import { cleanupConsultSessions } from "./agent-tools/consult.mjs"
 import { traceStop } from "./extension/stop-trace.mjs"
 import {
@@ -50,6 +50,10 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const { agent, history, fullHistory, toolByName, toolSchemas, cfgVerifyGuard, cfgCompactThreshold, systemPrompt } =
     await setupAgentRun({ provider, cwd, input, opts, depth, role, getAuto })
 
+  // End-of-run exploration distillation boundary (CONTEXT-COMPACTION §5): setupAgentRun has already
+  // pushed the user input + injections, so everything appended from here is "this run's" work.
+  agent._runStartHistoryLen = history.length
+
   // ─── Main loop ─────────────────────────────
   const maxTurns = overrideTurns || configuredMaxTurns()
   const recentSigs = []
@@ -76,6 +80,13 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         if (compacted) {
           history.length = 0
           history.push(...compacted)
+          // Compaction REBUILDS the machine line → the pre-compaction _runStartHistoryLen index is
+          // stale (a longer array shrank beneath it, so end-of-run exploration distillation would
+          // silently skip or slice from the wrong offset). compactHistory returns [head(note-side),
+          // summary note, "Understood" placeholder, ...verbatim tail], and head is always empty
+          // (KEEP_HEAD = 0), so the verbatim tail starts at index 2 (== head.length + 2). Reset so
+          // distillation scans only the still-raw tail — the summarized middle needs no re-distilling.
+          agent._runStartHistoryLen = 2
           // Measured baseline is invalidated along with old history — fall back to estimation
           agent._lastPromptTokens = null
           agent._usageAtLen = null
@@ -94,6 +105,9 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           if (truncated) {
             history.length = 0
             history.push(...truncated)
+            // Same boundary reset as the compacted path: truncateFallback returns the same
+            // [head(empty), note, "Understood", ...verbatim tail] shape — tail starts at index 2.
+            agent._runStartHistoryLen = 2
             agent._lastPromptTokens = null
             agent._usageAtLen = null
             reinjectAfterCompaction(history, agent, getAuto)
@@ -259,6 +273,22 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       }
 
       pushReal(history, fullHistory, { role: "assistant", content: response.content })
+      if (depth === 0) {
+        // End-of-run exploration distillation (CONTEXT-COMPACTION §5): shrink this run's inline
+        // exploration results into one semantic note before onComplete. Silent (N3): distillation
+        // failure must never block the return or lose history.
+        try {
+          const shrunk = await summarizeRunExplorations(history, agent._runStartHistoryLen ?? 0, provider, signal)
+          if (shrunk) {
+            history.length = 0
+            history.push(...shrunk)
+            // The machine line changed shape — the measured token baseline was for the pre-shrink
+            // context, so invalidate it (next compaction check falls back to re-estimation).
+            agent._lastPromptTokens = null
+            agent._usageAtLen = null
+          }
+        } catch { /* silent (N3) */ }
+      }
       if (depth === 0) callbacks.onComplete?.(response.content, agentState(agent))
       return response.content
     }
