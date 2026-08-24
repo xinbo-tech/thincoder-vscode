@@ -108,10 +108,8 @@ export const subagentTool = {
       }
     }
 
-    // Turn cap from shared config (CLI parity); explore stays capped lower (read-only search)
-    const maxTurns = role === "explore"
-      ? Math.min(30, parent.config?.agent?.subagentTurns ?? 100)
-      : parent.config?.agent?.subagentTurns ?? 100
+    // Turn cap from shared config (CLI parity)
+    const maxTurns = parent.config?.agent?.subagentTurns ?? 100
     parent._subIdCounter = (parent._subIdCounter ?? 0) + 1
     const subId = parent._subIdCounter
 

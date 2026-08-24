@@ -11,7 +11,7 @@ import { isDocFile } from "../advisor/repos.mjs"
 export const FILE_MUTATORS = new Set(["write", "edit", "insert_after", "apply_patch", "delete", "hashline_edit"])
 export const MAX_ADVISOR_PUSHBACKS = 3
 
-const DEFAULT_MAX_TURNS = 100
+const DEFAULT_MAX_TURNS = 200
 
 /** Top-level turn limit from the shared config.json (CLI agent.maxTurns), with local default fallback. */
 export function configuredMaxTurns() {
@@ -60,8 +60,8 @@ export function hasCodeMutations(agent) {
   if (files.length === 0) return agent._mutatedThisRun
   return files.some((p) => /(?:^|[\\/])src[\\/]/.test(p) || !isDocFile(p))
 }
-export const MAX_TOOL_RESULT = 16000 // chars — large results saved to disk instead of truncated (aligns with CLI)
-export const TOOL_RESULT_PREVIEW = 2000 // chars shown inline when offloaded (aligns with CLI)
+export const MAX_TOOL_RESULT = 64 * 1024 // chars — large results saved to disk instead of truncated (aligns with CLI)
+export const TOOL_RESULT_PREVIEW = 64 * 1024 // chars shown inline when offloaded (aligns with CLI)
 /** Offload-dir write-time self-cleanup retention window (CLI parity 2026-08-21): files older than 3 days are deleted on the next offload. */
 export const TMP_RETENTION_MS = 3 * 24 * 3600 * 1000
 export const MAX_PARALLEL_SUBAGENTS = 3

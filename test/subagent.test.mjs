@@ -151,6 +151,33 @@ test("subagent tool: user Stop at the wall → partial-work return, no resume", 
 })
 
 
+// ─── explore turn budget (AGENT-PARAMS-TUNING 2026-08-24): no Math.min(30, …) hard cap ───
+
+test("explore sub-agent uses the full subagentTurns budget — no 30-round cap (AC3)", async () => {
+  const { server, calls } = wallServer(999)
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  try {
+    const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+    const parent = {
+      _provider: { name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" },
+      config: {
+        providersList: [{ name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" }],
+        agent: { subagentTurns: 42, engineering: false },
+      },
+      _subIdCounter: 0,
+    }
+    const ctx = { agent: parent, cwd, callbacks: {} }
+    const r = String(await subagentTool.execute({ task: "loop", role: "explore" }, ctx))
+    assert.equal(calls.n, 42, "explore runs the full 42-turn budget (old Math.min(30, …) would stop at 30)")
+    assert.ok(r.includes("turn cap reached (42 turns)"), "cap message names the configured budget")
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
 // ─── mode-dependent subagent role enum (ARCHITECTURE.md: subagent role 枚举按模式覆盖) ───
 
 test("modeRoleField(false): coder shown, eng-coder hidden, suffix empty", async () => {

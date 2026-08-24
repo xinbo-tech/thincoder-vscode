@@ -218,11 +218,11 @@ export function providerNamesInConfig() {
   }
 }
 
-/** Agent runtime settings from config.json (CLI agent.* defaults: maxTurns 100, subagentTurns 100). */
+/** Agent runtime settings from config.json (CLI agent.* defaults: maxTurns 200, subagentTurns 100). */
 export function loadAgentSettings() {
   const a = loadRaw().agent
   return {
-    maxTurns: a?.maxTurns ?? 100,
+    maxTurns: a?.maxTurns ?? 200,
     subagentTurns: a?.subagentTurns ?? 100,
     subagentModel: a?.subagentModel ?? null, // default subagent model override (CLI parity)
     subagentModels: a?.subagentModels ?? {}, // per-type overrides: explore/plan/coder/eng-coder (CLI parity)
@@ -231,7 +231,7 @@ export function loadAgentSettings() {
       engineering: a?.engineering ?? false, // engineering mode flag (VS Code: config-level; the eng tool persists here)
     consultTurns: a?.consultTurns ?? 40, // consultation turn budget (was 100, then 15 was too tight)
     consultTimeoutMs: a?.consultTimeoutMs ?? 600000, // wall-clock watchdog per consultant (5 min)
-    advisor: a?.advisor ?? { guard: false },
+    advisor: a?.advisor ?? { guard: false }, // timeoutMs passes through panel saves; runtime default 600_000 (advisor/run.mjs)
     consultModels: Array.isArray(a?.consultModels) ? a.consultModels : [],
   }
 }
@@ -292,6 +292,14 @@ export function saveAgentSettingsFromPanel(payload) {
     const current = loadAgentSettings().advisor ?? {}
     patch.advisor = {
       guard: adv.guard !== undefined ? !!adv.guard : (current.guard ?? false),
+      // timeoutMs passthrough (AGENT-PARAMS-TUNING, P4): the panel has no timeoutMs
+      // input — an explicit valid payload value wins, otherwise the hand-written
+      // config.json value survives a panel save (never silently dropped).
+      ...(typeof adv.timeoutMs === "number" && adv.timeoutMs > 0
+        ? { timeoutMs: adv.timeoutMs }
+        : (typeof current.timeoutMs === "number" && current.timeoutMs > 0
+          ? { timeoutMs: current.timeoutMs }
+          : {})),
       ...(typeof adv.effort === "string" && adv.effort.trim() ? { effort: adv.effort.trim() } : {}),
       ...("provider" in adv ? (adv.provider ? { provider: adv.provider } : undefined) : {}),
       ...("model" in adv ? (adv.model ? { model: adv.model } : undefined) : {}),

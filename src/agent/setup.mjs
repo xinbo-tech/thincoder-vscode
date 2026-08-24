@@ -115,7 +115,7 @@ export async function setupAgentRun({ provider, cwd, input, opts, depth, role, g
   let cfgSubagentModel = null
   let cfgSubagentModels = null
   let cfgSubagentTurns = 100
-  let cfgMaxTurns = 100
+  let cfgMaxTurns = 200
   let cfgConsultModels = []
   let cfgConsultTurns = 40
   let cfgConsultTimeoutMs = 600_000
@@ -132,7 +132,7 @@ export async function setupAgentRun({ provider, cwd, input, opts, depth, role, g
     cfgSubagentModel = raw.agent?.subagentModel ?? null // default subagent model override (CLI parity)
     cfgSubagentModels = raw.agent?.subagentModels ?? {} // per-type subagent model overrides (CLI parity)
     cfgSubagentTurns = raw.agent?.subagentTurns ?? 100 // subagent turn cap (CLI parity)
-    cfgMaxTurns = raw.agent?.maxTurns ?? 100
+    cfgMaxTurns = raw.agent?.maxTurns ?? 200
     cfgConsultModels = raw.agent?.consultModels ?? [] // consultation model list (CONSULTATION.md)
     cfgConsultTurns = raw.agent?.consultTurns ?? 40 // consultation turn budget (panel-exposed)
     cfgConsultTimeoutMs = raw.agent?.consultTimeoutMs ?? 600_000 // consultation wall-clock watchdog (panel-exposed)

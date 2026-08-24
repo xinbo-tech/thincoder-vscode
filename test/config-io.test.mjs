@@ -440,9 +440,9 @@ describe("MCP server CRUD", () => {
 // ─── Agent settings (batch C) ───────────────────────────────────
 
 describe("agent settings", () => {
-  it("loadAgentSettings defaults: maxTurns 100, verifyGuard off, compactThreshold auto", () => {
+  it("loadAgentSettings defaults: maxTurns 200, verifyGuard off, compactThreshold auto", () => {
     const s = loadAgentSettings()
-    assert.equal(s.maxTurns, 100)
+    assert.equal(s.maxTurns, 200)
     assert.equal(s.subagentTurns, 100)
     assert.equal(s.verifyGuard, false)
     assert.equal(s.compactThreshold, null)
@@ -487,6 +487,15 @@ describe("agent settings", () => {
     assert.equal(loadAgentSettings().engineering, true)
     saveAgentSettingsFromPanel({ engineering: false })
     assert.equal(loadAgentSettings().engineering, false)
+  })
+
+  it("panel save preserves a handwritten advisor.timeoutMs (AGENT-PARAMS-TUNING AC6)", () => {
+    saveAgentSettings({ advisor: { guard: false, timeoutMs: 123456 } })
+    saveAgentSettingsFromPanel({ advisor: { guard: true } })
+    assert.deepEqual(loadRaw().agent.advisor, { guard: true, timeoutMs: 123456 }, "guard updated, timeoutMs preserved through the panel save")
+    // explicit valid timeoutMs in the payload wins over the current value
+    saveAgentSettingsFromPanel({ advisor: { timeoutMs: 999 } })
+    assert.equal(loadRaw().agent.advisor.timeoutMs, 999, "payload timeoutMs takes precedence")
   })
 
 })

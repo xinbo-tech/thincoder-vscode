@@ -67,11 +67,11 @@ describe("saveAgentSettingsFromPanel — single write channel (regression)", () 
     assert.equal(raw.agent.advisor.guard, true, "advisor guard updated in the same write")
   })
 
-  it("advisor provider/model cleared when emptied; guard survives merge", () => {
-    writeFileSync(cfgPath, JSON.stringify({ agent: { advisor: { guard: false, provider: "deepseek", model: "m1" } } }))
+  it("advisor provider/model cleared when emptied; guard survives merge; timeoutMs preserved (AGENT-PARAMS-TUNING)", () => {
+    writeFileSync(cfgPath, JSON.stringify({ agent: { advisor: { guard: false, provider: "deepseek", model: "m1", timeoutMs: 300000 } } }))
     saveAgentSettingsFromPanel({ advisor: { guard: true, provider: undefined, model: "" } })
     const raw = loadRaw()
-    assert.deepEqual(raw.agent.advisor, { guard: true }, "cleared provider/model removed, guard updated, no enabled key")
+    assert.deepEqual(raw.agent.advisor, { guard: true, timeoutMs: 300000 }, "cleared provider/model removed, guard updated, timeoutMs preserved, no enabled key")
     // guard not sent → previous guard survives
     saveAgentSettingsFromPanel({ advisor: {} })
     assert.equal(loadRaw().agent.advisor.guard, true, "guard preserved when not in payload")

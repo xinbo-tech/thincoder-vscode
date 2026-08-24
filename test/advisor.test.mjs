@@ -6,6 +6,7 @@
 import { describe, it, before, after, beforeEach } from "node:test"
 import assert from "node:assert/strict"
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs"
+import { createServer } from "node:http"
 import { join, dirname } from "node:path"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
@@ -16,7 +17,7 @@ import { verifyCitations, appendCitationReport, extractCitations } from "../src/
 import { buildAdvisorUserMessage } from "../src/advisor/messages.mjs"
 import { isDocFile } from "../src/advisor/repos.mjs"
 import { validateDesignToken, extractTokenUUID } from "../src/agent-tools/advisor.mjs"
-import { resolveAdvisorProvider } from "../src/advisor/run.mjs"
+import { resolveAdvisorProvider, MAX_RESULT_CHARS } from "../src/advisor/run.mjs"
 import { _setConfigPathForTest } from "../src/config-io.mjs"
 
 let tmpDir
@@ -428,6 +429,76 @@ describe("_renderTimeline (CLI parity — review process at its real positions)"
   })
 })
 
+// ─── advisor review timeout (AGENT-PARAMS-TUNING 2026-08-24): agent.advisor.timeoutMs ───
+
+/** Mock LLM server that always demands a read tool call (loop); beforeRespond runs
+ *  before each response — used to advance the mocked clock past the review timeout
+ *  between rounds (deterministic, no real waiting). */
+function toolLoopServer(beforeRespond) {
+  const calls = { n: 0 }
+  const server = createServer((req, res) => {
+    req.on("data", () => {}) // drain the request body — a response racing an unread body stalls the connection
+    req.on("end", () => {
+      calls.n++
+      beforeRespond?.(calls.n)
+      const frame = { choices: [{ index: 0, finish_reason: "tool_calls", delta: { content: "", tool_calls: [{ index: 0, id: "t1", type: "function", function: { name: "read", arguments: JSON.stringify({ path: "x" }) } }] } }] }
+      res.end(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`)
+    })
+  })
+  return { server, calls }
+}
+
+async function runToolLoop(advisorCfg, beforeRespond) {
+  const { server, calls } = toolLoopServer(beforeRespond)
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  try {
+    const { _runAdvisorToolLoop } = await import("../src/advisor/run.mjs")
+    const provider = { baseURL: `http://127.0.0.1:${port}`, apiKey: "sk-test", model: "deepseek-v4-pro" }
+    const agent = { config: { advisor: advisorCfg } }
+    const result = await _runAdvisorToolLoop(provider, [{ role: "user", content: "review" }], null, null, agent, tmpDir)
+    return { result, calls }
+  } finally {
+    server.close()
+  }
+}
+
+describe("advisor review timeout (AGENT-PARAMS-TUNING)", () => {
+  it("configured agent.advisor.timeoutMs truncates the review (~100ms) — AC1", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"] })
+    try {
+      const { result, calls } = await runToolLoop({ timeoutMs: 100 }, () => t.mock.timers.tick(150))
+      assert.match(result, /review timeout after/, "timeout message names the truncation")
+      assert.equal(calls.n, 1, "truncated after the first tool round — no second LLM call")
+    } finally {
+      t.mock.timers.reset()
+    }
+  })
+
+  it("no timeoutMs config falls back to the 600s default — AC2", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"] })
+    try {
+      const { result } = await runToolLoop(undefined, () => t.mock.timers.tick(600_001))
+      assert.match(result, /review timeout after 600s/, "default message shows 600s")
+    } finally {
+      t.mock.timers.reset()
+    }
+  })
+
+  it("invalid timeoutMs values (0 / -100 / 'abc') fall back to the default — AC9", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"] })
+    try {
+      for (const bad of [0, -100, "abc"]) {
+        const { result, calls } = await runToolLoop({ timeoutMs: bad }, () => t.mock.timers.tick(600_001))
+        assert.equal(calls.n, 1, `first round ran — no immediate timeout for ${JSON.stringify(bad)}`)
+        assert.match(result, /review timeout after 600s/, `default timeout still enforced for ${JSON.stringify(bad)}`)
+      }
+    } finally {
+      t.mock.timers.reset()
+    }
+  })
+})
+
 // ─── 文档归属纪律 + advisor 设计评审增强（2026-08-21，规格见 CLI AGENT-LOOP.md §12） ───
 
 const VSCODE_SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "src")
@@ -504,5 +575,13 @@ describe("document ownership + design-review enhancement (2026-08-21)", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
+  })
+})
+
+// ─── MAX_RESULT_CHARS ────────────────────────────────────────────
+
+describe("MAX_RESULT_CHARS — advisor 工具结果截断上限（TOOL-OUTPUT-LIMITS-TUNING §2.2 / AC4）", () => {
+  it("equals 64 * 1024 = 65536，与主链路落盘阈值对齐", () => {
+    assert.equal(MAX_RESULT_CHARS, 64 * 1024)
   })
 })

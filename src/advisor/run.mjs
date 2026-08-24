@@ -30,8 +30,8 @@ export const ADVISOR_THINKING_PLACEHOLDER = "\n[thinking…]\n"
 // Context window limits
 const MAX_CONTEXT_TOKENS = 120_000 // Reserve headroom to avoid OOM
 const TOOL_TIMEOUT_MS = 30_000 // single tool timeout
-const REVIEW_TIMEOUT_MS = 300_000 // whole review timeout
-const MAX_RESULT_CHARS = 12_000 // tool result truncation (line-aware)
+const REVIEW_TIMEOUT_MS = 600_000 // whole review timeout (10 minutes; agent.advisor.timeoutMs overrides)
+export const MAX_RESULT_CHARS = 64 * 1024 // tool result truncation (line-aware; 64K, aligned with main offload limit)
 const MAX_UNFIXED_DISPLAY = 10 // unfixed issues shown in the cap message
 const MAX_KEY_FILES_IN_COMPACTION = 5 // files named in the compaction summary
 
@@ -157,9 +157,14 @@ async function runAdvisorToolLoop(provider, messages, onOutput, signal, agent, c
     // Interrupted (Ctrl+I) — stop immediately instead of spinning a fresh uncancellable signal
     if (signal?.aborted) return renderTimeline(timeline, "Advisor: interrupted.")
     
-    // Check review timeout (5 minutes)
-    if (Date.now() - startTime > REVIEW_TIMEOUT_MS) {
-      return renderTimeline(timeline, `Advisor: review timeout after ${Math.round(REVIEW_TIMEOUT_MS / 1000)}s. Partial results may be available. Try again with a narrower scope.`)
+    // Check review timeout (default 10 minutes; agent.advisor.timeoutMs overrides).
+    // Runtime validation (design review #1, 2026-08-24): hand-written config.json
+    // invalid values (0/negative/string) must not silently disable or immediately
+    // trigger the timeout — invalid values fall back to the default.
+    const cfg = agent.config?.advisor?.timeoutMs
+    const timeoutMs = (Number.isFinite(cfg) && cfg > 0) ? cfg : REVIEW_TIMEOUT_MS
+    if (Date.now() - startTime > timeoutMs) {
+      return renderTimeline(timeline, `Advisor: review timeout after ${Math.round(timeoutMs / 1000)}s. Partial results may be available. Try again with a narrower scope.`)
     }
     
     if (++turns > MAX_ADVISOR_TURNS) {
@@ -302,6 +307,10 @@ async function runAdvisorToolLoop(provider, messages, onOutput, signal, agent, c
     }
   }
 }
+
+// Test seam (mirrors the CLI's _renderTimeline pattern): the timeout/truncation
+// tests drive the loop against a local mock LLM server.
+export { runAdvisorToolLoop as _runAdvisorToolLoop }
 
 /** Resolve the advisor's provider: config advisor.provider/model when set, otherwise the main agent's provider (CLI parity). */
 export function resolveAdvisorProvider(agent) {
