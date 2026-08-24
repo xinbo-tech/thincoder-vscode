@@ -4,6 +4,21 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.50] — 2026-08-25
+
+### Fixed
+
+- **安全修复：subagent 变形 role 绕过工程模式门禁**——`role="Coder"/" coder"` 等非精确字符串穿透两个模式门禁（精确比较），fallthrough 到全工具/无 overlay 子代理，绕过设计评审与 design token 拿到完整写权限。修复：execute 入口 ROLES 白名单，未知 role 直接 throw（fail-closed）；防回归测试锁定 7 种变形值 × 两种模式
+- IK9UZ8 思考型模型标题生成失败：三格式禁思考（openai thinking / anthropic thinking / google thinkingConfig）+ max_tokens 30→100——思考不再吃光输出预算致标题为空（CLI 3c1815e 对齐）
+
+### Docs
+
+- Settings 6 份历史批次文档合并为 `SETTINGS.md` 现行权威源；文档状态修复（13 处"待评审"→"已实现"）
+
+## [0.1.49] — 2026-08-25
+
+（vsce publish patch 自动 bump 版本；内容同 0.1.48——含评审超时配置/64K/蒸馏异步 send 按钮修复/sleep 删除）
+
 ## [0.1.48] — 2026-08-25
 
 ### Added
