@@ -1,6 +1,6 @@
 # sleep 工具删除 — 设计（VS Code 扩展）
 
-> 状态：待评审（2026-08-25）
+> 状态：**已实现**（2026-08-25 评审修订后实施；Open VSX/Marketplace 0.1.49）
 > 需求：`docs/design/SLEEP-REMOVAL-REQUIREMENTS.md`
 > 关联：`docs/design/README.md`（文档地图）
 > 说明：与 CLI 端 `SLEEP-REMOVAL-TUNING.md` 同源（两端语义一致，各自文件清单独立——文档地图惯例）

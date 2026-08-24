@@ -1,6 +1,6 @@
 # 覆盖率缺口修复 — 设计（VS Code 扩展）
 
-> 状态：待评审（2026-08-25）
+> 状态：**已实现**（2026-08-25 评审修订后实施；commit acce3e4）
 > 需求：`docs/design/COVERAGE-GAPS-REQUIREMENTS.md`
 > 关联：`docs/design/README.md`（文档地图）
 > 说明：与 CLI 端 `COVERAGE-GAPS-TUNING.md` 同源（两端语义一致，各自文件清单独立——文档地图惯例）
