@@ -281,4 +281,26 @@ describe("async distillation — panel save + slot guard + rapid-fire (SEND-STAL
       server.close()
     }
   })
+
+  it("AC5 — onToolResult truncates the live tool result at 64K (old 20K cap lifted)", async () => {
+    // read 方式（评审 #6，2026-08-25）：mkFiles 基础上额外建 70_000 字符 big.txt，第一轮发 read 调用
+    // — 零额外工具注入。read 工具不截断（tools/file.mjs 无默认 limit）；>64K 结果经 offloadToolResult
+    // 落盘为「提示 + 64K 预览 + ...」，onToolResult 再 slice(0, 64K) → 长度恰为 65536（评审 #7 精确断言）。
+    mkFiles()
+    writeFileSync(join(tmp, "big.txt"), "x".repeat(70_000))
+    const { server, port } = await scriptedLLMServer(async (i, body) => {
+      if (i === 1) return sseTools([{ index: 0, id: "c0", type: "function", function: { name: "read", arguments: JSON.stringify({ path: "big.txt" }) } }])
+      return sseTurn("done")
+    })
+    try {
+      const posted = []
+      const panel = await makePanel(port, posted)
+      await panel._chat("first message", undefined, undefined, "t")
+      const toolMsg = posted.find((m) => m.type === "toolResult" && m.name === "read" && m.text.length > 20_000)
+      assert.ok(toolMsg, "toolResult message posted (read)")
+      assert.equal(toolMsg.text.length, 64 * 1024, "live tool result capped at exactly 64K (评审 #7 精确断言)")
+    } finally {
+      server.close()
+    }
+  })
 })
