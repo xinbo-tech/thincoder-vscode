@@ -5,6 +5,7 @@
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { historyWindow, HISTORY_PAGE_SIZE } from "../src/extension/session-io.mjs"
+import { sendHistoryPage } from "../src/extension/panel-session.mjs"
 
 function fakeHistory(n) {
   return Array.from({ length: n }, (_, i) => ({ role: i % 3 === 0 ? "user" : "assistant", content: `msg-${i}`, timestamp: i }))
@@ -140,5 +141,33 @@ describe("tool name survives the restore path (write side + window passthrough)"
     const { messages } = historyWindow(h, null)
     const toolMsg = messages.find((m) => m.kind === "tool")
     assert.equal(toolMsg.name, "bash", "restored history card gets the tool name, not the 'tool' fallback")
+  })
+})
+
+describe("sendHistoryPage — 工具卡文本截断上限 64K（TOOL-OUTPUT-LIMITS-TUNING §2.4 / AC6）", () => {
+  function capturePanel() {
+    let captured = null
+    const panel = { _panel: { webview: { postMessage: (msg) => { captured = msg } } } }
+    return { panel, get: () => captured }
+  }
+
+  it("70_000 字符工具消息截到 64K，且 > 20000（原 2K 限制已破）", () => {
+    const { panel, get } = capturePanel()
+    const messages = [{ kind: "tool", text: "x".repeat(70_000), name: "bash", idx: 0 }]
+    sendHistoryPage(panel, messages, false, false)
+    const captured = get()
+    assert.ok(captured, "historyPage 消息发出")
+    assert.equal(captured.type, "historyPage")
+    assert.equal(captured.messages[0].text.length, 64 * 1024, "工具卡文本截到 64K")
+    assert.ok(captured.messages[0].text.length > 20_000, "64K 透传（原 2K 限制已破）")
+    assert.equal(captured.messages[0].name, "bash")
+    assert.equal(captured.messages[0].idx, 0)
+  })
+
+  it("短工具文本原样透传", () => {
+    const { panel, get } = capturePanel()
+    const messages = [{ kind: "tool", text: "done", name: "bash", idx: 0 }]
+    sendHistoryPage(panel, messages, false, false)
+    assert.equal(get().messages[0].text, "done")
   })
 })

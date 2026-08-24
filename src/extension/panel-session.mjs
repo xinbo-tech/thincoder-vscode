@@ -80,6 +80,11 @@ export function loadModelPrefs(panel) {
   }
 
 export function loadSession(panel) {
+    // Session switch (webview newSession/loadSession/deleteSession, project switch, panel open):
+    // abort any in-flight async distillation from the previous turn — its history arrays belong
+    // to the OLD session (SEND-STALL-DISTILL review #1; onDistilled's slot check is defense in
+    // depth). The next turn lazily creates a fresh controller.
+    panel._distillController?.abort()
     const history = activeHistory(panel)
     // AUTO state is session-level (CLI parity) — sync the panel flag and the webview
     // toolbar button to the slot's autoApprove field on every session load/switch.
@@ -107,7 +112,7 @@ export function sendHistoryPage(panel, messages, hasOlder, older) {
     // with the per-message strip in the old eager loader).
     const clean = messages.map((m) => {
       if (m.kind === "user") return { ...m, text: stripEditorInjection(m.text) }
-      if (m.kind === "tool") return { ...m, text: m.text.slice(0, 2000) }
+      if (m.kind === "tool") return { ...m, text: m.text.slice(0, 64 * 1024) }
       return m
     })
     panel._panel?.webview.postMessage({ type: "historyPage", messages: clean, hasOlder, older })

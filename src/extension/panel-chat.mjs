@@ -28,6 +28,28 @@ import { _cwd } from "./panel-messages.mjs"
  */
 export async function runPanelChat(panel, { text, modelOverride, reasoning, providerName, images }) {
   if (!panel._panel) { vscode.window.showErrorMessage("_chat: panel is null"); return }
+
+  // Async distillation mount point (SEND-STALL-DISTILL): the distill promise survives across
+  // turns on the panel (runAgent rebuilds its agent object every call). `pending` is the
+  // previous turn's in-flight distill — the next runAgent awaits it before pushing its input.
+  panel._distillState ??= { pending: null }
+  // One AbortController per panel lifetime — NOT recreated per turn: a rapid second message
+  // must not cancel the previous turn's in-flight distill (AC6a). Only panel dispose / session
+  // switch aborts it (review #1); the next turn then lazily creates a fresh one.
+  if (!panel._distillController || panel._distillController.signal.aborted) {
+    panel._distillController = new AbortController()
+  }
+
+  // Previous turn's async distillation must land BEFORE this turn loads the lines from disk:
+  // runPanelChat rebuilds the history array per turn (activeLines → JSON.parse of the slot),
+  // so awaiting inside runAgent alone would shrink the DETACHED previous array and this turn
+  // would start from the stale uncompressed line (AC6a race). The runAgent-side await (N1)
+  // stays for direct callers; here pending is nulled so runAgent sees a no-op.
+  const prevDistill = panel._distillState.pending
+  if (prevDistill) {
+    panel._distillState.pending = null
+    await prevDistill
+  }
   if (!providerName) {
     // Default provider: activeProvider first (CLI parity) — the settings-panel radio
     // sets this pointer; fall back to the first provider that has a key.
@@ -79,6 +101,9 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   // both lines via its internal pushReal — chat-panel only supplies the lines and persists them.
   const { fullHistory, contextHistory } = panel._activeLines()
   const history = Array.isArray(contextHistory) ? contextHistory : [...fullHistory]
+  // Slot snapshot for the async distill save (onDistilled): if the user switches session while
+  // the distill is in flight, the compressed history must not be written into the new session.
+  const distillSlot = panel._slot
   const isFirstMessage = fullHistory.filter((m) => (m.type ?? m.role) === "user").length === 0
 
   // Restore the session-scoped design token (persists across turns within a session; the
@@ -103,6 +128,9 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   // pushReal into fullHistory (no separate accumulation needed here).
   // Accumulate token usage across all LLM calls in this turn (matches CLI)
   const totalUsage = { prompt_tokens: 0, completion_tokens: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 }
+  // Agent state captured at onComplete, reused by the async onDistilled save — agent.mjs calls
+  // onDistilled without args, so the persisted engineering fields ride the closure.
+  let lastAgentState = {}
   // Ask a question in the panel (persistent in-chat card, never auto-dismisses) — shared
   // by the `question` tool and the turn-cap "Continue?" prompt. A native notification toast
   // (showInformationMessage) auto-dismisses after a while and resolves undefined, which can
@@ -153,7 +181,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     },
     onToolCall: (n, a, id) => panel._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
     onToolResult: (n, r, id) => {
-      const text = (r || "").slice(0, 20000)
+      const text = (r || "").slice(0, 64 * 1024)
       // Verified workspace-real paths ride along so the webview can linkify them.
       const links = extractFileLinks(cwd, text)
       panel._panel?.webview.postMessage({ type: "toolResult", name: n, text, id, links })
@@ -166,16 +194,26 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       panel._panel?.webview.postMessage({ type: "toolPanel", name, kind, text, round: chunk?.round })
     },
     onComplete: (content, agentState) => {
+      lastAgentState = agentState ?? {}
       panel._saveLines(fullHistory, history, { activeProvider: providerName, ...agentState })
       panel._panel?.webview.postMessage({ type: "complete" })
       panel._pushSessions()
       // Native notification when the user is in another window (no-op when focused).
       notifyCompletionIfUnfocused()
     },
+    // Distillation finished and the machine line was REPLACED by the compressed version — the
+    // onComplete save above holds the pre-shrink line, so persist again (FR3/AC5). Slot guard:
+    // a session switch since this turn started means the shrink belongs to the OLD session —
+    // never write it into the new one (AC6). Silent (N3): a save failure must not surface.
+    onDistilled: () => {
+      if (panel._slot !== distillSlot) return
+      try { panel._saveLines(fullHistory, history, { activeProvider: providerName, ...lastAgentState }) }
+      catch (e) { console.error("[chat-panel] distill save failed:", e.message) }
+    },
     onPermissionRequired: permissionGate(panel),
     onQuestion: (question, options) => askInPanel(question, options),
   })
-  const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume, planMode: panel._activeData()?.planMode ?? false })
+  const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume, planMode: panel._activeData()?.planMode ?? false, distillState: panel._distillState, distillSignal: panel._distillController?.signal })
   // Turn-cap continue loop (CLI agent-turn.mjs parity): each ContinueError offers
   // "Continue" — unlimited, resume:true keeps history, fresh budget per run. The loop
   // also folds in the Ctrl+I interrupt resume (same rebuild-controller semantics).
