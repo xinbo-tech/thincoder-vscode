@@ -361,3 +361,29 @@ test("activity stream: onToken → panel kind=text and accumulates; onReasoning 
     rmSync(cwd, { recursive: true, force: true })
   }
 })
+
+// ─── variant roles fail closed (coder-leak fix, 2026-08-25) ─────────────────────
+// The mode gates used exact string comparison — "Coder"/" coder" bypassed BOTH gates and
+// fell through to full tools / no overlay (a full-write coder without design review).
+// Schema enums are advisory; providers don't enforce them. Unknown roles must throw.
+test("variant roles fail closed — coder leak fix (2026-08-25)", async () => {
+  const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+  const makeCtx = (engineering) => ({
+    cwd: process.cwd(),
+    agent: { config: { agent: { engineering } }, _engDesignToken: null, _touchedFiles: [] },
+    callbacks: {}, depth: 0,
+  })
+  for (const role of ["Coder", "CODER", " coder", "eng-coder ", "Explore", "bogus", ""]) {
+    for (const eng of [true, false]) {
+      await assert.rejects(
+        subagentTool.execute({ task: "x", role }, makeCtx(eng)),
+        /Unknown subagent role/,
+        `role=${JSON.stringify(role)} engineering=${eng} must fail closed`,
+      )
+    }
+  }
+  await assert.rejects(
+    subagentTool.execute({ task: "x", role: "coder" }, makeCtx(true)),
+    /use role='eng-coder'/,
+  )
+})
