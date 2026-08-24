@@ -4,6 +4,22 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.48] — 2026-08-25
+
+### Added
+
+- **评审超时可配置**：`agent.advisor.timeoutMs`（默认 600s，原固定 300s）——运行期读取，非法值回退默认；设置面板保存 advisor 字段时不再丢弃手写 timeoutMs
+- **主 agent 轮次上限默认 100 → 200**；**explore 子 agent 去掉 30 轮硬帽**（直接用 `subagentTurns`）
+
+### Changed
+
+- **工具输出限制全链路 16K → 64K（65536）**：落盘阈值/preview、advisor 内部截断、实时显示（20K→64K）、历史页工具卡（2K→64K）全部对齐——大输出不再被过早落盘/截断
+- **轮末探索蒸馏异步化——send 按钮立即恢复**：`onComplete` 先于蒸馏发出（不再等第二次静默 LLM 调用）；蒸馏异步完成（专用 distillSignal，仅 dispose/会话切换中断），下一轮开头 await，压缩版经 `onDistilled` 落盘（slot 校验防串会话）
+
+### Removed
+
+- **`sleep` 工具删除**：编程场景零真实使用，且工具说明误导模型在同步工具（advisor/subagent）后 sleep 空等——白耗 10-300 秒；等待需求改走 bash 内联命令；内部速率限制/重试退避不受影响
+
 ## [0.1.47] — 2026-08-24
 
 ### Changed
