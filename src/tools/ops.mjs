@@ -1,6 +1,6 @@
 /**
  * ops.mjs — operational tools: file_ops (move/copy/rename), process (list),
- * get_current_time, sleep. Dedicated tools so the model doesn't shell out to `bash`
+ * get_current_time. Dedicated tools so the model doesn't shell out to `bash`
  * for the same operation (parity with thinworker's programming tool set).
  */
 import { cp, rename, rm } from "node:fs/promises"
@@ -119,37 +119,5 @@ export const getCurrentTimeTool = {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "unknown"
     const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     return `Date: ${now.toISOString()} (UTC)\nTimezone: ${tz}\nWeekday: ${days[now.getDay()]}\nLocal: ${now.toLocaleString()}`
-  },
-}
-
-// ─── sleep ─────────────────────────────────────────────────────
-
-export const sleepTool = {
-  name: "sleep",
-  description:
-    "Wait a number of seconds before continuing. Use to wait for a web page / async task / rate limit — cheaper than repeatedly polling.\n" +
-    "Parameters:\n" +
-    "- seconds (required): 1-300\n" +
-    "- reason (optional): why you are waiting (shown to the user)",
-  parameters: {
-    type: "object",
-    properties: {
-      seconds: { type: "number", description: "Seconds to wait (1-300)" },
-      reason: { type: "string", description: "Why wait (shown to the user)" },
-    },
-    required: ["seconds"],
-  },
-  readonly: true,
-  async execute({ seconds, reason }, ctx) {
-    const raw = Number(seconds)
-    const n = Number.isFinite(raw) ? Math.min(Math.max(Math.round(raw), 1), 300) : 1
-    await new Promise((resolve, reject) => {
-      const t = setTimeout(resolve, n * 1000)
-      if (ctx?.signal) {
-        if (ctx.signal.aborted) { clearTimeout(t); reject(new Error("aborted")) }
-        else ctx.signal.addEventListener("abort", () => { clearTimeout(t); reject(new Error("aborted")) }, { once: true })
-      }
-    })
-    return `Waited ${n}s${reason ? ` (${reason})` : ""}`
   },
 }

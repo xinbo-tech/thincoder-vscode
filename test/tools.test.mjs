@@ -645,7 +645,7 @@ describe("focus — agent-driven cursor/editor navigation", () => {
   })
 })
 
-describe("ops tools — file_ops / process / get_current_time / sleep", () => {
+describe("ops tools — file_ops / process / get_current_time", () => {
   beforeEach(setup)
   afterEach(cleanup)
 
@@ -660,15 +660,21 @@ describe("ops tools — file_ops / process / get_current_time / sleep", () => {
     assert.match(await fileOpsTool.execute({ action: "nuke", source: "a.txt", dest: "x.txt" }, ctx()), /action must be/)
   })
 
-  it("get_current_time / sleep / process behave", async () => {
-    const { getCurrentTimeTool, sleepTool, processTool } = await import("../src/tools/ops.mjs")
+  it("get_current_time returns the current date/time", async () => {
+    const { getCurrentTimeTool } = await import("../src/tools/ops.mjs")
     const now = await getCurrentTimeTool.execute({}, {})
     assert.match(now, /Date:/)
-    const t0 = Date.now()
-    await sleepTool.execute({ seconds: 1 }, {})
-    assert.ok(Date.now() - t0 >= 900, "sleeps ~1s")
+  })
+
+  it("process lists running processes with PID rows", async () => {
+    const { processTool } = await import("../src/tools/ops.mjs")
     const procs = await processTool.execute({ name: "node" }, ctx())
     assert.match(procs, /PID/, "process listing returns PID rows")
+  })
+
+  it("sleep is not registered as a builtin tool", async () => {
+    const { builtinTools } = await import("../src/tools/index.mjs")
+    assert.ok(!builtinTools.map((t) => t.name).includes("sleep"))
   })
 
   it("ls filter", async () => {
