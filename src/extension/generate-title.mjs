@@ -1,6 +1,11 @@
 /**
  * generate-title.mjs — LLM-generated session titles
  * Called from ChatPanel._generateTitle() with (userContent, providerName, modelName).
+ *
+ * IK9UZ8 (2026-08-25, CLI parity 3c1815e): thinking models burn the whole output budget on
+ * reasoning_content and leave content empty → title generation silently fails. Fix: disable
+ * thinking per format (openai: thinking field; anthropic: thinking param; google:
+ * thinkingConfig) and raise max tokens 30→100 (a 40-char title wants ~60-80; 100 is headroom).
  */
 import { getKey, buildProvider } from "./presets.mjs"
 
@@ -40,7 +45,8 @@ async function requestTitle(prov, text) {
       model: prov.model,
       system,
       messages: [{ role: "user", content: text }],
-      max_tokens: 30, stream: false,
+      max_tokens: 100, stream: false,
+      thinking: { type: "disabled" }, // IK9UZ8: don't let reasoning eat the budget
     })
     extract = (data) => data.content?.map((b) => b.text || "").join("")
   } else if (prov.format === "google") {
@@ -48,7 +54,7 @@ async function requestTitle(prov, text) {
     body = JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: "user", parts: [{ text }] }],
-      generationConfig: { maxOutputTokens: 30 },
+      generationConfig: { maxOutputTokens: 100, thinkingConfig: { thinkingLevel: "none" } }, // IK9UZ8
     })
     extract = (data) => data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("")
   } else {
@@ -60,7 +66,11 @@ async function requestTitle(prov, text) {
         { role: "system", content: system },
         { role: "user", content: text },
       ],
-      max_tokens: 30, stream: false,
+      // IK9UZ8 (CLI parity): disable thinking so reasoning_content doesn't consume the whole
+      // output budget and leave content empty. Providers that don't accept the field ignore it
+      // (OpenAI-compatible convention). 100 tokens = ~2.5x headroom for a 40-char title.
+      thinking: { type: "disabled" },
+      max_tokens: 100, stream: false,
     })
     extract = (data) => data.choices?.[0]?.message?.content
   }

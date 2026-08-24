@@ -524,13 +524,13 @@ describe("document ownership + design-review enhancement (2026-08-21)", () => {
     assert.match(text, /exactly ONE place/, "单一权威源语义")
   })
 
-  it("docs/design/README.md: 文档地图存在且含板块映射表 + Settings 待合并标注", () => {
+  it("docs/design/README.md: 文档地图存在且含板块映射表 + Settings 收口后指向 SETTINGS.md 权威源（2026-08-25）", () => {
     const text = readFileSync(join(VSCODE_SRC_DIR, "..", "docs", "design", "README.md"), "utf8")
     assert.ok(text.includes("板块 → 文档映射"), "映射表存在")
     assert.match(text, /\| 架构 \|/, "架构板块行")
     assert.match(text, /\| 配置面板（Settings） \|/, "Settings 板块行")
-    assert.ok(text.includes("6 文档同板块"), "Settings 6 文档如实登记")
-    assert.ok(text.includes("待合并（TODO）"), "存量碎片待合并标注")
+    assert.match(text, /\`SETTINGS\.md\`/, "Settings 指向现行权威源 SETTINGS.md")
+    assert.ok(text.includes("2026-08-25 合并"), "合并收口说明登记")
   })
 
   it("advisor/main.mjs: design 提示词硬加载——无 ADVISOR_DESIGN_FALLBACK 残留，内容与文件逐字节一致", () => {
