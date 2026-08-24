@@ -25,8 +25,8 @@
 
 ## Issue 批量（2026-08-22，来源：Gitee/GitHub issue 巡检）
 
-- [ ] GitHub thincoder#2 GLM 5.3 畸形 tool_calls 解析崩溃——需求层已入 `docs/design/ARCHITECTURE.md` 变更段
-- [ ] IK9UZ8 标题生成同修（扩展端 generate-title.mjs）——权威源 CLI `docs/design/SESSION.md` §7
+- [x] GitHub thincoder#2 GLM 畸形 tool_calls——已实现（openai.mjs droppedToolCalls 防御 + normalizeToolPairing，128464b）——2026-08-25 核对销账
+- [x] IK9UZ8 标题生成同修——已实现（commit c175506：三格式禁思考 + max_tokens 100，CLI 3c1815e 对齐）——2026-08-25 销账
 - [ ] 巡检登记：GitHub #1 embedding 三件套、IK9IXD 公式渲染、IK9UWM 中文粘贴——CLI 侧待办见 `thincoder/docs/TODO.md`
 ## 语义索引 needsRebuild 的 git 快路径盲区（2026-08-23 六轮 advisor 收敛后暂缓，来源：indexer.mjs 评审）
 
