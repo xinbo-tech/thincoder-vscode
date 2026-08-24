@@ -14,6 +14,7 @@ import { compactHistory, truncateFallback, shrinkOversized, summarizeRunExplorat
 import { specForModel, ctxPercentForModel, contextWindowForModel } from "../src/config.mjs"
 import { _setConfigPathForTest } from "../src/config-io.mjs"
 import { MAX_ADVISOR_PUSHBACKS } from "../src/agent/run-helpers.mjs"
+import { runAgent } from "../src/agent.mjs"
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -1014,6 +1015,164 @@ describe("Delegate well rewrite + exploration distillation", () => {
       assertNoOrphans(shrunk, "收缩结果")
     } finally {
       server.close()
+    }
+  })
+})
+
+
+// ─── End-of-run distillation is async (SEND-STALL-DISTILL) ─────────────────
+
+/** One-frame SSE replies (same shape as continue-on-turn-cap.test.mjs). */
+const sseTurn = (content) => `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`
+const sseTools = (toolCalls) => `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: toolCalls }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`
+
+/** Three explore-tool calls the loop executes against real files (read a/b/c.mjs). */
+const readCalls = () => ["a.mjs", "b.mjs", "c.mjs"].map((f, i) => ({
+  index: i, id: `call_${i}`, type: "function", function: { name: "read", arguments: JSON.stringify({ path: f }) },
+}))
+
+/** Scripted local provider: onRequest(index, body) → SSE string | { status, body } (may be async). */
+async function scriptedLLMServer(onRequest) {
+  const http = await import("node:http")
+  const requests = []
+  const server = http.createServer((req, res) => {
+    let body = ""
+    req.on("data", (c) => { body += c })
+    req.on("end", () => {
+      requests.push(body)
+      Promise.resolve(onRequest(requests.length, body))
+        .then((r) => {
+          if (r && r.status) { res.writeHead(r.status, { "Content-Type": "application/json" }); res.end(r.body ?? ""); return }
+          res.writeHead(200, { "Content-Type": "text/event-stream" })
+          res.end(r)
+        })
+        .catch(() => { try { res.writeHead(500); res.end() } catch { /* socket already closed (client abort) */ } })
+    })
+  })
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  return { server, port: server.address().port, requests }
+}
+
+describe("end-of-run distillation is async (SEND-STALL-DISTILL)", () => {
+  const mkFiles = (cwd) => { for (const f of ["a.mjs", "b.mjs", "c.mjs"]) writeFileSync(join(cwd, f), `export const ${f[0]} = 1\n`) }
+  // Distill requests are a single user message carrying EXPLORE_SUMMARY_PROMPT. Detect by
+  // message shape + prompt prefix — a raw body.includes() on the prompt fails because JSON
+  // escapes the trailing newline (\\n in the wire body).
+  const isDistillReq = (body) => {
+    try {
+      const m = JSON.parse(body)?.messages
+      return m?.length === 1 && m[0]?.role === "user" && typeof m[0]?.content === "string"
+        && m[0].content.startsWith("You are distilling exploration tool results")
+    } catch { return false }
+  }
+  const noteIdx = (msgs) => msgs.findIndex((m) => typeof m.content === "string" && m.content.startsWith("[Exploration summary]"))
+
+  it("AC1/AC2/AC3 — onComplete fires before a slow distill; the next run awaits it and starts from the compressed line", async () => {
+    const cwd = setupTempDir()
+    mkFiles(cwd)
+    const { server, port, requests } = await scriptedLLMServer(async (i, body) => {
+      if (isDistillReq(body)) {
+        await new Promise((r) => setTimeout(r, 5000))   // slow distill — the send button must NOT wait for it
+        return sseTurn("async exploration summary")
+      }
+      if (i === 1) return sseTools(readCalls())
+      return sseTurn("final reply")
+    })
+    const provider = mockProvider("unknown-model", port)
+    const opts = { history: [], fullHistory: [], distillState: { pending: null }, distillSignal: new AbortController().signal }
+    try {
+      // Round 1: exploration tools → final reply → onComplete → async distill
+      let onDistilled = 0
+      let completeAt = null
+      let histAtComplete = null
+      const t0 = Date.now()
+      await runAgent(provider, cwd, "explore the code", {
+        onComplete: () => {
+          completeAt = Date.now() - t0
+          histAtComplete = opts.history.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content.slice(0, 40) : null }))
+        },
+        onDistilled: () => { onDistilled++ },
+      }, undefined, false, opts)
+
+      // AC1: onComplete fired quickly while the distill is still in flight
+      assert.ok(completeAt !== null, "onComplete fired")
+      assert.ok(completeAt < 1000, `onComplete within 1s of send (got ${completeAt}ms)`)
+      assert.ok(opts.distillState.pending instanceof Promise, "distill still pending after runAgent returned")
+      // P1 regression guard: at onComplete time the machine line was NOT yet compressed
+      assert.ok(noteIdx(histAtComplete) < 0, "no summary note at onComplete time")
+      assert.ok(histAtComplete.some((m) => m.role === "tool"), "raw exploration results still in the machine line at onComplete")
+
+      // AC2: fire round 2 while the distill is in flight — runAgent awaits it BEFORE pushing input2
+      const out2 = await runAgent(provider, cwd, "second request", {}, undefined, false, opts)
+      assert.equal(out2, "final reply")
+      assert.equal(onDistilled, 1, "onDistilled exactly once (round 1 shrank; round 2 had no exploration — AC3)")
+
+      // Round 2's first LLM request: the compressed note sits BEFORE the new user input
+      const run2Body = requests.find((b) => !isDistillReq(b) && b.includes("second request"))
+      assert.ok(run2Body, "round-2 request captured")
+      const msgs = JSON.parse(run2Body).messages
+      const ni = noteIdx(msgs)
+      const ii = msgs.findIndex((m) => typeof m.content === "string" && m.content.includes("second request"))
+      assert.ok(ni >= 0, "compressed note present in round-2 request")
+      assert.ok(ii > ni, "summary note lands BEFORE the new user input (AC2)")
+      assert.ok(!msgs.some((m) => m.role === "tool"), "exploration tool results dropped from round-2 request")
+      // The slow (5s-delayed) distill response is the one that landed — proves the async path
+      assert.ok(requests.some((b) => isDistillReq(b)), "distill request was made")
+      assert.ok(msgs[ni].content.includes("async exploration summary"), "delayed distill summary reached the machine line")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("AC4 — distill failure is silent: pending resolves null, history untouched, onComplete still fired", async () => {
+    const cwd = setupTempDir()
+    mkFiles(cwd)
+    const { server, port, requests } = await scriptedLLMServer((i, body) => {
+      if (isDistillReq(body)) return { status: 400, body: JSON.stringify({ error: { message: "invalid api key" } }) }
+      if (i === 1) return sseTools(readCalls())
+      return sseTurn("done")
+    })
+    const opts = { history: [], fullHistory: [], distillState: { pending: null }, distillSignal: new AbortController().signal }
+    let completeFired = false
+    let distilledFired = false
+    try {
+      const out = await runAgent(mockProvider("unknown-model", port), cwd, "explore", {
+        onComplete: () => { completeFired = true },
+        onDistilled: () => { distilledFired = true },
+      }, undefined, false, opts)
+      assert.equal(out, "done")
+      assert.ok(completeFired, "onComplete fired despite distill failure")
+      // Await the pending distill first — only then is the request guaranteed to have arrived
+      assert.equal(await opts.distillState.pending, null, "failed distill resolves null")
+      assert.ok(requests.some((b) => isDistillReq(b)), "distill request was made and failed")
+      assert.equal(distilledFired, false, "onDistilled NOT fired when nothing shrank")
+      assert.ok(noteIdx(opts.history) < 0, "no note after failed distill")
+      assert.ok(opts.history.some((m) => m.role === "tool"), "raw exploration results kept")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("AC6b — subruns (depth>0) never trigger distillation", async () => {
+    const cwd = setupTempDir()
+    const { server, port } = await scriptedLLMServer(() => sseTurn("child done"))
+    const opts = { depth: 1, role: "explore", history: [], fullHistory: [], distillState: { pending: null }, distillSignal: new AbortController().signal }
+    let completeFired = false
+    let distilledFired = false
+    try {
+      const out = await runAgent(mockProvider("unknown-model", port), cwd, "child task", {
+        onComplete: () => { completeFired = true },
+        onDistilled: () => { distilledFired = true },
+      }, undefined, false, opts)
+      assert.equal(out, "child done")
+      assert.equal(opts.distillState.pending, null, "distillState.pending stays null (no distill created)")
+      assert.equal(distilledFired, false, "onDistilled never fires for a subrun")
+      assert.equal(completeFired, false, "onComplete is top-level-only (unchanged)")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
     }
   })
 })

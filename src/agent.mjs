@@ -47,6 +47,15 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   // AUTO reminder both re-read it on every iteration.
   const getAuto = typeof autoApprove === "function" ? autoApprove : () => autoApprove
 
+  // Previous turn's async exploration distillation must land FIRST: the compressed machine
+  // line is this run's starting context. Awaited BEFORE setupAgentRun (N1) — setupAgentRun
+  // pushes this run's user input, and the shrink would clobber it if it ran after.
+  const prev = opts.distillState?.pending
+  if (prev) {
+    opts.distillState.pending = null
+    await prev
+  }
+
   const { agent, history, fullHistory, toolByName, toolSchemas, cfgVerifyGuard, cfgCompactThreshold, systemPrompt } =
     await setupAgentRun({ provider, cwd, input, opts, depth, role, getAuto })
 
@@ -276,21 +285,33 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
       pushReal(history, fullHistory, { role: "assistant", content: response.content })
       if (depth === 0) {
         // End-of-run exploration distillation (CONTEXT-COMPACTION §5): shrink this run's inline
-        // exploration results into one semantic note before onComplete. Silent (N3): distillation
-        // failure must never block the return or lose history.
-        try {
-          const shrunk = await summarizeRunExplorations(history, agent._runStartHistoryLen ?? 0, provider, signal)
-          if (shrunk) {
-            history.length = 0
-            history.push(...shrunk)
-            // The machine line changed shape — the measured token baseline was for the pre-shrink
-            // context, so invalidate it (next compaction check falls back to re-estimation).
-            agent._lastPromptTokens = null
-            agent._usageAtLen = null
-          }
-        } catch { /* silent (N3) */ }
+        // exploration results into one semantic note AFTER onComplete — the send button (webview
+        // `complete` message) must not wait for this second silent LLM call (SEND-STALL-DISTILL).
+        // The next runAgent awaits the pending distill before pushing its user input (N1), so
+        // the summary is always in place before the next LLM call. Silent (N3): failure must
+        // never block the return or lose history.
+        callbacks.onComplete?.(response.content, agentState(agent))   // UI 立即释放
+        // depth 守卫（评审 #2）：仅顶层轮末触发蒸馏；子轮（depth>0）不得创建——
+        // 否则先创建的蒸馏晚 resolve 会 clobber 历史（N1 竞态）。
+        // 专用 distillSignal（评审 #1）：与运行 signal 分离——新消息/下一轮 abort 运行
+        // controller 时蒸馏继续完成；用户 Stop（abort 运行 signal）同样不影响蒸馏。
+        // panel dispose / 会话切换时 abort distillSignal。
+        const distill = summarizeRunExplorations(history, agent._runStartHistoryLen ?? 0, provider, opts.distillSignal ?? signal)
+          .then((shrunk) => {
+            if (shrunk) {
+              history.length = 0
+              history.push(...shrunk)
+              // The machine line changed shape — the measured token baseline was for the pre-shrink
+              // context, so invalidate it (next compaction check falls back to re-estimation).
+              agent._lastPromptTokens = null
+              agent._usageAtLen = null
+              callbacks.onDistilled?.()   // 压缩已落位 → 调用方应持久化（评审 #5）
+            }
+            return shrunk
+          })
+          .catch(() => null)
+        if (opts.distillState) opts.distillState.pending = distill
       }
-      if (depth === 0) callbacks.onComplete?.(response.content, agentState(agent))
       return response.content
     }
 

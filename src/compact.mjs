@@ -423,10 +423,13 @@ async function distillExplorations(history, runStartLen, provider, signal) {
 }
 
 /**
- * End-of-run exploration distillation (runAgent's final return, before onComplete). Shrinks the
- * MACHINE line only — the caller keeps fullHistory untouched. Returns a NEW array, or null when
- * nothing shrank (<3 exploration results or the LLM failed). Mirrors CLI summarizeRunExplorations;
- * only the call shape differs (this end passes the machine line explicitly, like compactHistory).
+ * End-of-run exploration distillation — ASYNC since 2026-08-25 (SEND-STALL-DISTILL): runAgent
+ * fires it AFTER onComplete (never awaited inside the turn); the NEXT runAgent awaits it before
+ * pushing its user input, so the summary lands in the machine line before the next LLM call.
+ * Shrinks the MACHINE line only — the caller keeps fullHistory untouched. Returns a NEW array,
+ * or null when nothing shrank (<3 exploration results or the LLM failed). Mirrors CLI
+ * summarizeRunExplorations; only the call shape differs (this end passes the machine line
+ * explicitly, like compactHistory).
  */
 export async function summarizeRunExplorations(history, runStartLen, provider, signal) {
   return distillExplorations(history, runStartLen, provider, signal)

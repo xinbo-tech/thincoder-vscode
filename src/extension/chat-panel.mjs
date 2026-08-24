@@ -32,6 +32,7 @@ export class ChatPanel {
     this._panel = null
 
     this._abortController = null
+    this._distillController = null  // async distillation abort (SEND-STALL-DISTILL): aborted ONLY on dispose / session switch, never per turn
     this._permissionQueue = []
     // Live autoApprove flag for the current turn — approve-all / the AUTO toolbar
     // button flip it MID-TURN (via _setAutoApprove); the permission gate re-checks
@@ -92,6 +93,7 @@ export class ChatPanel {
     webviewView.onDidDispose(() => {
       this._panel = null
       this._abortController?.abort()
+      this._distillController?.abort()  // kill any in-flight async distillation — it belongs to the dying view
       closeAllMcp()
     })
 
@@ -152,6 +154,7 @@ export class ChatPanel {
   dispose() {
     closeAllMcp()
     this._abortController?.abort()
+    this._distillController?.abort()  // in-flight async distillation belongs to the dying panel (SEND-STALL-DISTILL)
     this._statusBar?.dispose()
     this._statusBar = null
     this._panel?.dispose()
