@@ -10,7 +10,7 @@
 | 架构 | `ARCHITECTURE.md` | 权威源 |
 | 需求与决策 | `REQUIREMENTS.md` | 需求与决策记录 |
 | 三观（提示词根基） | `PHILOSOPHY.md` | |
-| 配置面板（Settings） | `SETTINGS-PANEL.md`、`SETTINGS-PANEL-2.md`、`SETTINGS-PANEL-PROXY-ROW.md`、`SETTINGS-REORG.md`、`SETTINGS-SUBMODEL-SHELL.md`、`MODEL-PICKER-UNIFY.md` | 6 文档同板块——**待合并（TODO）** |
+| 配置面板（Settings） | `SETTINGS.md` | 现行权威源（2026-08-25 合并 6 份历史批次文档：SETTINGS-PANEL(-2)/PROXY-ROW/REORG/SUBMODEL-SHELL/MODEL-PICKER-UNIFY 归档保留，细节查原文件） |
 | Responses 传输 | `RESPONSES-TRANSPORT.md` | |
 | 项目切换 | `PROJECT-SWITCHER.md` | |
 | 发布流程 | `RELEASE.md` | |
@@ -21,7 +21,7 @@
 | 工具移除 | `SLEEP-REMOVAL-REQUIREMENTS.md`、`SLEEP-REMOVAL-TUNING.md` | sleep 工具删除（2026-08-25，与 CLI 同源） |
 | 工具输出限制 | `TOOL-OUTPUT-LIMITS-REQUIREMENTS.md`、`TOOL-OUTPUT-LIMITS-TUNING.md` | 落盘阈值/显示层 16K→64K（2026-08-24，与 CLI 同源） |
 | Agent 运行参数 | `AGENT-PARAMS-REQUIREMENTS.md`、`AGENT-PARAMS-TUNING.md` | 评审超时/轮次上限调整（2026-08-24，与 CLI 同源） |
-| Agent 循环 | `TURN-CAP-CONTINUE.md` | 与 CLI 端 `TURN-CAP-CONTINUE.md` 同源（两处描述，待收敛单一权威源——**待合并（TODO）**） |
+| Agent 循环 | `TURN-CAP-CONTINUE.md` | 插件侧实现记录；CLI 端同源文档见 thincoder/docs/design/（2026-08-25 收口：两端各自为实现记录，不再标待合并） |
 | Webview 性能 | `webview-input-lag.md` | 输入卡顿修复方案 |
 
 ## 规则
@@ -30,7 +30,7 @@
 2. **先查地图定位归属**：写文档前先查本表——找到所属板块就改该板块文档，**不得为既有板块新建文件**。
 3. **新板块才新建**：确无归属的新板块才新建文档，并立即在本表登记。
 4. **单一权威源**：同一机制只在一处详述；其余文档引用（指路），不复制内容——多处复制必然漂移矛盾。
-5. **存量待合并**：表中标注"待合并（TODO）"的是存量碎片（如 Settings 板块 6 文档），合并不在此表范围内直接进行——统一记录于 `docs/TODO.md`。
+5. **存量碎片处理（2026-08-25 收口）**：Settings 6 文档已合并为 `SETTINGS.md`（现行权威源，历史批次文档归档）；TURN-CAP 两端同源已收口为各自实现记录。新增同主题内容须先查本表归属。
 
 ## 变更记录
 

@@ -10,7 +10,7 @@
 
 ## 文档债（2026-08-21 ARCHITECTURE.md 设计评审 advisory，未实现项）
 
-- [ ] 存量碎片合并（2026-08-21 §12 文档归属纪律，范围外项）：Settings 板块 6 文档（SETTINGS-PANEL、SETTINGS-PANEL-2、SETTINGS-PANEL-PROXY-ROW、SETTINGS-REORG、SETTINGS-SUBMODEL-SHELL、MODEL-PICKER-UNIFY）合并；TURN-CAP-CONTINUE 两端同源描述收敛单一权威源（详见两端 docs/design/README.md 地图标注）
+- [x] 存量碎片合并——2026-08-25 完成：SETTINGS.md 合并 6 文档为现行权威源（历史归档保留）；TURN-CAP-CONTINUE 收口为两端各自实现记录（地图标注同步更新）
 - [ ] design round2 专用提示词（§11 评审发现 #4）：design 重跑不再复用 code-review 收敛提示词
 
 - [ ] ARCHITECTURE.md 补 NFR 小节（性能/安全/兼容性）与测试层总览（advisor #2）
