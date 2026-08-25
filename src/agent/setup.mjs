@@ -176,7 +176,8 @@ export async function setupAgentRun({ provider, cwd, input, opts, depth, role, g
     _engDesignToken: engState?.engDesignToken ?? null,
     _engDesignReviewed: engDesignReviewed === true, // eng-coder children arrive pre-authorized
     _calledAdvisorThisRun: false, _mutatedThisRun: false,
-    _lastEngState: engineering, _pendingReminders: [],
+    _lastEngState: false, // seeded false: a resumed engineering session re-notifies on turn 1 (CLI parity)
+    _pendingReminders: [],
     config: {
       advisor: advisorCfg,
       agent: { engineering, subagentModel: cfgSubagentModel, subagentModels: cfgSubagentModels, subagentTurns: cfgSubagentTurns, maxTurns: cfgMaxTurns, verifyGuard: cfgVerifyGuard, compactThreshold: cfgCompactThreshold, consultModels: cfgConsultModels, consultTurns: cfgConsultTurns, consultTimeoutMs: cfgConsultTimeoutMs },

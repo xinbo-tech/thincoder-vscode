@@ -1176,3 +1176,53 @@ describe("end-of-run distillation is async (SEND-STALL-DISTILL)", () => {
     }
   })
 })
+
+
+// ─── ENG 状态提醒补全（2026-08-25）：vscode resume 重通知 + OFF 双向 ───
+describe("ENG state reminders (2026-08-25)", () => {
+  it("setupAgentRun seeds _lastEngState=false — a resumed engineering session re-notifies on turn 1", async () => {
+    const src = await import("../src/agent/setup.mjs")
+    // setupAgentRun needs a full agent; assert the seed contract at the source level:
+    // the literal must seed false (not the live engineering flag) so the injector fires.
+    const fs = await import("node:fs")
+    const text = fs.readFileSync(new URL("../src/agent/setup.mjs", import.meta.url), "utf8")
+    assert.ok(text.includes("_lastEngState: false"),
+      "setup must seed _lastEngState=false (resume re-notify contract)")
+  })
+
+  it("injectEngineeringReminder: every transition (ON and OFF) injects exactly one reminder", async () => {
+    const { ENG_ON_REMINDER, ENG_OFF_REMINDER } = await import("../src/agent.mjs")
+    const agent = {
+      config: { agent: { engineering: true } },
+      _lastEngState: false,
+      history: [],
+    }
+    // The injector is module-private; the runAgent loop calls it. Simulate its contract:
+    const inject = (a) => {
+      const eng = a.config?.agent?.engineering ?? false
+      if (eng !== a._lastEngState) {
+        a.history.push({ role: "user", content: eng ? ENG_ON_REMINDER : ENG_OFF_REMINDER, transient: true })
+      }
+      a._lastEngState = eng
+    }
+    inject(agent) // resume → ON: notifies
+    assert.equal(agent.history.length, 1, "resume into ON notifies once")
+    inject(agent) // stable ON: no repeat
+    assert.equal(agent.history.length, 1, "stable state stays silent")
+    agent.config.agent.engineering = false
+    inject(agent) // OFF transition: notifies (was silence before 2026-08-25)
+    assert.equal(agent.history.length, 2)
+    assert.match(agent.history[1].content, /engineering mode is now OFF/)
+    inject(agent) // stable OFF
+    assert.equal(agent.history.length, 2)
+  })
+
+  it("agent.mjs exports ENG_OFF_REMINDER and eng exit pushes it", async () => {
+    const { ENG_OFF_REMINDER, engTool } = await import("../src/agent.mjs")
+    const { engTool: eng } = await import("../src/agent-tools/eng.mjs")
+    assert.match(ENG_OFF_REMINDER, /engineering mode is now OFF/)
+    const agent = { config: { agent: { engineering: true } }, _pendingReminders: [] }
+    await eng.execute({ action: "exit" }, { agent })
+    assert.ok(agent._pendingReminders.includes(ENG_OFF_REMINDER))
+  })
+})

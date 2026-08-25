@@ -17,7 +17,25 @@ import { MAX_ADVISOR_ROUNDS } from "./advisor/run.mjs"
 import { executeToolBatches } from "./agent/execute-tools.mjs"
 import { setupAgentRun, AUTO_REMINDER } from "./agent/setup.mjs"
 
-/** Engineering mode reminder — shared with the eng tool (CLI parity). */
+/** Engineering mode OFF reminder (CLI parity — cmd-eng / injector transitions). */
+export const ENG_OFF_REMINDER =
+  "[System reminder: engineering mode is now OFF — standard discipline applies. " +
+  "Changes go through the normal workflow: you may edit files directly, advisor/verify " +
+  "guards apply per config.]"
+
+/** Engineering-mode status injection (CLI parity, agent.mjs injectEngineeringReminder):
+ *  one reminder on EVERY transition (ON and OFF) — the model must always know the mode
+ *  flipped, including after a session resume (vscode setup.mjs seeds _lastEngState=false
+ *  so a resumed engineering session re-notifies on the first turn). */
+function injectEngineeringReminder(agent) {
+  const eng = agent.config?.agent?.engineering ?? false
+  if (eng !== agent._lastEngState) {
+    agent.history.push({ role: "user", content: eng ? ENG_ON_REMINDER : ENG_OFF_REMINDER, transient: true })
+  }
+  agent._lastEngState = eng
+}
+
+/** Engineering mode reminders — shared with the eng tool (CLI parity). */
 export const ENG_ON_REMINDER =
   "[System reminder: engineering mode is ON — design-before-code enforced. " +
   "Workflow: Requirements doc → Design doc → advisor(type='design') → " +
@@ -133,6 +151,10 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     if (getAuto() && !history.some((m) => m.content === AUTO_REMINDER)) {
       history.push({ role: "user", content: AUTO_REMINDER })
     }
+
+    // Engineering-mode transition reminder (CLI parity): covers TUI/panel toggles and
+    // session resume — paths that bypass the eng tool's own _pendingReminders push.
+    injectEngineeringReminder(agent)
 
     // Flush pending reminders queued by meta-tools (eng enter/exit, etc.)
     if (agent._pendingReminders.length > 0) {

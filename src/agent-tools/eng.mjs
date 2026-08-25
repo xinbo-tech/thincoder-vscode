@@ -3,7 +3,7 @@
  * In engineering mode the agent follows design-before-code methodology.
  * The flag persists to the shared config.json (CLI persistRaw parity).
  */
-import { ENG_ON_REMINDER } from "../agent.mjs"
+import { ENG_ON_REMINDER, ENG_OFF_REMINDER } from "../agent.mjs"
 import { persistRaw } from "../config-io.mjs"
 
 export const engTool = {
@@ -29,8 +29,7 @@ export const engTool = {
       ctx.agent._mutatedThisRun = false
       ctx.agent._lastEngState = false
       ctx.agent._pendingReminders = ctx.agent._pendingReminders ?? []
-      ctx.agent._pendingReminders.push(
-        "[System reminder: engineering mode is now OFF — standard discipline applied. Changes go through the normal workflow.]")
+      ctx.agent._pendingReminders.push(ENG_OFF_REMINDER)
       persistEngineering(false)
       return "Engineering mode exited. Standard discipline now applies. You may edit files directly."
     }
