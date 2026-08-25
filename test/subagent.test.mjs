@@ -294,6 +294,8 @@ function streamServer(walls) {
   return { server, calls }
 }
 
+const realToken = "c8721152-df45-4f7b-96f2-db877500f9ba:1788244221240:feef8f9c40ec98c7" // v2: real signed token
+
 test("activity stream: panel channel name carries #subId (one block per invocation)", async () => {
   const { server } = streamServer(0)
   await new Promise((r) => server.listen(0, "127.0.0.1", r))
@@ -309,10 +311,10 @@ test("activity stream: panel channel name carries #subId (one block per invocati
         agent: { subagentTurns: 3, engineering: true },
       },
       _subIdCounter: 0,
-      _engDesignToken: "plain-token", // no ":" → validateDesignToken short-circuits true
+      _engDesignToken: realToken, // real signed token (v2 fail-closed killed bare-string pass-through)
     }
     const ctx = { agent: parent, cwd, callbacks: { onToolPanel: (name, chunk) => panels.push({ name, chunk }) } }
-    const r = String(await subagentTool.execute({ task: "child", role: "eng-coder", designToken: "plain-token" }, ctx))
+    const r = String(await subagentTool.execute({ task: "child", role: "eng-coder", designToken: realToken }, ctx))
     assert.ok(r.includes("Subagent (eng-coder) completed"), "run completes")
     assert.ok(panels.length > 0, "activity streamed to the panel")
     for (const p of panels) assert.match(p.name, /^sub:eng-coder#\d+$/, `channel name carries #subId: ${p.name}`)

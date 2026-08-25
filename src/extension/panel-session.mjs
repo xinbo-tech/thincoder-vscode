@@ -70,7 +70,10 @@ export function saveLines(panel, fullHistory, contextHistory, extra = {}) {
       // Engineering state persisted by runAgent (agentState): design token survives turns;
       // the engineering flag mirrors config.json so the CLI side round-trips it too.
       engineering: extra.engineering ?? existing.engineering ?? false,
-      engDesignToken: extra.engDesignToken ?? existing.engDesignToken ?? null,
+      // Key-presence write (v2 2026-08-25): ?? treated an explicit null (eng(exit) cleared the
+      // token) as "missing" and revived the stale slot value on the next save — a revived token
+      // re-opened the parent write gate. An explicit key always wins; absent key keeps the slot.
+      engDesignToken: "engDesignToken" in extra ? extra.engDesignToken : (existing.engDesignToken ?? null),
       pendingReminders: existing.pendingReminders ?? [], sessionStart: existing.sessionStart ?? null,
     })
   }

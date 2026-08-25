@@ -116,8 +116,8 @@ describe("buildAdvisorSystemPrompt", () => {
 // ─── design token validation ────────────────────────────────────
 
 describe("design token", () => {
-  it("validateDesignToken accepts a legacy non-signed token", () => {
-    assert.equal(validateDesignToken("some-simple-token"), true)
+  it("validateDesignToken REJECTS a legacy non-signed token (v2 fail-closed — the old accept-asis branch was a pass-through backdoor)", () => {
+    assert.equal(validateDesignToken("some-simple-token"), false)
   })
 
   it("validateDesignToken rejects null/empty", () => {
@@ -584,4 +584,44 @@ describe("MAX_RESULT_CHARS — advisor 工具结果截断上限（TOOL-OUTPUT-LI
   it("equals 64 * 1024 = 65536，与主链路落盘阈值对齐", () => {
     assert.equal(MAX_RESULT_CHARS, 64 * 1024)
   })
+})
+
+
+// ─── v2 token hardening (2026-08-25) — vscode parity ───
+describe("v2 token hardening (2026-08-25)", () => {
+it("validateDesignToken: fail-closed on malformed strings (two legacy backdoors gone)", async () => {
+  const { validateDesignToken } = await import("../src/agent-tools/advisor.mjs")
+  assert.equal(validateDesignToken("abc:notanumber:x"), false, "NaN expiry rejected (was fail-open)")
+  assert.equal(validateDesignToken("a:b:c:d"), false, "4-part rejected")
+  assert.equal(validateDesignToken("uuid:abc:sig"), false)
+})
+
+it("validateDesignToken: 7d TTL window (AC1/AC2)", async () => {
+  const { validateDesignToken } = await import("../src/agent-tools/advisor.mjs")
+  const { createHmac } = await import("node:crypto")
+  const mk = (expiresAt) => {
+    const uuid = "11111111-2222-3333-4444-555555555555"
+    const sig = createHmac("sha256", "thincoder-default-secret").update(`${uuid}:${expiresAt}`).digest("hex").slice(0, 16)
+    return `${uuid}:${expiresAt}:${sig}`
+  }
+  assert.equal(validateDesignToken(mk(Date.now() + 3 * 24 * 3600 * 1000)), true, "3d in → valid")
+  assert.equal(validateDesignToken(mk(Date.now() - 1000)), false, "expired → rejected")
+})
+
+it("revoke narrowing: error reply must not revoke a standing token (AC5)", async () => {
+  const { advisorTool } = await import("../src/agent-tools/advisor.mjs")
+  const agent = { config: { agent: { engineering: true } }, _engDesignToken: "standing", _advisorRound: 0, _advisorSession: null, cwd: process.cwd(), _touchedFiles: [] }
+  const out = await advisorTool.execute({ type: "design", documents: ["src/definitely-not-a-doc.mjs"] }, { agent })
+  assert.match(out, /must be in docs/)
+  assert.equal(agent._engDesignToken, "standing", "error reply must NOT revoke")
+})
+
+it("eng(enter) idempotent: already-on keeps the token (AC6)", async () => {
+  const { engTool } = await import("../src/agent-tools/eng.mjs")
+  const agent = { config: { agent: { engineering: true } }, _engDesignToken: "keepme", _pendingReminders: [] }
+  const out = await engTool.execute({ action: "enter" }, { agent })
+  assert.match(out, /already active/)
+  assert.equal(agent._engDesignToken, "keepme")
+})
+
 })

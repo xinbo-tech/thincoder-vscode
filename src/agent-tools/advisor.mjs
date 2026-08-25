@@ -7,30 +7,38 @@ import { randomUUID, createHmac } from "node:crypto"
 import { runAdvisorReview, resolveAdvisorProvider } from "../advisor/run.mjs"
 import { isDocFile } from "../advisor/repos.mjs"
 
-const TOKEN_EXPIRY_MS = 3600000 // 1 hour
+const TOKEN_TTL_DEFAULT_MS = 7 * 24 * 3600 * 1000 // 7-day ceiling (v2 2026-08-25): multi-batch delivery must not re-review an unchanged design within a week; agent.engTokenTtlMs overrides
 const TOKEN_SECRET = process.env.THINCODER_TOKEN_SECRET || "thincoder-default-secret"
 
+/** Effective token TTL: config override with runtime validation (advisor timeoutMs precedent —
+ *  invalid values fall back to the default, never silently disable the ceiling). */
+function effectiveTokenTtlMs(agent) {
+  const cfg = agent?.config?.agent?.engTokenTtlMs
+  return (Number.isFinite(cfg) && cfg > 0) ? cfg : TOKEN_TTL_DEFAULT_MS
+}
+
 /** Generate a signed design token with expiration */
-function generateDesignToken() {
+function generateDesignToken(agent) {
   const uuid = randomUUID()
-  const expiresAt = Date.now() + TOKEN_EXPIRY_MS
+  const expiresAt = Date.now() + effectiveTokenTtlMs(agent)
   const payload = `${uuid}:${expiresAt}`
   const signature = createHmac("sha256", TOKEN_SECRET).update(payload).digest("hex").slice(0, 16)
   return `${payload}:${signature}`
 }
 
 /** Validate design token: check format, expiration, and signature.
- *  Tokens not matching the signed format are accepted as-is (backward compat, CLI parity). */
+ *  ALL fail-closed (v2 2026-08-25): the two legacy fail-open branches (parts!=3, NaN expiry)
+ *  were pass-through backdoors — any malformed string bypassed validation. */
 export function validateDesignToken(token) {
   if (!token || typeof token !== "string") return false
 
   const parts = token.split(":")
-  if (parts.length !== 3) return true
+  if (parts.length !== 3) return false // fail-closed (was: return true, v2 2026-08-25)
 
   const [uuid, expiresAt, signature] = parts
   const expTime = parseInt(expiresAt, 10)
 
-  if (isNaN(expTime)) return true
+  if (isNaN(expTime)) return false // fail-closed (was: return true, v2 2026-08-25)
 
   if (Date.now() > expTime) return false
 
@@ -119,7 +127,7 @@ export const advisorTool = {
     // protocol like code reviews (CLI parity).
 
     // Generate the design token BEFORE the review and inject it into the advisor's prompt.
-    const designToken = reviewType === "design" ? generateDesignToken() : null
+    const designToken = reviewType === "design" ? generateDesignToken(agent) : null
     // Progress chunks ({kind, text}) stream into the webview — same emission
     // contract as the CLI TUI (think / tool / text kinds). A "start" chunk first
     // opens the in-conversation advisor block tagged with the round number.
@@ -142,8 +150,11 @@ export const advisorTool = {
         return `${cleanResult}\n\nApproved. Pass this exact token to eng-coder (designToken parameter): ${designToken}`
       }
       // Review failed (or advisor chose not to pass) → invalidate any previously-issued token.
-      // Guard: result === null means the review was skipped — must not revoke an issued token.
-      if (result !== null) agent._engDesignToken = null
+      // Guards (v2 2026-08-25): result === null = SKIPPED review — must not revoke. An error
+      // reply (own "Advisor:" prefix — runAdvisorReview's error-return convention) is a crash/
+      // timeout artifact, not a verdict — only a COMPLETED non-passing review revokes.
+      const isCompletedReview = result !== null && !result.startsWith("Advisor:")
+      if (isCompletedReview) agent._engDesignToken = null
       if (result) {
         const stripped = result.replace(makeDesignTokenRegex(designToken, "g"), "").trim()
         return stripped || "Advisor: design review did not pass."

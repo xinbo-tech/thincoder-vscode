@@ -304,3 +304,21 @@ describe("async distillation — panel save + slot guard + rapid-fire (SEND-STAL
     }
   })
 })
+
+
+// ─── v2 revival regression (2026-08-25): cleared token must not resurrect via ?? ───
+describe("v2 token revival regression (2026-08-25)", () => {
+it("eng(exit) → saveSession → loadSession: cleared token stays null (AC7)", async () => {
+  const { _setConfigPathForTest } = await import("../src/config-io.mjs")
+  _setConfigPathForTest(join(tmp, "config.json"))
+  const { saveLines } = await import("../src/extension/panel-session.mjs")
+  const { saveSessionToSlot } = await import("../src/extension/session-io.mjs")
+  // Seed the slot with a stale token, then save with an explicitly-cleared (null) extra
+  saveSessionToSlot(tmp, 1, { version: 2, cwd: tmp, updatedAt: Date.now(), history: [], contextHistory: [], display: [], tasks: [], planMode: false, autoApprove: false, engineering: false, engDesignToken: "stale:123:sig" })
+  const panel = { _slot: 1, _panel: { webview: { postMessage: async () => {} } } }
+  saveLines(panel, [], [], { activeProvider: "t", engDesignToken: null }) // exit-clear path
+  const data = loadSlot(tmp, 1)
+  assert.equal(data.engDesignToken, null, "explicit null must NOT revive the stale slot value (v2 ?? fix)")
+})
+
+})
