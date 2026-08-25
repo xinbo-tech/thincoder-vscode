@@ -5,8 +5,8 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { execFileSync } from "node:child_process"
-import { join } from "node:path"
-import { resolvePath, formatSize, getOpenDoc, applyEditorEdit, applyEditorRangeEdit, refreshMarkdownPreview } from "./shared.mjs"
+import { join, dirname } from "node:path"
+import { resolvePath, formatSize, getOpenDoc, applyEditorEdit, applyEditorRangeEdit, refreshMarkdownPreview, normalizeEOL, detectFileEol, majorityEol, joinWithEol } from "./shared.mjs"
 
 export const insertAfterTool = {
   name: "insert_after",
@@ -31,6 +31,8 @@ export const insertAfterTool = {
     const abs = resolvePath(path, ctx.cwd)
     const doc = getOpenDoc(abs)
     const text = doc ? doc.getText() : await readFile(abs, "utf8")
+    // EOL-safe disk write-back (review R9#2): joinWithEol detects the file's real
+    // line endings from the raw text; per-line \r is stripped before the join.
     const lines = text.split("\n")
 
     let target
@@ -68,9 +70,9 @@ export const insertAfterTool = {
       return `Inserted after line ${target + 1} in ${path} (via editor)`
     }
 
-    // Not open — write to disk
-    lines.splice(target + 1, 0, content)
-    await writeFile(abs, lines.join("\n"), "utf8")
+    // Not open — write to disk (original EOL style, same rule as edit/apply_patch)
+    lines.splice(target + 1, 0, normalizeEOL(content))
+    await writeFile(abs, joinWithEol(lines.map((l) => l.replace(/\r$/, "")), text), "utf8")
     refreshMarkdownPreview(abs)
     return `Inserted after line ${target + 1} in ${path}`
   },
@@ -179,17 +181,21 @@ export const applyPatchTool = {
       let content
       if (f.isNew) {
         if (existsSync(abs)) return `Error: Cannot create ${f.path}: file already exists`
-        content = f.hunks.flatMap((h) => h.ops.filter((o) => o.type === "+").map((o) => o.text)).join("\n") + "\n"
+        // New file: follow the directory's majority EOL style (default LF). CLI parity.
+        const eol = majorityEol(dirname(abs))
+        content = f.hunks.flatMap((h) => h.ops.filter((o) => o.type === "+").map((o) => o.text)).join(eol) + eol
       } else {
         let raw = doc ? doc.getText() : null
         if (raw === null) {
           raw = await readFile(abs, "utf8").catch(() => null)
           if (raw === null) return `Error: File not found: ${f.path}`
         }
-        const eol = raw.includes("\r\n") ? "\r\n" : "\n"
-        const lines = raw.split("\n")
-        applyHunks(lines, f.hunks, eol, f.path)
-        content = lines.join("\n")
+        const eol = detectFileEol(raw)
+        // Apply hunks in the normalized LF domain, then write back joined with the
+        // file's ORIGINAL EOL style — join("\n") here used to rewrite CRLF files as LF.
+        const lines = normalizeEOL(raw).split("\n")
+        applyHunks(lines, f.hunks, "\n", f.path)
+        content = lines.join(eol)
       }
       if (doc) await applyEditorEdit(doc, content)
       else { await writeFile(abs, content, "utf8"); refreshMarkdownPreview(abs) }

@@ -5,8 +5,9 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
 import { dirname } from "node:path"
-import { resolvePath, getOpenDoc, applyEditorEdit, applyEditorRangeEdit, normalizeEOL, gitDiffOne, hashLine, refreshMarkdownPreview } from "./shared.mjs"
+import { resolvePath, getOpenDoc, applyEditorEdit, applyEditorRangeEdit, normalizeEOL, detectFileEol, joinWithEol, majorityEol, findCandidates, FFFD_WARNING, gitDiffOne, hashLine, refreshMarkdownPreview } from "./shared.mjs"
 
 export const readTool = {
   name: "read",
@@ -17,7 +18,8 @@ export const readTool = {
     "Parameters:\n" +
     "- path (required): File path, relative to cwd or absolute (alias: filePath)\n" +
     "- offset: 1-based line number to start reading from\n" +
-    "- limit: Max lines to return (default 2000)",
+    "- limit: Max lines to return (default 2000)\n" +
+    "- hashes: Include SHA256 line hashes (for hashline_edit)",
   parameters: {
     type: "object",
     properties: {
@@ -25,10 +27,11 @@ export const readTool = {
       filePath: { type: "string", description: "Alias for path" },
       offset: { type: "number", description: "1-based line number to start from" },
       limit: { type: "number", description: "Max lines to return" },
+      hashes: { type: "boolean", description: "Include SHA256 line hashes for hash-based editing (default false). Use when you plan to edit the file with hashline_edit." },
     },
     required: ["path"],
   },
-  async execute({ path, offset, limit, filePath }, ctx) {
+  async execute({ path, offset, limit, hashes, filePath }, ctx) {
     path = path || filePath
     if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
     const abs = resolvePath(path, ctx.cwd)
@@ -38,6 +41,11 @@ export const readTool = {
     const start = Math.max(0, (offset || 1) - 1)
     const end = limit ? start + limit : lines.length
     const chunk = lines.slice(start, end)
+    if (hashes) {
+      // Parity with CLI read (review R9#3): hashline_edit is unusable without a way
+      // to obtain line hashes — read is that way on the CLI side; mirror it here.
+      return chunk.map((l, i) => `${String(start + i + 1).padStart(6, " ")}${hashLine(l)}  ${l}`).join("\n")
+    }
     return chunk.map((l, i) => `${String(start + i + 1).padStart(6, " ")}\t${l}`).join("\n")
   },
 }
@@ -74,8 +82,13 @@ export const writeTool = {
       return `Wrote ${content.length} chars to ${path} (via editor)`
     }
 
-    // Not open — write to disk directly
-    await writeFile(abs, content, "utf8")
+    // Not open — write to disk directly. EOL semantics (CLI parity): overwriting
+    // an existing file restores ITS original EOL style (F1); a new file follows
+    // the directory's majority style, defaulting to LF (F2).
+    const prev = existsSync(abs) ? await readFile(abs, "utf8").catch(() => null) : null
+    const eol = prev != null ? detectFileEol(prev) : majorityEol(dirname(abs))
+    const out = eol === "\r\n" ? normalizeEOL(content).replace(/\n/g, "\r\n") : content
+    await writeFile(abs, out, "utf8")
     refreshMarkdownPreview(abs)
     return `Wrote ${content.length} chars to ${path}`
   },
@@ -112,14 +125,27 @@ export const editTool = {
     // (getText returns the buffer as-is). Write-back restores the file's original
     // EOL style so the diff stays clean (no whole-file EOL rewrite).
     const rawText = doc ? doc.getText() : await readFile(abs, "utf8")
-    const fileEol = rawText.includes("\r\n") ? "\r\n" : "\n"
+    // First-newline rule (CLI parity): the file's first newline decides the EOL
+    // style — never count occurrences (mixed files follow the first line).
+    const fileEol = detectFileEol(rawText)
     const text = normalizeEOL(rawText)
     const count = text.split(old_string).length - 1
     if (count === 0) {
       // Helpful diagnosis instead of a bare miss: line ending mismatch vs genuinely absent
       const crlfCount = rawText.split(old_string.replace(/\n/g, "\r\n")).length - 1
       if (crlfCount > 0) return `Error: old_string not found with LF line endings, but matches ${crlfCount} time(s) with CRLF — internal normalization failed (report this)`
-      return `Error: old_string not found in ${path}`
+      // Similarity candidates (LCS, line-level, top 3, score ≥ 0.5) — turns the
+      // "not found" black box into a pointer at the most likely intended line.
+      // Multi-line old_string: only its first line is scored (marked accordingly). CLI parity.
+      const cands = findCandidates(text.split("\n"), old_string)
+      let candText = ""
+      if (cands.length > 0) {
+        const header = old_string.includes("\n")
+          ? `\n  similar lines (old_string line 1: "${old_string.split("\n")[0].slice(0, 80)}"):`
+          : "\n  similar lines:"
+        candText = header + "\n" + cands.map((c) => `    L${c.line}: ${c.preview} (${Math.round(c.score * 100)}%)`).join("\n")
+      }
+      return `Error: old_string not found in ${path}${candText}`
     }
     if (!replace_all && count > 1) {
       return `Error: old_string matches ${count} times in ${path} — set replace_all=true or add more context to make it unique`
@@ -143,7 +169,10 @@ export const editTool = {
 
     // Not open — write to disk. Restore the file's original EOL style.
     const replaced = replace_all ? text.replaceAll(old_string, () => new_string) : text.replace(old_string, () => new_string)
-    await writeFile(abs, fileEol === "\r\n" ? replaced.replace(/\n/g, "\r\n") : replaced, "utf8")
+    // normalizeEOL(replaced) first: new_string may carry \r\n (pasted from a raw CRLF read);
+    // without it the \n→\r\n conversion doubles the \r into \r\r\n (review R9#1).
+    const out = fileEol === "\r\n" ? normalizeEOL(replaced).replace(/\n/g, "\r\n") : replaced
+    await writeFile(abs, out, "utf8")
     refreshMarkdownPreview(abs)
     return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path}`
   },
@@ -176,7 +205,11 @@ export const hashlineEditTool = {
   async execute({ path, old_hashes, new_content }, ctx) {
     const abs = resolvePath(path, ctx.cwd)
     if (!old_hashes?.length) throw new Error("old_hashes must not be empty — read the file with hashes=true to get line hashes")
-    const text = normalizeEOL(await readFile(abs, "utf8"))
+    const raw = await readFile(abs, "utf8")
+    const text = normalizeEOL(raw)
+    // Encoding-corruption probe (CLI parity): U+FFFD means the file is not clean
+    // UTF-8 — hash addressing may be unreliable. Warn (never block).
+    const corrupted = text.includes("\uFFFD")
     const lines = text.split("\n")
     const fileHashes = lines.map((l) => hashLine(l))
     const target = old_hashes
@@ -197,7 +230,8 @@ export const hashlineEditTool = {
       const preview = target.join(" ")
       throw new Error(
         `Hash sequence not found in ${path}: ${preview}\n` +
-        `The file may have been modified since you last read it. Current hashes (first ${maxShow} lines):\n${hashDump}`
+        `The file may have been modified since you last read it. Current hashes (first ${maxShow} lines):\n${hashDump}` +
+        (corrupted ? `\n${FFFD_WARNING}` : "")
       )
     }
 
@@ -221,9 +255,10 @@ export const hashlineEditTool = {
     }
 
     const pos = matches[0]
-    const newLines = new_content.split("\n")
+    const newLines = normalizeEOL(new_content).split("\n") // normalize: CRLF in new_content would join into \r\r\n
     lines.splice(pos, target.length, ...newLines)
-    const updated = lines.join("\n")
+    // Write back in the file's original EOL style (same rule as edit / apply_patch).
+    const updated = joinWithEol(lines, raw)
 
     // Open in editor → WorkspaceEdit; otherwise write to disk
     const doc = getOpenDoc(abs)
@@ -235,6 +270,6 @@ export const hashlineEditTool = {
       refreshMarkdownPreview(abs)
     }
     const diff = gitDiffOne(ctx.cwd, abs)
-    return `Edited ${path}: replaced ${target.length} line(s) at L${pos + 1} with ${newLines.length} line(s)${diff ? "\n" + diff : ""}`
+    return `Edited ${path}: replaced ${target.length} line(s) at L${pos + 1} with ${newLines.length} line(s)${diff ? "\n" + diff : ""}${corrupted ? `\n${FFFD_WARNING}` : ""}`
   },
 }

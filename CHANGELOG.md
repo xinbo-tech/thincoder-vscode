@@ -4,6 +4,23 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.51] — 2026-08-26
+
+### Fixed
+
+- **编辑工具 CRLF 行尾写回丢失**：`apply_patch` / `insert_after` 在 Windows CRLF 文件上写回全部被转成 LF——现按"首个换行符类型"检测原文件行尾并原样恢复；`edit` / `hashline_edit` 对含 CRLF 的 `new_string`/`new_content` 先归一化再转换，杜绝 `\r\r\n`（edit 的行尾恢复本版已有，本版补齐归一化缺口）
+- **`old_string not found` 黑盒报错**：失败时返回相似度最高的 top 3 候选行（行号+预览+LCS 相似度，阈值 0.5，多行 old_string 只对首行并标注 `old_string line 1:`）
+
+### Added
+
+- **`read` 工具 `hashes` 参数**（CLI 对齐）：返回行 SHA256 哈希——此前 hashline_edit 引导"先 hashes=true 读"但本端 read 不支持，该工具实际不可用；现恢复
+- **`write` 行尾语义**：覆盖既有文件按原行尾恢复；新建文件默认 LF，同目录多数派为 CRLF 时跟随
+- **`hashline_edit` 编码损坏探测**：文件含 U+FFFD 时结果追加警告，不阻断
+
+### Changed
+
+- 候选相似度 LCS 计算复用模块级 DP 缓冲
+
 ## [0.1.50] — 2026-08-25
 
 ### Fixed
