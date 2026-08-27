@@ -4,6 +4,13 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.1] — 2026-08-28
+
+### Added
+
+- **GLM-5.3-Flash 模型支持**：智谱 2026-08-26 发布的原生多模态 Flash 档位模型——1M 上下文 + 128K 输出 + 文本/图片输入，模型选择器可选（不改默认预设）
+- **版本号切 CalVer**：`年份.月份.月内计数`（2026=0、8月=8、月内第1版）——从 0.1.52 切到 0.8.1（0.1→0.8 前进，规范见 RELEASE.md）
+
 ## [0.1.52] — 2026-08-27
 
 ### Fixed
