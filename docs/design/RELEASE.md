@@ -107,6 +107,22 @@ code --install-extension thincoder-vscode-0.1.0.vsix   # 本地安装验证
 - **版本 bump 别用 PowerShell `Set-Content -Encoding UTF8`**:Windows PowerShell 5.1 的 `-Encoding UTF8` 会给文件写入 BOM(`EF BB BF`),导致 JSON 解析失败、`prepublish` 测试崩。改 `package.json` 用 JSON.parse→改字段→JSON.stringify(无 BOM),或用 `-Encoding utf8NoBOM`。
 - **两端门禁要对称**:`vscode:prepublish` 是最后一道门,必须同时跑 `lint && test`(历史上一端只 lint、一端只 test,导致对方缺的那道门漏拦)。已统一为 `npm run lint && npm test`。
 
+### 5.2 版本号规范(CalVer,2026-08-27 用户拍板)
+
+**格式**:`年份段.月份段.月内计数段`,三段。
+
+| 段 | 含义 | 规则 |
+|---|---|---|
+| 第一段 | 年份 | 2026=0,2027=1,每年 +1 |
+| 第二段 | 月份 | 1=1 月 … 12=12 月 |
+| 第三段 | 月内发布计数 | **每月从 1 重置**,月内逐次 +1 |
+
+**VS Code 切换规则(方案 B)**:现状 0.1.52——第二段"1"是乱号。**从下个版本起直接套用规范**:2026-08 的下个版本 = `0.8.1`(年份段 0、月份段 8、月内计数重置为 1),之后月内递增 0.8.2、0.8.3…,2027-01 起 `1.1.0`。0.1→0.8 是前进,vsce 接受。
+
+**硬约束**:版本号必须单调递增,任何切换都不得低于已发布版本(vsce/ovsx 均拒绝倒退)。切换前先 `npx vsce show xinbo-tech.thincoder-vscode --json` 确认当前号。
+
+**判据对照**(本端现状):`0.1.52` = 年份段 0(2026)、月份段 1(乱号)、计数段 52(历史累计)——**下个版本直接改为 `0.8.1`**(0.1→0.8 前进,合法),之后严格走规范。
+
 ## 5b. Open VSX 发布(Cursor / VSCodium / Windsurf 用户可见)
 
 > 微软 Marketplace 与 Open VSX 是两个独立注册表。微软的服务条款禁止非官方 VS Code 衍生版使用其市场,Cursor 等 fork 的扩展面板连的是 **Open VSX**(open-vsx.org)。要让 ThinCoder 在 Cursor 里被搜到,必须两边都发。2026-08-13 已发布 0.1.0 到两边。
