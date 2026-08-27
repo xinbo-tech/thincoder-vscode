@@ -111,7 +111,7 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run lint",
+    "vscode:prepublish": "npm run lint && npm test",
     "package": "vsce package",
     "publish": "vsce publish",
     "publish:ovsx": "ovsx publish",

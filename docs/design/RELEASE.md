@@ -100,6 +100,13 @@ code --install-extension thincoder-vscode-0.1.0.vsix   # 本地安装验证
 - **回滚版本**:vsce 不支持撤销已发布版本。修正后发布补丁版本(如 0.1.1),或联系 Marketplace 支持下架
 - **登录失效**:`npx @vscode/vsce ls-publishers` 验证当前登录状态;失效则重新执行 §1.3
 
+### 5.1 踩坑记录(2026-08-27 补)
+
+- **Marketplace 延迟(已知,每次发布都会遇到)**:`vsce publish` 报 `already exists` 但 `vsce show` 仍显示旧版本 —— **通常是发布其实已成功、市场查询索引有缓存延迟**,不是失败。先 `vsce show xinbo-tech.thincoder-vscode --json` 确认新版本是否在 `versions` 列表里(往往过几分钟就刷出);真失败会报 `Invalid access token` 或明确错误,而不是 `already exists`。
+- **PAT 在环境变量里(会忘)**:发布用的 PAT 常存于环境变量(`VSCE_PAT` / `OVSX_PAT`),但无 TTY 环境(如 agent 子进程)下环境变量可能没继承或 CLI 静默 exit 0 假装成功。**发布前先验证**:`npx @vscode/vsce ls-publishers`(marketplace)、`npx ovsx verify-pat xinbo-tech --pat $env:OVSX_PAT`(open-vsx);拿不准就显式 `--pat` 传。
+- **版本 bump 别用 PowerShell `Set-Content -Encoding UTF8`**:Windows PowerShell 5.1 的 `-Encoding UTF8` 会给文件写入 BOM(`EF BB BF`),导致 JSON 解析失败、`prepublish` 测试崩。改 `package.json` 用 JSON.parse→改字段→JSON.stringify(无 BOM),或用 `-Encoding utf8NoBOM`。
+- **两端门禁要对称**:`vscode:prepublish` 是最后一道门,必须同时跑 `lint && test`(历史上一端只 lint、一端只 test,导致对方缺的那道门漏拦)。已统一为 `npm run lint && npm test`。
+
 ## 5b. Open VSX 发布(Cursor / VSCodium / Windsurf 用户可见)
 
 > 微软 Marketplace 与 Open VSX 是两个独立注册表。微软的服务条款禁止非官方 VS Code 衍生版使用其市场,Cursor 等 fork 的扩展面板连的是 **Open VSX**(open-vsx.org)。要让 ThinCoder 在 Cursor 里被搜到,必须两边都发。2026-08-13 已发布 0.1.0 到两边。
