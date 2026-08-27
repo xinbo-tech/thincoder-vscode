@@ -193,8 +193,8 @@ describe("checklist — persistent tree checklist (ported from CLI)", () => {
     assert.doesNotMatch(content, /T1/)
     const done = readFileSync(join(cwd, ".thincoder", "checklist-done.md"), "utf8")
     assert.match(done, /- \[x\] T1: parent/)
-    assert.match(done, /\n  - \[x\] T1\.1: child1/)
-    assert.match(done, /\n  - \[x\] T1\.2: child2/)
+    assert.match(done, /\n {2}- \[x\] T1\.1: child1/)
+    assert.match(done, /\n {2}- \[x\] T1\.2: child2/)
   })
 
   it("T-cl-9 父 done 子树有 pending → 拒绝（父子都不归档不删除）", () => {
