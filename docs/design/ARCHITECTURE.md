@@ -311,3 +311,52 @@ user input
 | T6 | `arguments` 为对象（非字符串） | JSON.stringify 追加，不产生 `[object Object]` | F2 防御 |
 | T7 | 混合负载：1 正常 + 2 畸形 | 正常执行；`droppedToolCalls=2`；机读线 1 条告警 | F1 |
 | T8 | 回归：现有 provider.test.mjs 的 tool_calls 解析用例全过 | 无破坏 | 范围边界 |
+### 子agent/advisor 模型显示（2026-08-26 · 需求层）
+
+**总体需求**：会话界面必须展示子 agent 与 advisor 实际使用的模型——防止"模型悄悄换掉"造成认知断层；两端对称交付（2026-08-23 功能批次：CLI CHANGELOG 0.12.41 / 本仓库 CHANGELOG 0.1.46）。现状盘点：子 agent 面板行 `role · model` 已实现可用；advisor 块标题期望 `advisor round N · model`，自 0.1.46 起**从未生效**（实现断链，见设计层）。
+
+**功能性需求**：
+- F1 advisor 评审块标题显示实际使用的模型，格式 `advisor round N · model`（与主 agent 同模型时同样显示——显式优于推断）。
+- F2 子 agent 活动流面板行显示 `role · model`（已实现，2026-08-23）。
+- **范围边界**：不改模型解析逻辑（`resolveAdvisorProvider` / `effectiveSubagentModel` 单一解析源维持）；不移植 CLI 的 `[model]` 字符串 token 机制。
+
+**非功能性需求**：
+- NF1 消息契约完备性：`toolPanel` postMessage 载荷凡 chunk 携带的展示字段一律透传，桥处不得静默丢字段（本次审计暴露的缺陷类型）。
+- NF2 链路级回归测试：锁**桥**（扩展端 → postMessage），断言 `model` 语义字段而非渲染字符串。
+
+### 子agent/advisor 模型显示 · 设计层（2026-08-26）
+
+**消息契约**（本段为单一权威源）：
+- `onSubagent(info)` → `{ type:"subagent", ...info }`——展开透传，`model` 随行（已实现；webview `panels.js` `handleSubagentMessage` → `renderSubagentPanel` 显示 `role · model`）。
+- `onToolPanel(name, chunk)` → `{ type:"toolPanel", name, kind, text, round, model }`——显式白名单字段（修复后）。
+- webview `advisorChunk(m)` 渲染 `round + (m.model ? " · " + m.model : "")`（已实现，此前因桥缺失恒空）。
+- **演进先例**：新增展示字段需同时落三个点——发射端 chunk / 桥 postMessage / webview 渲染端（本次断链即只改两点、漏桥）。
+
+**断链根因**：2026-08-23 commit `948ad70`（"show subagent/advisor model in webview"）只改了发射端（`advisor.mjs:137` start chunk 带 `model`）与渲染端（`streaming.js` 消费 `m.model`），**未改桥**——`panel-chat.mjs` `onToolPanel` 的 postMessage 只带 `type/name/kind/text/round`，`model` 从发布首日起被丢弃。该 commit 自带 84 行测试全为 git/execute 工具用例，桥字段零覆盖，故全绿发布。
+
+**方案**：
+- `src/extension/panel-chat.mjs`：提取并导出**纯函数 `toolPanelPayload(name, chunk)`**——kind/text 的 string/对象推导与白名单载荷 `{ type, name, kind, text, round, model }` 统一在此构造；`onToolPanel` 闭包改调它再 `postMessage`（行为不变，仅新增导出缝）。修复点即载荷补 `model: chunk?.model`——string 兼容分支下 `chunk?.model` 恒 undefined，安全；webview 三元渲染自然降级为空。（2026-08-26 交付评审 #1：string 兼容分支无生产触发路径，须直测纯函数方可覆盖——用户批准 (a) 此重构。）
+- 回归测试锁桥：`chat-panel.test.mjs` T1-T3 用真实链路（scripted provider + stub webview）捕获 `{ type:"toolPanel" }` 载荷，断言 `advisor` start chunk 的 `model` 字段透传；T4 直测 `toolPanelPayload` string 分支。
+- 渲染端锁定：`test/advisor-webview.test.mjs`（T5）**收编进 package.json test 脚本**——曾缺席 `npm test` 导致 T5 永不执行（交付评审 #2），并入后 CI 实际运行。
+
+**受影响文件**：
+- `src/extension/panel-chat.mjs`（提取 toolPanelPayload + onToolPanel 闭包调用，约 3 行重构）
+- `test/chat-panel.test.mjs`（桥字段回归 T1-T4）
+- `test/advisor-webview.test.mjs`（新建，T5 渲染端）
+- `package.json`（test 脚本文件清单收编 advisor-webview.test.mjs）
+- `AGENTS.md`（测试段补录该测试文件）
+
+**关键决策**：
+- 不移植 CLI `[model]` token：两端渲染架构不同——CLI TUI 直接访问 agent 对象（`resolveAdvisorProvider(agent).model`），webview 只能经 postMessage 收结构化字段；token 在 vscode 无收益且引入新解析面。
+- 回归测试锁桥而非渲染端：缺陷类型是"桥丢字段"，测试必须断言 postMessage 载荷；渲染端（streaming.js）逻辑不变、无需改。
+- T4 直测纯函数而非真实链路：string 分支无生产触发路径（四个发射端全传对象 chunk，shell 的 string 走 `onToolOutput` 通道），真实链路不可达；`toolPanelPayload` 导出缝使桥字段契约（含防御分支）可单测。
+
+**测试用例表**：
+
+| # | 输入 | 预期输出 | 对应需求 |
+|---|---|---|---|
+| T1 | `onToolPanel("advisor", { kind:"start", text:"", round:1, model:"deepseek-v4" })` | postMessage 载荷含 `model:"deepseek-v4"` | F1 / NF1 |
+| T2 | `onSubagent({ id:"a", role:"explore", status:"started", model:"glm-5.2" })` | postMessage 载荷 `...info` 含 model（展开透传不回退） | F2 |
+| T3 | `onToolPanel("sub:explore#1", { kind:"text", text:"chunk" })`（无 model chunk） | 载荷 `model === undefined`（对象层 key 存在、JSON 序列化后消失）、不抛错；webview 三元渲染降级为空 | 范围边界 |
+| T4 | `toolPanelPayload(name, "raw string")`（string 兼容分支，直测纯函数） | 载荷 `model === undefined`、不抛错 | NF1 / 评审 #1 |
+| T5 | `advisorChunk({ kind:"start", round:1, model:"deepseek-v4" })` | 块标题含 `round 1 · deepseek-v4`；无 model 时无 `·` 后缀 | F1 / 评审 #2 |

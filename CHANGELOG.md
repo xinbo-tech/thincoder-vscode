@@ -4,12 +4,19 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.52] — 2026-08-27
+
+### Fixed
+
+- **checklist 工具坐标系断裂**：`add` 返回任务 ID、`mark` 却只收列表位置 index——agent 拿 ID 定位不到条目、只能猜 index，误标无关条目（线上事故）。修复：`mark` 加 `id` 参数（优先于 index）；auto-ID 按「最大根号+1」分配（含 `checklist-done.md` 双文件扫描，归档 ID 恒占位不复用）；历史重复 `T[\d.]+:` 前缀读入即归一；标记父任务 done 时子任务非全 done 则拒绝（防静默丢弃子树），全 done 则递归归档整棵子树
+
 ## [0.1.51] — 2026-08-26
 
 ### Fixed
 
 - **编辑工具 CRLF 行尾写回丢失**：`apply_patch` / `insert_after` 在 Windows CRLF 文件上写回全部被转成 LF——现按"首个换行符类型"检测原文件行尾并原样恢复；`edit` / `hashline_edit` 对含 CRLF 的 `new_string`/`new_content` 先归一化再转换，杜绝 `\r\r\n`（edit 的行尾恢复本版已有，本版补齐归一化缺口）
 - **`old_string not found` 黑盒报错**：失败时返回相似度最高的 top 3 候选行（行号+预览+LCS 相似度，阈值 0.5，多行 old_string 只对首行并标注 `old_string line 1:`）
+- **advisor 块标题显示实际使用的模型**：面板消息桥 `onToolPanel` 转发 postMessage 时补透传 `model` 字段（0.1.46 起发射端/渲染端已实现、桥丢失致标题模型恒空的断链修复）；补桥字段回归测试与 webview 标题渲染测试
 
 ### Added
 

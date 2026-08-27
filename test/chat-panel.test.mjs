@@ -322,3 +322,97 @@ it("eng(exit) → saveSession → loadSession: cleared token stays null (AC7)", 
 })
 
 })
+
+
+// ─── toolPanel bridge model passthrough (2026-08-26 断链修复 — ARCHITECTURE.md「子agent/advisor 模型显示」T1–T3) ───
+// 0.1.46 wired the emitter (advisor.mjs start chunk carries `model`) and the renderer
+// (streaming.js consumes m.model) but NOT the bridge: panel-chat.mjs's onToolPanel dropped
+// the field from the postMessage payload. These tests lock the bridge via real chat runs
+// (scripted provider + stub webview capture — the distill describe's makePanel pattern).
+describe("toolPanel bridge — model passthrough (advisor/subagent model display)", () => {
+  /** Real ChatPanel bound to a stub webview; provider + agent sub-config routed to the sandbox. */
+  async function makeBridgePanel(port, posted, agentCfg) {
+    const { ChatPanel } = await import("../src/extension/chat-panel.mjs")
+    const { _setConfigPathForTest } = await import("../src/config-io.mjs")
+    _setConfigPathForTest(join(tmp, "config.json"))
+    writeFileSync(join(tmp, "config.json"), JSON.stringify({
+      providers: [{ name: "t", baseURL: `http://127.0.0.1:${port}`, model: "unknown-model", apiKey: "sk-test" }],
+      activeProvider: "t",
+      ...(agentCfg ? { agent: agentCfg } : {}),
+    }))
+    const panel = new ChatPanel({
+      globalStorageUri: { fsPath: tmp },
+      workspaceState: { get: () => undefined, update: async () => {} },
+      subscriptions: [],
+    })
+    panel._panel = { webview: { postMessage: async (m) => posted.push(m) } }
+    return panel
+  }
+
+  it("T1 — advisor start chunk: toolPanel payload carries the advisor's resolved model (F1/NF1)", async () => {
+    const advisorCall = [{ index: 0, id: "c0", type: "function", function: { name: "advisor", arguments: JSON.stringify({ type: "code", paths: ["a.mjs"] }) } }]
+    const { server, port } = await scriptedLLMServer(async (i) => {
+      if (i === 1) return sseTools(advisorCall)                 // main run requests a code review
+      if (i === 2) return sseTurn("All clear — no issues.")     // the advisor's own single-burst reply
+      return sseTurn("done")
+    })
+    try {
+      writeFileSync(join(tmp, "a.mjs"), "x\n")
+      const posted = []
+      const panel = await makeBridgePanel(port, posted, { advisor: { provider: "t", model: "deepseek-v4" } })
+      await panel._chat("review a.mjs", undefined, undefined, "t")
+      const start = posted.find((m) => m.type === "toolPanel" && m.name === "advisor" && m.kind === "start")
+      assert.ok(start, "advisor start chunk crossed the bridge")
+      assert.equal(start.model, "deepseek-v4", "bridge forwards chunk.model (silently dropped since 0.1.46)")
+      assert.equal(start.round, 1)
+    } finally {
+      server.close()
+    }
+  })
+
+  it("T2+T3 — subagent: onSubagent spread keeps model; model-less text chunks post model === undefined", async () => {
+    const exploreCall = [{ index: 0, id: "c0", type: "function", function: { name: "subagent", arguments: JSON.stringify({ task: "inspect a.mjs", role: "explore" }) } }]
+    const { server, port } = await scriptedLLMServer(async (i) => {
+      if (i === 1) return sseTools(exploreCall)
+      if (i === 2) return sseTurn("explore findings")           // child token stream → toolPanel text chunks
+      return sseTurn("done")
+    })
+    try {
+      writeFileSync(join(tmp, "a.mjs"), "x\n")
+      const posted = []
+      const panel = await makeBridgePanel(port, posted, { subagentModels: { explore: "glm-5.2" } })
+      // subagentTool is not readonly — seed the bound slot with autoApprove so the permission gate is skipped
+      const { saveSessionToSlot } = await import("../src/extension/session-io.mjs")
+      saveSessionToSlot(tmp, 1, { version: 2, cwd: tmp, updatedAt: Date.now(), title: "", history: [], contextHistory: [], display: [], tasks: [], planMode: false, autoApprove: true, engineering: false })
+      panel._slot = 1
+      await panel._chat("spawn an explorer", undefined, undefined, "t")
+
+      const started = posted.find((m) => m.type === "subagent" && m.status === "started")
+      assert.ok(started, "subagent started event crossed the bridge")
+      assert.equal(started.role, "explore")
+      assert.equal(started.model, "glm-5.2", "onSubagent { type, ...info } spread keeps model (F2 — 展开透传不回退)")
+
+      const textChunk = posted.find((m) => m.type === "toolPanel" && m.name === "sub:explore#1" && m.kind === "text")
+      assert.ok(textChunk, "child token stream crossed the bridge as text chunks")
+      assert.ok(textChunk.text.includes("explore findings"), "chunk text arrived intact")
+      assert.equal(textChunk.model, undefined, "model-less chunk → payload.model === undefined (T3, 评审 #1 断言语义)")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("T4 — toolPanelPayload string compat branch: kind text, text verbatim, round/model undefined (NF1, 评审 #1)", async () => {
+    // The string branch has no production trigger path (all emitters send objects),
+    // so it is unreachable via the closure — direct-test the exported pure function.
+    const { toolPanelPayload } = await import("../src/extension/panel-chat.mjs")
+    let payload
+    assert.doesNotThrow(() => { payload = toolPanelPayload("sub:explore#1", "raw string") })
+    assert.equal(payload.type, "toolPanel")
+    assert.equal(payload.name, "sub:explore#1")
+    assert.equal(payload.kind, "text", "string chunk → kind 'text'")
+    assert.equal(payload.text, "raw string", "string chunk → text verbatim")
+    assert.equal(payload.model, undefined, "string chunk carries no model — chunk?.model safely undefined")
+    assert.equal(payload.round, undefined, "string chunk carries no round")
+  })
+})
+

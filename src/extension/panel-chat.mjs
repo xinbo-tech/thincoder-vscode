@@ -23,6 +23,19 @@ import { t } from "../i18n.mjs"
 import { _cwd } from "./panel-messages.mjs"
 
 /**
+ * Build the `toolPanel` postMessage payload (pure — directly testable without a
+ * webview; ARCHITECTURE.md「子agent/advisor 模型显示」交付评审 #1). String chunks
+ * are the legacy text form; object chunks carry kind/text/round/model. All display
+ * fields the chunk carries must ride along — the bridge must not silently drop
+ * fields (NF1).
+ */
+export function toolPanelPayload(name, chunk) {
+  const kind = typeof chunk === "string" ? "text" : (chunk?.kind ?? "text")
+  const text = typeof chunk === "string" ? chunk : String(chunk?.text ?? "")
+  return { type: "toolPanel", name, kind, text, round: chunk?.round, model: chunk?.model }
+}
+
+/**
  * Run one chat turn: resolve provider → build callbacks → runAgent →
  * persist both lines on complete. `panel` is the ChatPanel instance.
  */
@@ -188,11 +201,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     },
     // Live output streaming (bash etc.) — chunks append to the running tool card.
     onToolOutput: (n, chunk, id) => panel._panel?.webview.postMessage({ type: "toolOutput", name: n, text: chunk, id }),
-    onToolPanel: (name, chunk) => {
-      const kind = typeof chunk === "string" ? "text" : (chunk?.kind ?? "text")
-      const text = typeof chunk === "string" ? chunk : String(chunk?.text ?? "")
-      panel._panel?.webview.postMessage({ type: "toolPanel", name, kind, text, round: chunk?.round })
-    },
+    onToolPanel: (name, chunk) => panel._panel?.webview.postMessage(toolPanelPayload(name, chunk)),
     onComplete: (content, agentState) => {
       lastAgentState = agentState ?? {}
       panel._saveLines(fullHistory, history, { activeProvider: providerName, ...agentState })

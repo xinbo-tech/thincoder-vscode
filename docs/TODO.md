@@ -22,6 +22,7 @@
 - [ ] §4 模型能力表补 thinkEnabledValue / noUsageStream（advisor #10）
 - [ ] advisor 子代理工具集补 lsp（原文档 T19 遗留）
 - [ ] 跨端文档漂移（2026-08-21 评审 advisory）：checkpoint 机制两端语义差异待明确（CLI v2 全量副本快照 vs VS Code git stash）、preset 计数 16/17、TUI 模块数 ~24/45、12 位旧 hash 改名侧未标注
+- [ ] 模块图补录（2026-08-26 模型显示交付评审 🔵4）：`src/extension/panel-chat.mjs` / `webview/streaming.js` / `webview/panels.js` / `webview/state.js` 未入 AGENTS.md 模块图与 ARCHITECTURE.md §6/§1——既有漂移，非本次引入
 
 ## Issue 批量（2026-08-22，来源：Gitee/GitHub issue 巡检）
 
