@@ -94,6 +94,21 @@ describe("model specs", () => {
     assert.equal(specForModel("kimi-k3").context, 1_000_000, "kimi-k3 itself unaffected")
   })
 
+  it("glm-5.3-flash: 1M context / 128K output / multimodal / effort low-high-max (default max)", async () => {
+    const s = specForModel("glm-5.3-flash")
+    assert.equal(s.context, 1_000_000)
+    assert.equal(s.maxOutput, 128_000)
+    assert.equal(s.multimodal, true, "glm-5.3-flash is multimodal — read_image must not be gated off")
+    assert.deepEqual(s.reasoningEffortEnum, ["low", "high", "max"])
+    assert.equal(s.reasoningEffortDefault, "max")
+    assert.equal(s.noUsageStream, true)
+    assert.equal(s.thinkApi, "type", "thinking 始终开（thinking.type，不可关闭）")
+    // 默认预设未动（方案 A：只加可用性，不惊动存量用户默认）
+    const { PROVIDER_PRESETS } = await import("../src/config-io.mjs")
+    assert.equal(PROVIDER_PRESETS.glm.model, "glm-5.2")
+    assert.equal(PROVIDER_PRESETS["glm-code"].model, "glm-5.2")
+  })
+
   it("unknown model name warns once, not per request (IK5VGJ)", () => {
     const warns = []
     const orig = console.warn

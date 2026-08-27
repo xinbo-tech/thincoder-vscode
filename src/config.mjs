@@ -3,17 +3,21 @@
  * One source per spec row; `specForModel` matches by prefix (case-insensitive).
  *
  * Field reference:
- *   context:            context window size in tokens
- *   maxOutput:          max output tokens
- *   thinking:           model supports thinking mode (true/false)
- *   multimodal:         model supports image inputs
- *   prefixMode:         truncation protocol: uses prefix-based continuation
- *   partialMode:        truncation protocol: partially-available response
- *   cacheMode:          "auto" | "prompt" | "none"
- *   thinkApi:           "type"=thinking.type field | "effort"=reasoning_effort field
- *   reasoningEcho:      "required"=must echo | "optional"=optional (default: don't echo)
- *   reasoningEffortEnum: valid reasoning_effort values
- *   tempRange:          [min, max] temperature range
+ *   context:               context window size in tokens
+ *   maxOutput:             max output tokens
+ *   thinking:              model supports thinking mode (true/false)
+ *   multimodal:            model supports image inputs
+ *   prefixMode:            truncation protocol: uses prefix-based continuation
+ *   partialMode:           truncation protocol: partially-available response
+ *   cacheMode:             "auto" | "prompt" | "none"
+ *   thinkApi:              "type"=thinking.type field | "effort"=reasoning_effort field
+ *   thinkEnabledValue:     when thinkApi is "type", the value used to enable thinking (default "enabled"; MiniMax uses "adaptive")
+ *   reasoningEcho:         "required"=must echo | "optional"=optional (default: don't echo)
+ *   reasoningEffortEnum:   valid reasoning_effort values
+ *   reasoningEffortDefault: default reasoning_effort value (preselected in model picker)
+ *   tempRange:             [min, max] temperature range
+ *   noUsageStream:         true = omit stream_options.include_usage (provider doesn't support usage streaming)
+ *   format:                API wire format: "openai" (default) | "anthropic" | "google"
  */
 const MODEL_SPECS = [
   // DeepSeek V4 series (official Models & Pricing: dual models, both 1M ctx / 384K out,
@@ -31,6 +35,7 @@ const MODEL_SPECS = [
   // GLM-5.3: thinking always-on (no "disabled"); effort converges to low/high/max — NOT the
   //          7-level glm-5.2 enum (verified vs docs.bigmodel.cn GLM-5.3 page, 2026-08)
   ["glm-5.3",           { context: 1_000_000, maxOutput: 128_000, thinking: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "optional", reasoningEffortEnum: ["low", "high", "max"], reasoningEffortDefault: "max", tempRange: [0, 1], noUsageStream: true }],
+  ["glm-5.3-flash",     { context: 1_000_000, maxOutput: 128_000, thinking: true, multimodal: true, cacheMode: "auto", thinkApi: "type", reasoningEcho: "optional", reasoningEffortEnum: ["low", "high", "max"], reasoningEffortDefault: "max", tempRange: [0, 1], noUsageStream: true }],
   ["glm-5.2",           { context: 1_000_000, maxOutput: 128_000, thinking: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "optional", reasoningEffortEnum: ["max", "xhigh", "high", "medium", "low", "minimal", "none"], reasoningEffortDefault: "max", tempRange: [0, 1], noUsageStream: true }],
   ["glm-5",             { context: 1_000_000, maxOutput: 128_000, thinking: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "optional", reasoningEffortEnum: ["max", "xhigh", "high", "medium", "low", "minimal", "none"], reasoningEffortDefault: "max", tempRange: [0, 1], noUsageStream: true }],
   ["glm-4",             { context: 128_000,   maxOutput: 32_000,  thinking: true,  cacheMode: "auto", thinkApi: "type", reasoningEcho: "optional", tempRange: [0, 1], noUsageStream: true }],
