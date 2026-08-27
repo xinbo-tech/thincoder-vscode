@@ -49,10 +49,14 @@ export function sanitizeOutput(s) {
     .replace(/\r/g, "\n")
 }
 
-/** Get the open TextDocument for a path, or null if not open */
+/** Get the open TextDocument for a path, or null if not open.
+ *  win32 is case-insensitive: `d:\` vs `D:\` used to mismatch and put us on the
+ *  disk-write path while the editor held the same file (split-brain). */
 export function getOpenDoc(absPath) {
   try {
-    return vscode.workspace.textDocuments.find((d) => d.uri.fsPath === absPath) || null
+    const win = process.platform === "win32"
+    const key = win ? absPath.toLowerCase() : absPath
+    return vscode.workspace.textDocuments.find((d) => (win ? d.uri.fsPath.toLowerCase() : d.uri.fsPath) === key) || null
   } catch { return null }
 }
 
@@ -211,6 +215,21 @@ export function gitDiffOne(cwd, abs) {
 /** Normalize CRLF to LF (hash/compare stability). CLI parity. */
 export function normalizeEOL(text) {
   return text.replace(/\r\n/g, "\n")
+}
+
+/** Strip a leading UTF-8 BOM (unifies the hash/match domain, see F5-3/F5-4). */
+export function stripBom(text) {
+  return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text
+}
+
+/** Map an LF-domain offset back to a raw-buffer offset. `positionAt` expects raw
+ *  coordinates (CRLF `\r\n` = 2 chars); normalizeEOL drops each `\r`, so an LF
+ *  offset must be mapped back before calling it. `\r\n` pairs are consumed as one
+ *  unit; lone `\r`/`\n` count as 1 (tolerates mixed EOL). */
+export function lfOffsetToRaw(rawText, lfOffset) {
+  let raw = 0, lf = 0
+  while (lf < lfOffset) { raw += rawText[raw] === "\r" && rawText[raw + 1] === "\n" ? 2 : 1; lf += 1 }
+  return raw
 }
 
 /** Detect a file's EOL style by the type of its FIRST newline: "\r\n" first →

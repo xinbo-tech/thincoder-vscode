@@ -7,7 +7,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { dirname } from "node:path"
-import { resolvePath, getOpenDoc, applyEditorEdit, applyEditorRangeEdit, normalizeEOL, detectFileEol, joinWithEol, majorityEol, findCandidates, FFFD_WARNING, gitDiffOne, hashLine, refreshMarkdownPreview } from "./shared.mjs"
+import { resolvePath, getOpenDoc, applyEditorEdit, applyEditorRangeEdit, normalizeEOL, stripBom, lfOffsetToRaw, detectFileEol, joinWithEol, majorityEol, findCandidates, FFFD_WARNING, gitDiffOne, hashLine, refreshMarkdownPreview } from "./shared.mjs"
 
 export const readTool = {
   name: "read",
@@ -37,7 +37,10 @@ export const readTool = {
     const abs = resolvePath(path, ctx.cwd)
     const doc = getOpenDoc(abs)
     const text = doc ? doc.getText() : await readFile(abs, "utf8")
-    const lines = text.split("\n")
+    // Unify the hash domain with hashline_edit: strip a leading BOM and normalize
+    // EOL before splitting — otherwise CRLF lines keep a trailing \r and a BOM
+    // sticks to line 1, so every line hash mismatches what hashline_edit computes.
+    const lines = normalizeEOL(stripBom(text)).split("\n")
     const start = Math.max(0, (offset || 1) - 1)
     const end = limit ? start + limit : lines.length
     const chunk = lines.slice(start, end)
@@ -76,9 +79,13 @@ export const writeTool = {
 
     const doc = getOpenDoc(abs)
     if (doc) {
-      // Open in editor — apply via WorkspaceEdit (undo-integrated)
+      // Open in editor — apply via WorkspaceEdit (undo-integrated). Overwriting an
+      // open file restores ITS original EOL style (F1) — passing LF content straight
+      // through silently flipped an open CRLF file to LF.
       if (doc.isDirty) return `Error: File has unsaved changes in the editor: ${abs}. Save or discard before allowing automated edits.`
-      await applyEditorEdit(doc, content)
+      const eol = detectFileEol(doc.getText())
+      const out = eol === "\r\n" ? normalizeEOL(content).replace(/\n/g, "\r\n") : normalizeEOL(content)
+      await applyEditorEdit(doc, out)
       return `Wrote ${content.length} chars to ${path} (via editor)`
     }
 
@@ -87,7 +94,9 @@ export const writeTool = {
     // the directory's majority style, defaulting to LF (F2).
     const prev = existsSync(abs) ? await readFile(abs, "utf8").catch(() => null) : null
     const eol = prev != null ? detectFileEol(prev) : majorityEol(dirname(abs))
-    const out = eol === "\r\n" ? normalizeEOL(content).replace(/\n/g, "\r\n") : content
+    // Normalize first in BOTH branches: CRLF content written to an LF file would
+    // otherwise leave bare CRLF (mixed line endings) in the output.
+    const out = eol === "\r\n" ? normalizeEOL(content).replace(/\n/g, "\r\n") : normalizeEOL(content)
     await writeFile(abs, out, "utf8")
     refreshMarkdownPreview(abs)
     return `Wrote ${content.length} chars to ${path}`
@@ -117,6 +126,12 @@ export const editTool = {
   async execute({ path, old_string, new_string, replace_all, filePath }, ctx) {
     path = path || filePath
     if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
+    if (typeof old_string !== "string" || typeof new_string !== "string") return "Error: old_string and new_string must be strings"
+    // A model may paste old_string/new_string straight from a raw CRLF read — its
+    // `\r\n` would fail the count gate against the LF-normalized text (entry bug,
+    // same family). Normalize both at the entry so every downstream check agrees.
+    old_string = normalizeEOL(old_string)
+    new_string = normalizeEOL(new_string)
     const abs = resolvePath(path, ctx.cwd)
     const doc = getOpenDoc(abs)
     // EOL normalization on BOTH read paths: disk files are often CRLF (Windows) while
@@ -155,14 +170,25 @@ export const editTool = {
       // Open in editor — apply via WorkspaceEdit
       if (doc.isDirty) return `Error: File has unsaved changes in the editor: ${abs}. Save or discard before allowing automated edits.`
       if (replace_all) {
-        // For replace_all, apply the full text replacement
-        await applyEditorEdit(doc, text.replaceAll(old_string, () => new_string))
+        // For replace_all, apply the full text replacement. Restore the file's
+        // original EOL style — passing the LF-normalized text straight through
+        // silently flipped a CRLF file to LF.
+        const replaced = text.replaceAll(old_string, () => new_string)
+        const out = fileEol === "\r\n" ? normalizeEOL(replaced).replace(/\n/g, "\r\n") : replaced
+        await applyEditorEdit(doc, out)
       } else {
-        // Find the match position and apply range edit
+        // Find the match position and apply a range edit. `idx` is an LF-domain
+        // offset (normalizeEOL dropped each \r) but doc.positionAt expects raw
+        // CRLF offsets — map back first or the edit drifts by one char per
+        // preceding newline (line 粘连/截断/重复).
         const idx = text.indexOf(old_string)
-        const pos = doc.positionAt(idx)
-        const endPos = doc.positionAt(idx + old_string.length)
-        await applyEditorRangeEdit(doc, pos.line, pos.character, endPos.line, endPos.character, new_string)
+        if (idx === -1) return `Error: old_string not found in ${path}`
+        const start = lfOffsetToRaw(rawText, idx)
+        const end = lfOffsetToRaw(rawText, idx + old_string.length)
+        const newText = fileEol === "\r\n" ? normalizeEOL(new_string).replace(/\n/g, "\r\n") : normalizeEOL(new_string)
+        const pos = doc.positionAt(start)
+        const endPos = doc.positionAt(end)
+        await applyEditorRangeEdit(doc, pos.line, pos.character, endPos.line, endPos.character, newText)
       }
       return `Replaced ${replace_all ? count : 1} occurrence(s) in ${path} (via editor)`
     }
@@ -206,7 +232,11 @@ export const hashlineEditTool = {
     const abs = resolvePath(path, ctx.cwd)
     if (!old_hashes?.length) throw new Error("old_hashes must not be empty — read the file with hashes=true to get line hashes")
     const raw = await readFile(abs, "utf8")
-    const text = normalizeEOL(raw)
+    // Strip the BOM for the hash domain (hashLine never sees it) but remember it —
+    // the disk write-back must restore it, while the editor path passes BOM-less
+    // text (VS Code re-adds the BOM on save per its file encoding).
+    const hadBom = raw.charCodeAt(0) === 0xFEFF
+    const text = normalizeEOL(stripBom(raw))
     // Encoding-corruption probe (CLI parity): U+FFFD means the file is not clean
     // UTF-8 — hash addressing may be unreliable. Warn (never block).
     const corrupted = text.includes("\uFFFD")
@@ -264,9 +294,10 @@ export const hashlineEditTool = {
     const doc = getOpenDoc(abs)
     if (doc) {
       if (doc.isDirty) return `Error: File has unsaved changes in the editor: ${abs}. Save or discard before allowing automated edits.`
+      // BOM-less text: the editor re-adds the BOM on save — passing it would double it.
       await applyEditorEdit(doc, updated)
     } else {
-      await writeFile(abs, updated, "utf8")
+      await writeFile(abs, (hadBom ? "\uFEFF" : "") + updated, "utf8")
       refreshMarkdownPreview(abs)
     }
     const diff = gitDiffOne(ctx.cwd, abs)

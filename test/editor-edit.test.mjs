@@ -17,8 +17,20 @@ function makeDoc(text, fsPath = "d:\\proj\\file.mjs") {
     calls,
     uri: vscode.Uri.file(fsPath),
     isDirty: false,
+    _text: text,
     get lineCount() { return this._lines.length },
     _lines: text.split("\n"),
+    // Faithful positionAt: scan the RAW buffer counting \n to locate line/column;
+    // \r counts as 1 char (matches the real host). The old mock lacked this, so
+    // the edit range branch was never exercised — the CRLF offset-drift bug slipped.
+    positionAt(offset) {
+      let line = 0, col = 0
+      const n = Math.max(0, Math.min(offset, this._text.length))
+      for (let i = 0; i < n; i++) {
+        if (this._text[i] === "\n") { line++; col = 0 } else col++
+      }
+      return { line, character: col }
+    },
     _applyEdit(range, newText) {
       // Replace [start.line..end.line] span with newText (full-file shape)
       this._lines.splice(range.start.line, range.end.line - range.start.line, ...newText.split("\n"))

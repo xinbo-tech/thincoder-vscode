@@ -31,9 +31,12 @@ export const insertAfterTool = {
     const abs = resolvePath(path, ctx.cwd)
     const doc = getOpenDoc(abs)
     const text = doc ? doc.getText() : await readFile(abs, "utf8")
+    const fileEol = detectFileEol(text)
     // EOL-safe disk write-back (review R9#2): joinWithEol detects the file's real
     // line endings from the raw text; per-line \r is stripped before the join.
-    const lines = text.split("\n")
+    // Normalize first so CRLF lines carry no trailing \r — a bare `$` regex anchor
+    // otherwise never matches a CRLF line.
+    const lines = normalizeEOL(text).split("\n")
 
     let target
     if (after_line != null) {
@@ -61,11 +64,11 @@ export const insertAfterTool = {
       if (insertLine >= lineCount) {
         // Append at end
         const lastLine = doc.lineAt(lineCount - 1)
-        await applyEditorRangeEdit(doc, lastLine.lineNumber, lastLine.text.length, lastLine.lineNumber, lastLine.text.length, "\n" + content)
+        await applyEditorRangeEdit(doc, lastLine.lineNumber, lastLine.text.length, lastLine.lineNumber, lastLine.text.length, fileEol + normalizeEOL(content))
       } else {
-        // Insert between lines — insert at start of the next line with a newline prefix
+        // Insert between lines — insert at start of the next line with a newline suffix
         const nextLine = doc.lineAt(insertLine)
-        await applyEditorRangeEdit(doc, nextLine.lineNumber, 0, nextLine.lineNumber, 0, content + "\n")
+        await applyEditorRangeEdit(doc, nextLine.lineNumber, 0, nextLine.lineNumber, 0, normalizeEOL(content) + fileEol)
       }
       return `Inserted after line ${target + 1} in ${path} (via editor)`
     }
