@@ -4,6 +4,12 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.3] — 2026-08-28
+
+### Changed
+
+- System prompt: added two constraints — (1) decide what's right before deciding what's smallest; (2) expose approach tradeoffs when confirming understanding. Targets the "smallest change" shortcut habit.
+
 ## [0.8.2] — 2026-08-28
 
 ### Fixed
