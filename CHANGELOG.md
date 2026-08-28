@@ -4,6 +4,12 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.2] — 2026-08-28
+
+### Fixed
+
+- **edit 工具 CRLF 偏移坐标系错位**：编辑器路径用 LF 域偏移调 doc.positionAt（期望 CRLF 原文偏移），错位量随行号线性增长，导致行粘连/截断/重复。改用 lfOffsetToRaw 偏移映射，并顺带修 6 处同族隐患（replace_all 丢 CRLF、read/hashline_edit 哈希域不一致、BOM 双写、getOpenDoc 大小写 split-brain、insert_after 混合 EOL 注入、write 编辑器分支行尾还原）
+
 ## [0.8.1] — 2026-08-28
 
 ### Added
