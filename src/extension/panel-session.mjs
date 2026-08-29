@@ -58,6 +58,14 @@ export function saveLines(panel, fullHistory, contextHistory, extra = {}, slotOv
     // machine line or provider prefix caches miss (CLI parity, 2026-08-16 cache-hit fix).
     const keepReal = (m) => !m.transient
     const keepMachine = () => true
+    // advisor.guard is session-level (2026-08-29): agentState carries the LIVE guard off the
+    // run's agent config, merged over the existing advisor object (provider/model/thinking are
+    // config-scoped but round-trip through the slot untouched; a legacy null upgrades to an
+    // object). When the run didn't speak (abort/finally saves carry no agentState), the field
+    // is preserved verbatim — a session that never expressed a guard preference keeps `null`
+    // and reads keep falling back to config.json.
+    const existingAdvisor = typeof existing.advisor === "object" && existing.advisor !== null ? existing.advisor : {}
+    const advisorOut = extra.advisorGuard !== undefined ? { ...existingAdvisor, guard: extra.advisorGuard } : (existing.advisor ?? null)
     saveSessionToSlot(cwd, slot, {
       ...existing,
       version: 2, cwd, updatedAt: Date.now(),
@@ -70,10 +78,14 @@ export function saveLines(panel, fullHistory, contextHistory, extra = {}, slotOv
       // of resuming from a stale snapshot missing every VS Code-added message.
       display: [], tasks: extra.tasks ?? existing.tasks ?? [],
       planMode: existing.planMode ?? false, goal: existing.goal ?? null,
-      autoApprove: existing.autoApprove ?? false, advisor: existing.advisor ?? null,
+      autoApprove: existing.autoApprove ?? false,
+      advisor: advisorOut,
       // Engineering state persisted by runAgent (agentState): design token survives turns;
-      // the engineering flag mirrors config.json so the CLI side round-trips it too.
-      engineering: extra.engineering ?? existing.engineering ?? false,
+      // the engineering flag is slot-authoritative (2026-08-29) — config.json is the mirror.
+      // `!== undefined` (not ??): a legacy slot with NO engineering field must stay field-less
+      // when the run didn't speak (abort/finally saves) — hard-writing `false` here would pin
+      // the session off and kill the config.json fallback (compat contract, see tests).
+      engineering: extra.engineering !== undefined ? extra.engineering : existing.engineering,
       // Key-presence write (v2 2026-08-25): ?? treated an explicit null (eng(exit) cleared the
       // token) as "missing" and revived the stale slot value on the next save — a revived token
       // re-opened the parent write gate. An explicit key always wins; absent key keeps the slot.

@@ -134,11 +134,14 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   const isFirstMessageNow = fullHistory.filter((m) => (m.type ?? m.role) === "user").length === 0
   isFirstMessage = isFirstMessageNow
 
-  // Restore the session-scoped design token (persists across turns within a session; the
-  // `engineering` flag and advisor convergence budget live elsewhere — the flag in config.json,
-  // the budget resets per run, CLI parity).
+  // Restore the session-scoped design token AND the session-level mode flags: engineering
+  // and advisor.guard are SLOT-authoritative (2026-08-29 refactor) — config.json is only a
+  // CLI-compat mirror and the setup fallback. `null` = the session never set the flag,
+  // setup falls back to config (legacy slots).
   const sessionData = panel._activeData(turnSlot) ?? {}
   const engState = {
+    enabled: sessionData.engineering ?? null,
+    advisorGuard: sessionData.advisor?.guard ?? null,
     engDesignToken: sessionData.engDesignToken ?? null,
   }
 
@@ -237,7 +240,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     onPermissionRequired: permissionGate(panel),
     onQuestion: (question, options) => askInPanel(question, options),
   })
-  const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume, planMode: panel._activeData(turnSlot)?.planMode ?? false, distillState: panel._distillState, distillSignal: panel._distillController?.signal })
+  const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume, planMode: panel._activeData(turnSlot)?.planMode ?? false, distillState: panel._distillState, distillSignal: panel._distillController?.signal, engPersist: { cwd, slot: turnSlot } })
   // Turn-cap continue loop (CLI agent-turn.mjs parity): each ContinueError offers
   // "Continue" — unlimited, resume:true keeps history, fresh budget per run. The loop
   // also folds in the Ctrl+I interrupt resume (same rebuild-controller semantics).

@@ -127,11 +127,13 @@ export function pushReal(history, fullHistory, msg) {
 }
 
 /** Extract the persisted engineering/advisor state for the session file (CLI session.mjs fields).
- *  Only the design token is session-scoped — engineering lives in config.json and the advisor
- *  convergence budget resets per run (CLI parity). */
+ *  The design token AND the mode flags are session-scoped (2026-08-29): engineering and
+ *  advisor.guard persist into the slot (slot authority, config.json is the CLI mirror);
+ *  the advisor convergence budget still resets per run (CLI parity). */
 export function agentState(agent) {
   return {
     engineering: agent.config?.agent?.engineering ?? false,
+    advisorGuard: agent.config?.advisor?.guard === true,
     engDesignToken: agent._engDesignToken ?? null,
   }
 }

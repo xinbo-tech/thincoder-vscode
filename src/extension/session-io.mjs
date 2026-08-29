@@ -239,6 +239,29 @@ export function setSlotPlanMode(cwd, slot, value) {
   return true
 }
 
+/**
+ * Set the slot's engineering flag — the SLOT is the source of truth for the VS Code
+ * session (2026-08-29: engineering was global config.json `agent.engineering`, which the
+ * CLI's /eng also writes, so the two ends flipped each other's mode). config.json keeps a
+ * CLI-compat mirror; reads fall back to config only when the slot has no field yet.
+ */
+export function setSlotEngineering(cwd, slot, value) {
+  const data = loadSlot(cwd, slot)
+  if (!data) return false
+  data.engineering = value
+  saveSessionToSlot(cwd, slot, data)
+  return true
+}
+
+/** Set the slot's advisor guard flag (`advisor: { guard }` — null upgrades to an object). */
+export function setSlotAdvisorGuard(cwd, slot, value) {
+  const data = loadSlot(cwd, slot)
+  if (!data) return false
+  data.advisor = { ...(typeof data.advisor === "object" && data.advisor !== null ? data.advisor : {}), guard: value }
+  saveSessionToSlot(cwd, slot, data)
+  return true
+}
+
 
 /** Page size for lazy history loading (initial paint + scroll-back pages). */
 export const HISTORY_PAGE_SIZE = 50

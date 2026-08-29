@@ -16,7 +16,7 @@ import { addProviderEntry, removeProviderEntry } from "./provider-flows.mjs"
 import { mcpConnectedNames } from "../mcp.mjs"
 import { listModels } from "../provider.mjs"
 import { specForModel } from "../specs.mjs"
-import { loadModelPrefs } from "./session-io.mjs"
+import { loadModelPrefs, loadSlot } from "./session-io.mjs"
 
 /**
  * Status snapshot for the settings panel. Shape consumed by webview/settings.js:
@@ -68,9 +68,16 @@ export function handleSetProviderProxy(name, proxy) {
   return null
 }
 
-/** Agent/Advisor settings snapshot for the panel (from shared config.json). */
-export function agentSettings() {
+/** Agent/Advisor settings snapshot for the panel (from shared config.json).
+ *  `session` ({ cwd, slot }, optional): engineering + advisor.guard are SESSION-level
+ *  (2026-08-29 refactor — slot authority, config.json is the CLI mirror). When given, the
+ *  session slot's values override the config snapshot so the ENG/GUARD buttons show the
+ *  live session state, not the global one; without it (no panel bound yet) config is shown. */
+export function agentSettings(session) {
   const s = loadAgentSettings()
+  // Slot read failure must not break the settings push — fall back to config.
+  let slotData = null
+  try { slotData = session ? loadSlot(session.cwd, session.slot) : null } catch { /* unreadable slot */ }
   return {
     maxTurns: s.maxTurns,
     subagentTurns: s.subagentTurns,
@@ -78,10 +85,13 @@ export function agentSettings() {
     subagentModels: s.subagentModels,
     compactThreshold: s.compactThreshold, // null = auto
     verifyGuard: s.verifyGuard,
-      engineering: s.engineering,
+    engineering: slotData?.engineering ?? s.engineering,
     consultTurns: s.consultTurns,
     consultTimeoutMs: s.consultTimeoutMs,
-    advisor: { ...(s.advisor ?? {}), guard: s.advisor?.guard === true },
+    // Guard chain: slot value when the session ever set it (explicit false ≠ unset — an
+    // explicit session OFF must not fall through to a config ON, see eng-session.test.mjs),
+    // then the config flag coerced to boolean.
+    advisor: { ...(s.advisor ?? {}), guard: slotData?.advisor?.guard ?? (s.advisor?.guard === true) },
     consultModels: s.consultModels ?? [],
     // Spec-derived effort enums — offline, always available; the webview's model list
     // (network probe) may not have arrived when the panel opens, and the effort dropdown

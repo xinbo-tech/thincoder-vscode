@@ -4,7 +4,7 @@
  */
 import * as vscode from "vscode"
 import { t, loadLocaleStrings } from "../i18n.mjs"
-import { saveModelPrefs, switchToSlot, setSlotTitle } from "./session-io.mjs"
+import { saveModelPrefs, switchToSlot, setSlotTitle, setSlotAdvisorGuard, setSlotEngineering } from "./session-io.mjs"
 import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection, shellCandidates, saveShellSettingsFromPanel, saveWebsearchKeyFromPanel, deleteWebsearchKeyFromPanel, testProviderConnection } from "./settings.mjs"
 import { PRESETS } from "./presets.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
@@ -239,22 +239,27 @@ export async function handlePanelMessage(panel, msg) {
       panel._pushSettingsLight()
       break
     }
-    case "getAgentSettings": panel._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() }); break
+    case "getAgentSettings": panel._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings(panel._agentSettingsSession?.() ?? null) }); break
     case "webviewReady": {
       // The webview finished loading — now it's safe to push initial state.
       // resolveWebviewView pushed i18n right after setting webview.html, which
       // races the async load and is DROPPED on Reload Window (labels showed raw
       // keys like "msg.user"). Re-push here, plus the settings the toolbar needs.
       panel._panel?.webview.postMessage({ type: "i18n", strings: loadLocaleStrings(vscode.env.language) })
-      panel._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
+      panel._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings(panel._agentSettingsSession?.() ?? null) })
       break
     }
     case "setAdvisorGuard": {
+      // Slot first (session-level authority, 2026-08-29), then the config.json mirror
+      // (CLI compat). A slot write failure must not block the config write.
+      try { setSlotAdvisorGuard(_cwd(), panel._ensureSlot(), !!msg.value) } catch {}
       saveAgentSettingsFromPanel({ advisor: { guard: !!msg.value } })
       panel._pushSettingsLight()
       break
     }
     case "setEngineeringEnabled": {
+      // Same dual-write contract as setAdvisorGuard above: slot authority + config mirror.
+      try { setSlotEngineering(_cwd(), panel._ensureSlot(), !!msg.value) } catch {}
       saveAgentSettingsFromPanel({ engineering: !!msg.value })
       panel._pushSettingsLight()
       break

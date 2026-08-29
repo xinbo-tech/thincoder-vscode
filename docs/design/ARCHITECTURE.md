@@ -132,8 +132,8 @@ user input
 **advisor / eng（与 CLI 同源移植）**：
 - `advisor`：独立只读评审子代理，工具集 = read/glob/grep/ls/git_diff/git_status/git_log/code_search（CLI 另有 lsp，VS Code 侧待补，见 TODO.md）。收敛协议（round 1 全量 → round 2 验证+新明显问题 → round 3+ 严格验证，机械上限 5 轮）、会话内 `_advisorSession` 复用、`.thincoder/advisor.md` 自定义标准、advisor guard pushback（最多 3 次）——全部与 CLI 一致。
 - `type='design'` 设计评审：生成 HMAC 签名 design token（1 小时过期），advisor 仅在无 🔴 时回显 `[DESIGN-TOKEN:…]`，回显即签发 token 给 eng-coder。
-- `eng`：工程模式开关，engineering 标志落盘共享 config.json（`agent.engineering`）；工程模式下主代理 system prompt 换成 `engineering.md` + 项目 METHODOLOGY.md，dispatch 门禁机械拦截 design review 通过前的代码文件写入（docs/** 豁免），`eng-coder` 子代理须持 token 才获写权限（spawn 时校验 + 运行时门禁双保险）。
-- 工程状态持久化：`engineering` 进 config.json，`engDesignToken` 进会话槽位文件（`_advisorRound` 为 per-run，不持久化，与 CLI 一致）。
+- `eng`：工程模式开关。**engineering 与 advisor.guard 都是会话级（2026-08-29 重构，详见 CLI `docs/design/ENGINEERING-MODE.md`「会话级模式开关」——单一权威源）**：事实源是当前会话槽位文件（slot 显式值 > config.json 兜底 > false），config.json `agent.engineering` / `agent.advisor.guard` 降为 CLI 兼容镜像（双写保留）。工程模式下主代理 system prompt 换成 `engineering.md` + 项目 METHODOLOGY.md，dispatch 门禁机械拦截 design review 通过前的代码文件写入（docs/** 豁免），`eng-coder` 子代理须持 token 才获写权限（spawn 时校验 + 运行时门禁双保险）。
+- 工程状态持久化：`engineering`/`advisor.guard` 进会话槽位文件（面板 toggle 双写、`engPersist: { cwd, slot }` 通道、`agentState()` 每 turn 随 `saveLines` 落盘），config.json 镜像；`engDesignToken` 进会话槽位文件（`_advisorRound` 为 per-run，不持久化，与 CLI 一致）。
 
 **提示词借鉴增量（kimi-code 对照，2026-08-21）**：explore 彻底度分级（quick/medium/thorough，prompt 约定形态）+ system.md 确认理解补"列出最重要的验收标准"。需求/设计/测试/文件清单见 CLI `docs/design/AGENT-LOOP.md`「## 10. 提示词借鉴增量」——两端 `src/prompts/` 改动保持 byte-identical，subagent 工具 description 两端各自同步语义。VS Code 端受影响文件：`src/prompts/explore.md`、`src/prompts/main.md`、`src/prompts/system.md`、`src/agent-tools/subagent.mjs`、测试、`CHANGELOG.md`。
 

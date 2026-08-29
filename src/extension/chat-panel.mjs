@@ -229,7 +229,7 @@ export class ChatPanel {
     // (per-provider proxy checkboxes revert without it) and shellCandidates WITH current
     // (the webview nulls the shell value when current is missing).
     pushStatus(this._panel)
-    this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
+    this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings(this._agentSettingsSession()) })
     this._panel?.webview.postMessage({ type: "proxySettings", settings: proxySettings() })
     this._panel?.webview.postMessage({ type: "websearchSettings", settings: websearchSettings() })
     this._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates(), current: loadRaw().shell ?? null })
@@ -237,12 +237,22 @@ export class ChatPanel {
 
   _pushSettings() {
     fullStatus(this._panel)
-    this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings() })
+    this._panel?.webview.postMessage({ type: "agentSettings", settings: agentSettings(this._agentSettingsSession()) })
     this._panel?.webview.postMessage({ type: "proxySettings", settings: proxySettings() })
     this._panel?.webview.postMessage({ type: "websearchSettings", settings: websearchSettings() })
     this._panel?.webview.postMessage({ type: "shellCandidates", candidates: shellCandidates(), current: loadRaw().shell ?? null })
     this._pushMcpStatus()
     this._pushIndexStatus()
+  }
+
+  /** Session reference for the agentSettings snapshot: engineering/advisor.guard are
+   *  session-level (slot authority) — the ENG/GUARD buttons must reflect the session,
+   *  not global config. Unbound panel (no slot yet) → null → config fallback. */
+  _agentSettingsSession() {
+    try {
+      const slot = this._slot ?? this._ensureSlot()
+      return slot != null ? { cwd: _cwd(), slot } : null
+    } catch { return null }
   }
 
   // ─── Index (implementations in panel-index.mjs) ───

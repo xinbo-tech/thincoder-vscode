@@ -139,7 +139,17 @@ export async function setupAgentRun({ provider, cwd, input, opts, depth, role, g
     cfgProviders = resolveProviders().providers // for subagent model overrides
     cfgWebsearch = raw.websearch ?? { provider: "tavily", apiKey: "" }
   } catch { /* config unreadable — defaults */ }
+  // Session-level engineering (2026-08-29): `engState.enabled` comes from the panel's bound
+  // session slot (panel-chat.mjs). `null` = the session NEVER set the flag (legacy slot or
+  // fresh session) → fall back to the config.json CLI-compat mirror; an explicit true/false
+  // always wins over config (this is what keeps an external config flip from hijacking the
+  // session's mode — the reported cross-end pollution bug).
   const engineering = engState?.enabled ?? cfgEngineering
+  // Advisor guard is ALSO session-level (2026-08-29): the slot value wins when the session
+  // has ever set the guard (panel toggle / eng tool); `null` = never set → config fallback
+  // (legacy slots keep their old behavior). Other advisor keys (provider/model/thinking…)
+  // stay config-scoped — only guard flipped to session authority.
+  advisorCfg = { ...advisorCfg, guard: engState?.advisorGuard ?? advisorCfg.guard ?? false }
 
   // Tool schemas are built AFTER `engineering` is known: the subagent role enum is
   // mode-dependent (CLI setup.mjs parity) — normal mode must not advertise 'eng-coder'
@@ -189,6 +199,11 @@ export async function setupAgentRun({ provider, cwd, input, opts, depth, role, g
   // Live state channel for the parent (eng-coder mutation merge) — the caller gets a
   // reference to the same array, so it stays current as the child touches files.
   if (opts.stateSink) opts.stateSink.touchedFiles = agent._touchedFiles
+  // Session persistence channel for the eng tool (2026-08-29): `engPersist: { cwd, slot }`
+  // rides opts → agent; eng(enter/exit) persists the flipped flag into the session slot
+  // (slot authority) in addition to the config.json mirror. Top level only — subagents
+  // must never write the parent's slot (they get no engPersist).
+  if (opts.engPersist) agent._engPersist = opts.engPersist
   const platform = { win32: "Windows", darwin: "macOS", linux: "Linux" }[os.platform()] ?? os.platform()
 
   // System prompt — engineering mode replaces the standard discipline block with
