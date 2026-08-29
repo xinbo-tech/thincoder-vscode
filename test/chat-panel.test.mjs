@@ -544,8 +544,6 @@ describe("session switch race guards (GitHub #2/#5 — 2026-08-28)", () => {
         agent: { maxTurns: 2 },
       }))
       // Patch askInPanel: answer "Stop" when the Continue card appears
-      const origQuestion = panel._questionQueue
-      panel._questionQueue = origQuestion // keep shape; we drain via posted messages
       panel._slot = 1
       const turn = panel._chat("keep this message", undefined, undefined, "t")
       // Drain question cards: the Continue card resolves with "Stop"

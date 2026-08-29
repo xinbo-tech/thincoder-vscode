@@ -278,6 +278,8 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       // Persist the interrupted/errored turn: the user message and any partial output
       // were already pushed into both lines by runAgent (pushReal). Without this save,
       // an abort/error loses the whole turn from disk (CLI parity: at most half a turn lost).
+      // (The finally block below also saves unconditionally — CLI agent-turn.mjs parity —
+      // so this catch-block save is now redundant on this path, but harmless.)
       try {
         panel._saveLines(fullHistory, history, { activeProvider: providerName }, turnSlot)
       } catch (saveErr) {
