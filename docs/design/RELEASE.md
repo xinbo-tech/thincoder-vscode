@@ -65,6 +65,7 @@ npx @vscode/vsce login xinbo-tech
 - [ ] `CHANGELOG.md` 已更新(市场页 Changelog 标签内容来源)
 - [ ] 版本号已递增 —— 同一版本号**不可重复发布**
 - [ ] 扩展改动已实际跑过(项目纪律:没有「写了没跑」的代码)
+- [ ] **双源发布已计划**(2026-08-29 漏发事故):`vsce publish` 只进微软 Marketplace,**Cursor/VSCodium/Windsurf 用户连的是 Open VSX**——每次发版必须两个 registry 都发(见 §3 与 §5b),缺一即未完成
 
 ## 3. 发布
 
@@ -85,6 +86,7 @@ npx @vscode/vsce publish major   # 0.2.0 → 1.0.0
 
 `vsce publish` 自动执行:`vscode:prepublish`(eslint)→ 打包 → 上传。
 首次发布会经过市场验证扫描(通常几分钟),通过后即可搜索 "ThinCoder",安装 ID 为 `xinbo-tech.thincoder-vscode`。
+**发完这里只是完成了一半**——必须继续 §5b 的 `ovsx publish`(同一 vsix),两个 registry 都成功才算发布完成(2026-08-29 0.8.4 漏发 Open VSX,Cursor 用户滞留旧版)。
 
 ## 4. 本地验证(不发布)
 
@@ -149,6 +151,7 @@ npx ovsx publish thincoder-vscode-0.1.0.vsix --pat <OVSX-PAT>   # 直接发已�
 
 - 发布后可查:https://open-vsx.org/extension/xinbo-tech/thincoder-vscode (API:`https://open-vsx.org/api/xinbo-tech/thincoder-vscode`,新版本/搜索索引可能延迟数分钟)
 - `publishedBy` 是发布者的 GitHub 账号(实测:eprom2006),与 marketplace 的 Azure DevOps 身份无关
+- **发布后必须回查 API 确认 `version` 已翻转**(2026-08-29 教训:0.8.4 首次 `ovsx publish` 输出 🚀 但版本进入 inactive 队列——API 仍返回旧版、新版本端点 404,属静默假成功)。轮询 `GET /api/xinbo-tech/thincoder-vscode` 直到 `version` 变为刚发的版本;此时重复 publish 会明确报 "already published, but currently isn't active",只能等队列消化,不可误判为成功后不管
 - Cursor 用户兜底:任何 vsix 都能在 Cursor 里 "Install from VSIX" 手动安装
 
 ## 6. 发布者职责
