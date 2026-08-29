@@ -88,6 +88,8 @@ npx @vscode/vsce publish major   # 0.2.0 → 1.0.0
 首次发布会经过市场验证扫描(通常几分钟),通过后即可搜索 "ThinCoder",安装 ID 为 `xinbo-tech.thincoder-vscode`。
 **发完这里只是完成了一半**——必须继续 §5b 的 `ovsx publish`(同一 vsix),两个 registry 都成功才算发布完成(2026-08-29 0.8.4 漏发 Open VSX,Cursor 用户滞留旧版)。
 
+**推荐方式(2026-08-29 机械化,1be4bcf)**:`npm run publish:all` —— 一条命令完成双源发布 + 双源 LIVE 轮询确认(marketplace gallery query + open-vsx API 各自轮询到 version 翻转),任一源未确认即非零退出;`--skip-marketplace` / `--skip-openvsx` 可显式跳过单源(两个都跳则中止)。凭据走 env:`VSCE_PAT` + `OVSX_PAT`。
+
 ## 4. 本地验证(不发布)
 
 ```bash
