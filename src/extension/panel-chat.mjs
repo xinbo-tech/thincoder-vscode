@@ -52,6 +52,8 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   const turnSlot = ensureSlot(panel)
   const distillSlot = turnSlot
   let isFirstMessage // assigned inside the try (needs the loaded lines); read after finally
+  let fullHistory = [] // hoisted: the finally-block save must see them even on early-return paths
+  let history = []
   try {
 
   // Async distillation mount point (SEND-STALL-DISTILL): the distill promise survives across
@@ -124,8 +126,9 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   // history = machine line (compaction shrinks it); old sessions fall back to the human line.
   // runAgent appends this turn's real messages (user input, assistant replies, tool results) to
   // both lines via its internal pushReal — chat-panel only supplies the lines and persists them.
-  const { fullHistory, contextHistory } = panel._activeLines(turnSlot)
-  const history = Array.isArray(contextHistory) ? contextHistory : [...fullHistory]
+  const loadedLines = panel._activeLines(turnSlot)
+  fullHistory = loadedLines.fullHistory
+  history = Array.isArray(loadedLines.contextHistory) ? loadedLines.contextHistory : [...fullHistory]
   // Slot snapshot comment: turnSlot/distillSlot are captured at function entry (above, before
   // any await) — see the 交付评审 🔴#1 note at the top of this function.
   const isFirstMessageNow = fullHistory.filter((m) => (m.type ?? m.role) === "user").length === 0
@@ -300,6 +303,15 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     panel._turnActive = false
     panel._refreshStatus()
     panel._panel?.webview.postMessage({ type: "loading", loading: false })
+    // Persist on EVERY exit path (CLI agent-turn.mjs finally parity — "Save session after
+    // every turn (survives crashes)"): the ContinueError→Stop `break` above skips the
+    // catch-block save, which stranded the whole turn (user input + N turns of work) in
+    // memory only — lost on session switch/reload.
+    try {
+      if (fullHistory?.length) panel._saveLines(fullHistory, history, { activeProvider: providerName }, turnSlot)
+    } catch (saveErr) {
+      console.error("[chat-panel] save in finally failed:", saveErr.message)
+    }
   }
   // Generate session title from first message (after agent completes)
   if (isFirstMessage) await panel._generateTitle(turnSlot)

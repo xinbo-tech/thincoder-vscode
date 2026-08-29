@@ -520,4 +520,54 @@ describe("session switch race guards (GitHub #2/#5 — 2026-08-28)", () => {
       server.close()
     }
   })
+
+  it("ContinueError → Stop still persists the turn to disk (finally-save, CLI agent-turn.mjs parity)", async () => {
+    // maxTurns=2 forces a Continue prompt; user picks Stop → the break previously skipped
+    // the catch-block save, stranding the whole turn in memory (lost on session switch).
+    // CLI parity: agent-turn.mjs's finally unconditionally saveSession's every exit path.
+    const { server, port } = await scriptedLLMServer(async (i) => {
+      void i
+      return sseTurn(`filler reply ${Date.now()}`) // many replies; the cap will be hit
+    })
+    try {
+      mkFiles()
+      const { handlePanelMessage } = await import("../src/extension/panel-messages.mjs")
+      const posted = []
+      const panel = await makePanel(port, posted)
+      const { _setConfigPathForTest } = await import("../src/config-io.mjs")
+      void _setConfigPathForTest
+      // Tight turn budget via config.json agent.maxTurns
+      _setConfigPathForTest(join(tmp, "config.json"))
+      writeFileSync(join(tmp, "config.json"), JSON.stringify({
+        providers: [{ name: "t", baseURL: `http://127.0.0.1:${port}`, model: "unknown-model", apiKey: "sk-test" }],
+        activeProvider: "t",
+        agent: { maxTurns: 2 },
+      }))
+      // Patch askInPanel: answer "Stop" when the Continue card appears
+      const origQuestion = panel._questionQueue
+      panel._questionQueue = origQuestion // keep shape; we drain via posted messages
+      panel._slot = 1
+      const turn = panel._chat("keep this message", undefined, undefined, "t")
+      // Drain question cards: the Continue card resolves with "Stop"
+      const drain = setInterval(() => {
+        while (panel._questionQueue?.length) {
+          const q = panel._questionQueue.shift()
+          q.resolve("Stop")
+        }
+      }, 50)
+      try {
+        await turn
+      } finally {
+        clearInterval(drain)
+      }
+      assert.equal(panel._turnActive, false, "turn unwound")
+      const data = loadSlot(tmp, 1)
+      assert.ok(data, "session file written on the declined-continue path")
+      assert.ok(data.history.some((m) => m.role === "user" && String(m.content).includes("keep this message")),
+        "the user's input survived in the session file (no stranded-in-memory turn)")
+      assert.ok(data.history.length >= 2, "partial assistant work also persisted")
+    } finally {
+      server.close()
+    }
+  })
 })
