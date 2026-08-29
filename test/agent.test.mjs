@@ -758,6 +758,38 @@ describe("pre-work plan confirmation discipline", () => {
     assert.ok(text.includes("no exemptions"), "no-exemption wording present")
     assert.ok(text.includes("obvious enough to skip"), "self-exemption excuse explicitly blocked")
   })
+
+  it("engineering.md: UI/interaction decisions must land in the design doc AND the eng-coder task (2026-08-29)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "engineering.md"), "utf8")
+    // 设计文档要素扩项：UI 决策必须落档，未定标 open、绝不静默发明
+    assert.ok(
+      /MUST also\s+capture every UI\/interaction decision agreed with the user/.test(text),
+      "design-doc step requires UI/interaction decisions",
+    )
+    assert.ok(text.includes("marked open, never silently invented"), "undecided parts marked open, not invented")
+    // 任务书传递强制：eng-coder 无对话上下文
+    assert.ok(
+      text.includes("MUST restate the agreed\n   UI/interaction decisions"),
+      "eng-coder task must restate UI/interaction decisions",
+    )
+    assert.ok(
+      text.includes("an eng-coder has NO conversation context"),
+      "mechanism named: zero-context subagent",
+    )
+    // Hard Rules 独立条目：点破"讨论过但没落文档"是实现无视的根因
+    assert.ok(text.includes("UI/interaction decisions ride the full chain"), "hard-rule entry present")
+    assert.ok(
+      text.includes('"Discussed but not written down" is the most common reason'),
+      "root cause named in the hard rule",
+    )
+  })
+
+  it("eng-coder.md: implement UI exactly as briefed; missing decisions → stop and report (2026-08-29)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "eng-coder.md"), "utf8")
+    assert.ok(text.includes("UI/interaction: implement exactly what the task brief and design doc state"), "follow-the-brief clause")
+    assert.ok(text.includes("stop and report the gap"), "missing-decision → stop and report")
+    assert.ok(text.includes("do not invent your own interaction design"), "self-invention blocked")
+  })
 })
 // ─── Workflow/Debugging 必须用 task（2026-08-23）───
 // discipline.md 内容级断言：不能只靠「两端 byte-identical」漂绿——副本内容未改时必须能失败。

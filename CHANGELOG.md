@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **工程模式下模型仍委托 role='coder'（跨端污染，用户实测）**：engineering 的事实源曾是全局 config.json `agent.engineering`，CLI 端 `/eng` toggle 也写同一字段 → 两端互相翻转对方的工程模式（CLI 关掉一次 /eng，VS Code 工程会话立即降级为普通模式、subagent schema 回到 coder 枚举）。现 **engineering 与 advisor.guard 均为会话级（slot 权威）**：面板 ENG/GUARD toggle 先写当前会话槽位（`setSlotEngineering`/`setSlotAdvisorGuard`），config.json 保留为 CLI 兼容镜像（slot 写失败不阻断镜像写）；setup 读取优先级 slot 显式值 > config 兜底 > false（旧槽位无字段才回退 config，兼容锁定）；`eng` 工具翻转后经 `engPersist: { cwd, slot }` 通道持久化槽位（top-level run 专属，subagent 不携带）；`agentState()` 每轮把 live engineering/advisorGuard 随 `saveLines` 落盘（advisor 兄弟键 provider/model 往返保留；abort/finally 保存不伪造字段——legacy 槽位保持无字段状态以维持 config 回退）；设置面板快照 `agentSettings(session)` 合并槽位值，ENG/GUARD 按钮回显会话态而非全局态。CLI 侧同构改造见 CLI 0.12.50
 
+### Changed
+
+- **工程模式 UI/交互决策全链路落档**（用户报告"agent 无视讨论过的 UI 设计"）：设计文档要素扩项——涉及界面时必须收录与用户达成的每条 UI/交互决策（布局/流程/控件行为/状态反馈），未定标 open 不静默发明；eng-coder 任务书必须复述这些决策（或指向设计文档具体章节）——子代理零上下文，留在聊天里的决策永远到不了它；`eng-coder.md` 执行侧闭合——缺失的界面决策停下报告，不自行发明。与 CLI 0.12.50 byte-identical
+
 ### Tests
 
 - 新增 `test/eng-session.test.mjs`（18 断言组）：slot setter 往返（含 advisor null→对象升级、兄弟键保留、未知槽位安全 false）；panel-messages 双写（slot+config、slot 失败不阻断）；**核心回归锁定——slot engineering=true + config false → eng-coder 枚举组**（THE reported bug）、slot 无字段 + config true → 回退（compat lock）、slot 显式 false 压过 config true；agentState→saveLines 持久化（含 abort 保存不 pin false）；eng 工具 engPersist 通道（含 subagent 无通道仍翻活态）；agentSettings 快照合并（含无 session/坏槽位回退）
