@@ -62,39 +62,30 @@ const results = { marketplace: false, openvsx: false }
 if (skipMarketplace) {
   console.log("\n⚠️  --skip-marketplace: NOT publishing to the Microsoft Marketplace (explicit flag).")
 } else {
-  if (!process.env.VSCE_PAT && !vsix) throw new Error("VSCE_PAT not set (and no vsix given) — cannot publish to the marketplace")
-  const pat = process.env.VSCE_PAT ? ` --pat ${process.env.VSCE_PAT}` : ""
-  run(`npx @vscode/vsce publish${vsix ? ` ${vsix}` : ""}${pat}`, "① Microsoft Marketplace (vsce publish)")
+  if (!process.env.VSCE_PAT) throw new Error("VSCE_PAT not set — cannot publish to the marketplace")
+  // vsce reads VSCE_PAT natively — keep the PAT OFF the command line (process-list / crash-log leak).
+  // NOTE: a .vsix must ride -i/--packagePath; a bare positional arg to `vsce publish` is parsed as [version].
+  run(`npx @vscode/vsce publish${vsix ? ` -i ${vsix}` : ""}`, "① Microsoft Marketplace (vsce publish)")
   // Microsoft's gallery query API reflects new versions near-instantly.
-  results.marketplace = await pollVersion(
-    `https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery`,
-    "marketplace",
-    6,
-    10_000,
-  ).then(async (ok) => {
-    if (ok) return true
-    // The POST query needs a body — fall back to the simple page check.
-    console.log("  ↻ falling back to gallery page check…")
-    return false
-  })
-  if (!results.marketplace) {
-    // gallery POST body variant (the plain GET above can't work; do the real query here)
-    const body = JSON.stringify({ filters: [{ criteria: [{ filterType: 7, value: `${PUBLISHER}.${PKG.name}` }] }], flags: 103 })
-    for (let i = 1; i <= 10; i++) {
-      try {
-        const res = await fetch("https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json;api-version=3.0-preview.1" },
-          body,
-        })
-        const data = await res.json()
-        const latest = data.results?.[0]?.extensions?.[0]?.versions?.[0]?.version
-        if (latest === VERSION) { console.log(`  ✅ marketplace: version ${VERSION} is LIVE (attempt ${i})`); results.marketplace = true; break }
-        console.log(`  ⏳ marketplace: latest ${latest} (attempt ${i}/10)`)
-      } catch (e) { console.log(`  ⏳ marketplace query error (attempt ${i}/10)`) }
-      await sleep(10_000)
-    }
+// ⚠️ marketplace 的 extensionquery 是 POST-only——不走这个 GET（会浪费轮询窗口），见下方 POST 直查。
+// 直查（含 flags 71：不含 ExcludeNonValidated，避免"验证扫描中"的新版本被排除导致假 NOT-CONFIRMED）。
+{
+  const body = JSON.stringify({ filters: [{ criteria: [{ filterType: 7, value: `${PUBLISHER}.${PKG.name}` }] }], flags: 71 })
+  for (let i = 1; i <= 15; i++) {
+    try {
+      const res = await fetch("https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json;api-version=3.0-preview.1" },
+        body,
+      })
+      const data = await res.json()
+      const latest = data.results?.[0]?.extensions?.[0]?.versions?.[0]?.version
+      if (latest === VERSION) { console.log(`  ✅ marketplace: version ${VERSION} is LIVE (attempt ${i})`); results.marketplace = true; break }
+      console.log(`  ⏳ marketplace: latest ${latest} (attempt ${i}/15)`)
+    } catch (e) { console.log(`  ⏳ marketplace query error (attempt ${i}/15)`) }
+    await sleep(10_000)
   }
+}
 }
 
 // ── 2. Open VSX ──
@@ -102,7 +93,8 @@ if (skipOpenvsx) {
   console.log("\n⚠️  --skip-openvsx: NOT publishing to Open VSX (explicit flag).")
 } else {
   if (!process.env.OVSX_PAT) throw new Error("OVSX_PAT not set — cannot publish to Open VSX")
-  run(`npx ovsx publish ${vsix ?? ""} --pat ${process.env.OVSX_PAT}`.replace(/\s+/g, " "), "② Open VSX (ovsx publish)")
+  // ovsx reads OVSX_PAT natively (util.addEnvOptions) — keep the PAT off the command line.
+  run(`npx ovsx publish${vsix ? ` ${vsix}` : ""}`, "② Open VSX (ovsx publish)")
   // ovsx may report 🚀 while the upload sits in the inactive moderation queue — poll until
   // the API actually flips, or loudly report the stuck state (do NOT exit 0 on fake success).
   results.openvsx = await pollVersion(`https://open-vsx.org/api/${PUBLISHER}/${PKG.name}`, "open-vsx")
