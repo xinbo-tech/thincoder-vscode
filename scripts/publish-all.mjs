@@ -18,7 +18,9 @@
 import { execSync } from "node:child_process"
 
 const PKG = JSON.parse((await import("node:fs")).readFileSync(new URL("../package.json", import.meta.url), "utf8"))
-const VERSION = PKG.version
+// Poll target: a vsix may carry a DIFFERENT version than package.json (e.g. re-publishing a
+// packaged older release) — prefer the vsix's own version when one is given.
+const VERSION = vsix ? (vsix.match(/(\d+\.\d+\.\d+)/)?.[1] ?? PKG.version) : PKG.version
 const PUBLISHER = PKG.publisher
 const args = process.argv.slice(2)
 const vsix = args.find((a) => !a.startsWith("--"))
