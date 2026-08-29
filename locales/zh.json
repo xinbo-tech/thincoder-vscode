@@ -12,6 +12,7 @@
   "input.placeholder": "向 ThinCoder 提问...（Shift+Enter 换行）",
   "toolbar.send": "发送（Enter）",
   "toolbar.stop": "停止",
+  "paste.unsupportedFormat": "仅支持 png / jpg / gif / webp 图片（收到 ${type}）",
   "toolbar.attach": "添加图片",
   "toolbar.attachShort": "附件",
   "toolbar.model": "切换模型",
@@ -162,11 +163,6 @@
   "settings.fetchModelsFirst": "请先拉取模型",
   "settings.providerUrlRequired": "需要 baseURL",
   "input.interruptPlaceholder": "中断 — 注入消息…（Enter 发送，Esc 取消）",
-  "search.placeholder": "搜索会话…",
-  "search.noMatch": "无匹配",
-  "search.prev": "上一个匹配",
-  "search.next": "下一个匹配",
-  "search.close": "关闭搜索",
   "status.currentTool": "工具",
   "status.turns": "轮次",
   "status.elapsed": "耗时",
@@ -202,5 +198,10 @@
   "project.followActive": "跟随活动文件",
   "project.followActiveHint": "自动切换到活动编辑器所在的项目",
   "project.pickPlaceholder": "切换当前项目",
-  "project.followActiveOn": "已开启跟随活动文件"
+  "project.followActiveOn": "已开启跟随活动文件",
+  "search.placeholder": "搜索消息…",
+  "search.prev": "上一个匹配",
+  "search.next": "下一个匹配",
+  "search.close": "关闭搜索",
+  "search.noMatch": "无匹配"
 }

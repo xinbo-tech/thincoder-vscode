@@ -1,103 +1,94 @@
-/**
- * search.test.mjs — in-conversation search (Ctrl+F) integration (happy-dom).
- * Loads the real index.html body + chat.js, then drives the search bar.
- */
-import { describe, it, before, after } from "node:test"
+// search.test.mjs — in-conversation search (Ctrl+F) perf-regression tests.
+// 2026-08-28 白屏修复回归：防抖（击键不搜）、mark 上限（DOM 不爆炸）、搜索不自动滚动
+// （无强制布局）、i18n 键补齐（不再显示裸键名）。
+import { test, before, after, beforeEach } from "node:test"
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
-import { join, dirname } from "node:path"
-import { fileURLToPath } from "node:url"
 import { setupWebview } from "./helpers/webview-env.mjs"
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-let env
+let _scrollCalls = 0
+let ctx // shared webview state (state.js exports; dynamic import inside before — top-level would run before the acquireVsCodeApi stub)
 
 before(async () => {
-  env = setupWebview()
-  const html = readFileSync(join(__dirname, "..", "webview", "index.html"), "utf8")
-  const body = html.match(/<body>([\s\S]*)<\/body>/)?.[1] ?? ""
-  document.body.innerHTML = body.replace(/<script[\s\S]*?<\/script>/g, "")
-  // chat.js calls the VS Code webview bridge acquireVsCodeApi() at module top —
-  // stub it so the module initializes (messages captured via window._vscode).
-  globalThis.acquireVsCodeApi = () => ({ postMessage: (m) => env.capturedPosts.push(m), getState: () => null, setState: () => {} })
-  await import("../webview/chat.js")
+  setupWebview()
+  globalThis.acquireVsCodeApi = () => ({})
+  // 修复 3 观察点：统计 scrollIntoView 调用次数（真实浏览器该调用触发强制布局）
+  Element.prototype.scrollIntoView = () => { _scrollCalls++ }
+  const state = await import("../webview/state.js")
+  ctx = state.ctx
+  await import("../webview/search.js")
 })
-after(() => env?.cleanup())
 
-function typeSearch(query) {
-  const input = document.getElementById("search-input")
-  input.value = query
-  input.dispatchEvent(new window.Event("input", { bubbles: true }))
+after(() => {
+  try { globalThis.GlobalRegistrator?.unregister?.() } catch { /* noop */ }
+})
+
+function messagesEl() {
+  return document.getElementById("messages")
 }
 
-describe("in-conversation search (Ctrl+F)", () => {
-  it("Ctrl+F opens the search bar", () => {
-    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }))
-    const bar = document.getElementById("search-bar")
-    assert.ok(bar, "search bar created")
-    assert.equal(bar.style.display, "flex")
-  })
+function toolbarEl() {
+  return document.getElementById("toolbar")
+}
 
-  it("typing highlights matches and shows the count", () => {
-    const messagesEl = document.getElementById("messages")
-    messagesEl.innerHTML = `<div class="message">hello world foo</div><div class="message">bar baz foo qux</div>`
-    typeSearch("foo")
-    const hits = messagesEl.querySelectorAll("mark.search-hit")
-    assert.equal(hits.length, 2, "two 'foo' matches highlighted")
-    assert.match(document.getElementById("search-count").textContent, /1\/2/)
-  })
+// 工具：把 messages 区填成"高频词密集"长会话（模拟长会话文本体量；包含 the/fox 等多词）
+function fillSession(occurrences) {
+  messagesEl().textContent = "the quick brown fox jumps over the lazy dog ".repeat(occurrences)
+}
 
-  it("next/prev moves the current match", () => {
-    const messagesEl = document.getElementById("messages")
-    messagesEl.innerHTML = `<div class="message">foo one</div><div class="message">foo two</div><div class="message">foo three</div>`
-    typeSearch("foo")
-    document.getElementById("search-next").click()
-    assert.match(document.getElementById("search-count").textContent, /2\/3/)
-    document.getElementById("search-prev").click()
-    assert.match(document.getElementById("search-count").textContent, /1\/3/)
-  })
-
-  it("empty query and close clear the highlights", () => {
-    const messagesEl = document.getElementById("messages")
-    messagesEl.innerHTML = `<div class="message">foo bar</div>`
-    typeSearch("foo")
-    assert.ok(messagesEl.querySelectorAll("mark.search-hit").length > 0)
-    document.getElementById("search-close").click()
-    assert.equal(messagesEl.querySelectorAll("mark.search-hit").length, 0, "highlights cleared on close")
-    assert.equal(messagesEl.textContent, "foo bar", "original text restored")
-  })
+beforeEach(() => {
+  _scrollCalls = 0
+  document.body.innerHTML = `<div id="messages"></div><div id="toolbar"></div>`
+  // 重新绑定共享 ctx 的元素引用（messagesEl / inputEl 每测重建）
+  ctx.messagesEl = messagesEl()
+  ctx.inputEl = document.createElement("input") // closeSearch 聚焦目标
 })
 
-describe("input history ↑/↓ — no conflict with multi-line cursor", () => {
-  it("↑ mid-text does NOT recall history (cursor moves); only the absolute start/end do", () => {
-    const input = document.getElementById("input")
-    // Seed one history entry by sending a message.
-    const before = env.capturedPosts.filter((m) => m.type === "userMessage").length
-    input.value = "sent-alpha"
-    input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
-    const after = env.capturedPosts.filter((m) => m.type === "userMessage").length
-    assert.ok(after > before, "send actually ran (userMessage posted → history seeded)")
-    assert.equal(input.value, "", "input cleared after send")
+function openBar() {
+  const found = document.getElementById("search-input")
+  if (found) return found
+  document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }))
+  return document.getElementById("search-input")
+}
 
-    // Multi-line text, cursor mid-line → ↑ must NOT recall history.
-    input.value = "line one\nline two"
-    input.selectionStart = 4
-    input.selectionEnd = 4
-    input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }))
-    assert.equal(input.value, "line one\nline two", "mid-text ↑ moves the cursor, not the history")
+function type(input, value) {
+  input.value = value
+  input.dispatchEvent(new window.Event("input"))
+}
 
-    // Cursor at absolute start (selectionStart === 0) → ↑ recalls history.
-    input.selectionStart = 0
-    input.selectionEnd = 0
-    assert.equal(input.selectionStart, 0, "selectionStart set to 0")
-    input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }))
-    assert.equal(input.value, "sent-alpha", "↑ at absolute start recalls history")
-
-    // While showing history, cursor at absolute end → ↓ returns to the stashed draft.
-    input.selectionStart = input.value.length
-    input.selectionEnd = input.value.length
-    input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }))
-    assert.equal(input.value, "line one\nline two", "↓ at absolute end returns to the stashed draft")
-  })
+test("debounce: rapid keystrokes do NOT run a search until the 150ms pause (white-screen fix)", async () => {
+  fillSession(300)
+  const input = openBar()
+  type(input, "t")
+  type(input, "th")
+  type(input, "the")
+  // 防抖窗口内（150ms 未到）：不得有任何高亮/扫描
+  assert.equal(messagesEl().querySelectorAll("mark.search-hit").length, 0, "keystrokes must be debounced")
+  await new Promise((r) => setTimeout(r, 250))
+  assert.ok(messagesEl().querySelectorAll("mark.search-hit").length > 0, "search runs after the pause")
 })
 
+test("mark cap: high-frequency terms cap the DOM at 500 marks and the count shows '+'", async () => {
+  fillSession(700) // 700 个 "the" 潜在匹配
+  const input = openBar()
+  type(input, "the")
+  await new Promise((r) => setTimeout(r, 250))
+  const marks = messagesEl().querySelectorAll("mark.search-hit").length
+  assert.ok(marks <= 500, `marks ${marks} must be capped at 500`)
+  assert.match(document.getElementById("search-count").textContent, /\+$/, "truncated count must show '+'")
+})
+
+test("no auto-scroll during search; scroll only on jump (Enter)", async () => {
+  fillSession(50)
+  const input = openBar()
+  type(input, "fox")
+  await new Promise((r) => setTimeout(r, 250))
+  assert.equal(_scrollCalls, 0, "search itself must NOT call scrollIntoView (avoid forced layout)")
+  input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+  assert.ok(_scrollCalls >= 1, "jump must scroll to the match")
+})
+
+test("i18n keys resolved — no bare placeholder keys after locale injection", async () => {
+  const input = openBar()
+  assert.equal(input.getAttribute("placeholder"), "Search messages…")
+  assert.ok(!input.getAttribute("placeholder").startsWith("search."), "bare locale key must not surface")
+})

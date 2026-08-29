@@ -18,6 +18,7 @@ import { modeRoleField } from "../agent-tools/subagent.mjs"
 import { injectContext } from "../context.mjs"
 import { loadRaw, normalizeProxy, resolveProviders } from "../config-io.mjs"
 import { loadEngineeringPrompt, pushReal } from "./run-helpers.mjs"
+import { pushModeReminders, pushTimeReminder, pushInjections, appendImagePointer } from "./setup-reminders.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SYSTEM_PROMPT = readFileSync(join(__dirname, "..", "prompts", "system.md"), "utf8")
@@ -32,9 +33,8 @@ try { _ENG_MAIN = readFileSync(join(__dirname, "..", "prompts", "engineering.md"
 try { _CONSULT_BASE = readFileSync(join(__dirname, "..", "prompts", "consult-base.md"), "utf8") } catch { _CONSULT_BASE = "" }
 try { _ENG_SUB = readFileSync(join(__dirname, "..", "prompts", "engineering-sub.md"), "utf8") } catch { _ENG_SUB = "" }
 
-/** AUTO mode reminder (CLI parity — same wording, byte-identical). */
-export const AUTO_REMINDER =
-  "[System reminder: AUTO mode is active — all tool calls are automatically approved without asking.]"
+/** AUTO mode reminder lives in setup-reminders.mjs (single source of truth — its
+ *  pushModeReminders pushes it; agent.mjs imports it from there for the dedupe check). */
 
 /**
  * Decorate a consult-related tool's description with the CURRENT configured candidate
@@ -238,94 +238,26 @@ export async function setupAgentRun({ provider, cwd, input, opts, depth, role, g
   // These machine-only injections are transient context; a persistent machine line already carries
   // them from prior turns, so only inject when starting a brand-new (empty) machine line.
   const freshMachineLine = history.length === 0
-  if (depth === 0 && freshMachineLine) {
-    injectContext(history, cwd, input)
-    // MCP server config (array of { name, command?, args?, env?, url?, wsUrl?, headers? } — shared config.json).
-    // Tools are EXPANDED into the tool table (MCP.md D1) — this is informational only.
-    if (mcpServers && mcpServers.length > 0) {
-      const list = mcpServers.map((cfg) => {
-        const desc = cfg.wsUrl ? cfg.wsUrl : cfg.url ? cfg.url : `stdio (${cfg.command} ${(cfg.args ?? []).join(" ")})`
-        return `  - ${cfg.name}: ${desc}`
-      }).join("\n")
-      const toolCount = mcpTools.length
-      history.push({ role: "user", content: `[System: MCP servers configured (${toolCount} tools expanded into your toolset — call them directly):\n${list}]` })
-    }
-    // MCP connection warnings (failures never block — MCP.md D6)
-    for (const w of mcpWarnings) {
-      history.push({ role: "user", content: `[System reminder: ${w}]` })
-    }
-    // Skills from .thincoder/skills/
-    if (skills && skills.length > 0) {
-      const list = skills.map((s) => `### ${s.name}\n${s.content}`).join("\n\n")
-      history.push({ role: "user", content: `[System: available skills from .thincoder/skills/ — use the skill tool to load one when relevant. Available skills:\n\n${list}]` })
-    }
-  }
-
-  if (depth === 0 && freshMachineLine) {
-    if (getAuto()) {
-      history.push({ role: "user", content: AUTO_REMINDER })
-    } else {
-      history.push({
-        role: "user",
-        content: "[System reminder: Permission mode — confirm with the user before making changes. Describe what you plan to modify and wait for approval before executing file-changing tools.]",
-      })
-    }
-    // Engineering mode degraded-constraint warnings (CLI setup.mjs parity)
-    if (engPromptActive && (engResult.templateMissing || engResult.methodologyMissing)) {
-      const warnings = []
-      if (engResult.templateMissing) warnings.push(`Engineering template (${role === "eng-coder" ? "engineering-sub.md" : "engineering.md"}) not found — using degraded constraints.`)
-      if (engResult.methodologyMissing) warnings.push("METHODOLOGY.md not found — project-specific rules are absent.")
-      history.push({
-        role: "user",
-        content: `[System reminder: ENGINEERING MODE is active but ${warnings.join(" ")} Create METHODOLOGY.md and ensure prompt templates exist for full enforcement, or disable engineering mode (eng tool).]`,
-      })
-    }
-  }
+  pushModeReminders(history, { depth, freshMachineLine, getAuto, role, engPromptActive, engResult })
 
   // resume (interrupt continuation): the input is already in history — pushing it
   // again would duplicate the user message (CLI setup.mjs resume parity).
-  if (!resume) pushReal(history, fullHistory, { role: "user", content: input })
-
-  // Per-run time grounding, pushed LAST (after the user input): the reminder is transient
-  // (dropped on persist, fresh each run) and must live at the END of the sequence so its
-  // second-precision content never shifts a prefix. Interleaving it BEFORE the user input
-  // made it drift run-to-run (disk reload loses the old transient) → provider prefix
-  // caches never hit (2026-08-16 cache-hit regression).
-  history.push({
-    role: "user",
-    content: `[System reminder: current time is ${new Date().toLocaleString("sv-SE")} (local; timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone || "local"}).]`,
-    transient: true,
-  })
-
-  // Machine-only injections (editor context, etc.) — pushed to the MACHINE line ONLY,
-  // never into fullHistory (CLI parity: automatic context must not pollute the
-  // human-readable record or the session-restore display). Marked transient so
-  // persistence layers can drop them. Accepts an array OR a single message —
-  // collectEditorInjection returns one object, and a bare for...of over it threw
-  // "object is not iterable" on every send with an active editor (2211d46 bug).
-  const injections = Array.isArray(opts.injections) ? opts.injections : (opts.injections ? [opts.injections] : [])
-  for (const inj of injections) {
-    if (inj && typeof inj.content === "string") {
-      history.push({ role: "user", content: inj.content, transient: true })
-    }
+  // The pushed object is captured BY REFERENCE: the paste-image pointer below
+  // appends to THIS message (never history.at(-1) — the transient time reminder
+  // pushed afterwards is last, and mutating it re-sent the image pointer every run).
+  let userMsg = null
+  if (!resume) {
+    userMsg = { role: "user", content: input }
+    pushReal(history, fullHistory, userMsg)
   }
 
-  // Inject pasted images as multimodal content on the first user message
-  if (depth === 0 && Array.isArray(opts.images) && opts.images.length > 0) {
-    const spec = specForModel(provider.model)
-    if (!spec.multimodal) {
-      throw new Error("This model does not support pasted images. Switch to a vision-capable model (Kimi K3, Qwen, GPT-4o, or MiniMax M3).")
-    } else {
-      const lastMsg = history[history.length - 1]
-      const parts = [{ type: "text", text: input }]
-      for (const img of opts.images) {
-        if (typeof img === "string" && img.startsWith("data:image/")) {
-          parts.push({ type: "image_url", image_url: { url: img } })
-        }
-      }
-      if (parts.length > 1) lastMsg.content = parts
-    }
-  }
+  pushTimeReminder(history)
+
+  pushInjections(history, opts.injections)
+
+  // Pasted images (GitHub thincoder#3, Plan B): pointer appended to the REAL user
+  // message by reference — see setup-reminders.mjs for the full contract.
+  appendImagePointer(userMsg, opts.images, provider.model, { depth })
 
   return { agent, history, fullHistory, toolByName, toolSchemas, cfgVerifyGuard, cfgCompactThreshold, systemPrompt }
 }

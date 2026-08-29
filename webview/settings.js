@@ -11,13 +11,19 @@ import { agentCardHtml, consultAdvisorCardHtml, bindAgentControls, updateAgentSe
 import { installToolsKeyHandlers, toolsCardHtml, bindToolsControls, renderMcpList, updateMcpTools, updateWebsearchSettings, updateIndexStatus } from "./settings-tools.js"
 import { envCardHtml, bindEnvControls, updateShellCandidates, updateProxySettings, updateProxyTestResult } from "./settings-env.js"
 
+// openSettings refresh (GitHub #3): one-shot callbacks waiting for the next agentSettings
+// push, plus their timeout-fallback timers (see openSettings / notifyAgentSettingsRefreshed).
+const _agentSettingsWaiters = new Set()
+const _agentSettingsWaiterTimers = new Map()
+
 /**
  * Initialize settings panel.
  * @param {{ onClose?: Function, getModels?: Function }} deps
  */
 export function initSettings({ onClose, getModels }) {
   SS.getModels = getModels
-  document.getElementById("settings-btn").addEventListener("click", openSettings)
+  // NOTE: settings-btn 的 click 绑定在 chat.js（工具栏统一接线）——这里曾重复绑定导致
+  // 每次 openSettings 触发两遍（B1 后变成 2× getAgentSettings + 双 build），已移除。
   document.getElementById("settings-close").addEventListener("click", () => {
     closeSettings()
     if (onClose) onClose()
@@ -34,7 +40,7 @@ export function initSettings({ onClose, getModels }) {
   // Single-click delete — these actions are reversible (provider/MCP/key can be re-added).
   window._confirmDelete = function(btn, action) { action() }
 
-  return { openSettings, closeSettings, renderMcpList, updateMcpTools, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
+  return { openSettings, closeSettings, renderMcpList, updateMcpTools, updateProviderStatus, updateIndexStatus, updateAgentSettings, notifyAgentSettingsRefreshed, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
 }
 
 /** Error banner at the top of the settings panel (extension-side failures). */
@@ -55,11 +61,42 @@ function openSettings() {
   const panel = document.getElementById("settings-panel")
   panel.style.display = "flex"
   panel.setAttribute("aria-hidden", "false")
-  buildSettings()
+  // Refresh agent settings from disk BEFORE rendering (GitHub #3): the SS snapshot is
+  // pushed once at webviewReady, so a CLI-side /advisor write after that was invisible
+  // until reload. getAgentSettings → the extension re-reads config.json and pushes the
+  // regular agentSettings message → handleAgentSettings updates SS → the waiter fires
+  // and buildSettings renders the fresh values (postMessage has no ack, so the only
+  // ordering guarantee is a callback invoked by the push handler itself). The panel
+  // area is already visible; the build is fast local rendering, not a network call.
+  requestAgentSettingsThen(() => buildSettings())
   setTimeout(() => {
     const firstBtn = panel.querySelector("button, input")
     if (firstBtn) firstBtn.focus()
   }, 50)
+}
+
+/** One-shot callback invoked when the next agentSettings push lands (after SS is
+ *  updated), with a timeout fallback that renders from the current snapshot — a lost
+ *  or unanswered message must never leave the panel unrendered. */
+function requestAgentSettingsThen(onFresh) {
+  const timer = setTimeout(() => {
+    _agentSettingsWaiters.delete(onFresh)
+    _agentSettingsWaiterTimers.delete(onFresh)
+    onFresh()
+  }, 250)
+  _agentSettingsWaiters.add(onFresh)
+  _agentSettingsWaiterTimers.set(onFresh, timer)
+  window._vscode.postMessage({ type: "getAgentSettings" })
+}
+
+/** Called by chat.js's agentSettings handler AFTER updateAgentSettings refreshed SS. */
+export function notifyAgentSettingsRefreshed() {
+  for (const waiter of [..._agentSettingsWaiters]) {
+    clearTimeout(_agentSettingsWaiterTimers.get(waiter))
+    _agentSettingsWaiterTimers.delete(waiter)
+    _agentSettingsWaiters.delete(waiter)
+    waiter()
+  }
 }
 
 function closeSettings() {

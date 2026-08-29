@@ -15,7 +15,8 @@ import {
 } from "./agent/run-helpers.mjs"
 import { MAX_ADVISOR_ROUNDS } from "./advisor/run.mjs"
 import { executeToolBatches } from "./agent/execute-tools.mjs"
-import { setupAgentRun, AUTO_REMINDER } from "./agent/setup.mjs"
+import { setupAgentRun } from "./agent/setup.mjs"
+import { AUTO_REMINDER } from "./agent/setup-reminders.mjs"
 
 /** Engineering mode OFF reminder (CLI parity — cmd-eng / injector transitions). */
 export const ENG_OFF_REMINDER =

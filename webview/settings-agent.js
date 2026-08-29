@@ -84,7 +84,9 @@ export function bindAgentControls() {
         maxTurns: get("ag-maxturns") || undefined,
         subagentTurns: get("ag-subturns") || undefined,
         // null (not undefined): postMessage JSON-serializes and DROPS undefined keys — a
-        // cleared global default must reach the extension as an explicit null to delete it
+        // cleared value must reach the extension as an explicit null to delete it. Same
+        // rule for the advisor slots below: config-io now BACKFILLS missing advisor keys
+        // from disk (GitHub #3), so a dropped key would silently resurrect the old value.
         subagentModel: document.getElementById("submodel-slot-global")?.dataset.value || null,
         subagentModels: subModels,
         compactThreshold: compactRaw === "" ? "" : (compactRaw || undefined),
@@ -93,9 +95,12 @@ export function bindAgentControls() {
         verifyGuard: chk("ag-verifyguard"),
         advisor: {
           guard: chk("adv-guard"),
-          provider: document.getElementById("adv-model-slot")?.dataset.provider || undefined,
-          model: document.getElementById("adv-model-slot")?.dataset.model || undefined,
-          effort: document.getElementById("adv-effort")?.value || undefined,
+          // null (not undefined) for empty slots: JSON serialization drops undefined
+          // keys, so "slot missing" and "explicitly cleared" would arrive identical —
+          // missing now BACKFILLS from config.json (GitHub #3), only null clears.
+          provider: document.getElementById("adv-model-slot")?.dataset.provider || null,
+          model: document.getElementById("adv-model-slot")?.dataset.model || null,
+          effort: document.getElementById("adv-effort")?.value || null,
         },
         consultModels: models,
       },
@@ -130,6 +135,13 @@ export function bindAgentControls() {
   for (const id of ["adv-guard", "consult-turns", "consult-timeout"]) {
     document.getElementById(id)?.addEventListener("change", autoSaveAgent)
   }
+  // 交付评审 🔴（GitHub #3 batch, 2026-08-29）：静态渲染的 effort select（adv-effort + 各
+  // consult 行的 .consult-effort）由 innerHTML 生成、不在上面任何绑定路径里——只有 model
+  // pick 后 refreshAdvisorEffort/refreshRowEffort 替换出的 select 才带监听。用户只改档位
+  // 不碰 model → 静默不保存（与当年 adv-guard 同类的 split 断链）。绑定 build 时存在的
+  // 全部 effort select；替换件自带监听，这里不会重复。
+  document.getElementById("adv-effort")?.addEventListener("change", autoSaveAgent)
+  document.querySelectorAll("#consult-rows .consult-effort").forEach((el) => el.addEventListener("change", autoSaveAgent))
   document.getElementById("consult-rows")?.addEventListener("consult-rows-changed", autoSaveAgent)
   // Mount model-menu triggers into their slots + wire consult interactions
   try { mountModelMenus(); bindConsultRows() } catch (e) { console.error("[settings] model-menu mount failed:", e) }

@@ -8,6 +8,7 @@ import { resolveProviders } from "../config-io.mjs"
 import { ctxPercentForModel } from "../config.mjs"
 import { providerNames, getKey, buildProvider } from "./presets.mjs"
 import { saveModelPrefs } from "./session-io.mjs"
+import { ensureSlot } from "./panel-session.mjs"
 import { specForModel } from "../specs.mjs"
 import { runAgent, ContinueError } from "../agent.mjs"
 import { getMcpServers } from "./settings.mjs"
@@ -41,6 +42,17 @@ export function toolPanelPayload(name, chunk) {
  */
 export async function runPanelChat(panel, { text, modelOverride, reasoning, providerName, images }) {
   if (!panel._panel) { vscode.window.showErrorMessage("_chat: panel is null"); return }
+
+  // 交付评审 🔴#1（2026-08-28）：turn 启动的守卫标志与槽绑定必须发生在任何 await 之前——
+  // 否则启动窗口内（provider 解析 / await prevDistill，可达秒级）的会话切换会绕过守卫、
+  // turnSlot 捕获切换后的槽，"内容落错槽"仍可复现。finally 统一清标志（覆盖全部提前 return）。
+  // ensureSlot（而非裸读 _slot）：首次 turn 可能先于 status() 解析（面板命令直呼 _chat），
+  // 裸读会把 null 冻进 distillSlot、使 onDistilled 的槽守卫恒拒绝（AC5 回归）。
+  panel._turnActive = true
+  const turnSlot = ensureSlot(panel)
+  const distillSlot = turnSlot
+  let isFirstMessage = false // assigned inside the try (needs the loaded lines)
+  try {
 
   // Async distillation mount point (SEND-STALL-DISTILL): the distill promise survives across
   // turns on the panel (runAgent rebuilds its agent object every call). `pending` is the
@@ -79,16 +91,16 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   // needsSetup tells the webview to re-open the welcome panel (even if the user
   // previously skipped it) — a send with no configured provider should land the
   // user on the configuration form, not just an error banner.
-  if (!providerName) { panel._panel.webview.postMessage({ type: "error", text: t("error.provider"), needsSetup: true }); return }
+  if (!providerName) { panel._panel?.webview.postMessage({ type: "error", text: t("error.provider"), needsSetup: true }); return }
   let p
   try {
     p = await buildProvider(providerName)
   } catch (e) {
     console.error("[chat-panel] buildProvider failed:", e.message)
-    panel._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }), needsSetup: true })
+    panel._panel?.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }), needsSetup: true })
     return
   }
-  if (!p) { panel._panel.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }), needsSetup: true }); return }
+  if (!p) { panel._panel?.webview.postMessage({ type: "error", text: t("error.failedProvider", { name: providerName }), needsSetup: true }); return }
   if (modelOverride) p = { ...p, model: modelOverride }
   // Reasoning selector → provider fields. "off" AND "none" (the effort enum's lowest
   // level, labeled "off" in the UI) are a true thinking toggle — previously "none"
@@ -103,7 +115,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   // session-level slot field, not a VS Code setting). runAgent receives a GETTER: the
   // agent loop and the permission gate re-read it every iteration, so approve-all /
   // the AUTO button take effect immediately mid-turn.
-  panel._autoApprove = panel._activeData()?.autoApprove ?? false
+  panel._autoApprove = panel._activeData(turnSlot)?.autoApprove ?? false
 
   text = injectAtRefs(text, cwd)
 
@@ -112,17 +124,17 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   // history = machine line (compaction shrinks it); old sessions fall back to the human line.
   // runAgent appends this turn's real messages (user input, assistant replies, tool results) to
   // both lines via its internal pushReal — chat-panel only supplies the lines and persists them.
-  const { fullHistory, contextHistory } = panel._activeLines()
+  const { fullHistory, contextHistory } = panel._activeLines(turnSlot)
   const history = Array.isArray(contextHistory) ? contextHistory : [...fullHistory]
-  // Slot snapshot for the async distill save (onDistilled): if the user switches session while
-  // the distill is in flight, the compressed history must not be written into the new session.
-  const distillSlot = panel._slot
-  const isFirstMessage = fullHistory.filter((m) => (m.type ?? m.role) === "user").length === 0
+  // Slot snapshot comment: turnSlot/distillSlot are captured at function entry (above, before
+  // any await) — see the 交付评审 🔴#1 note at the top of this function.
+  const isFirstMessageNow = fullHistory.filter((m) => (m.type ?? m.role) === "user").length === 0
+  isFirstMessage = isFirstMessageNow
 
   // Restore the session-scoped design token (persists across turns within a session; the
   // `engineering` flag and advisor convergence budget live elsewhere — the flag in config.json,
   // the budget resets per run, CLI parity).
-  const sessionData = panel._activeData() ?? {}
+  const sessionData = panel._activeData(turnSlot) ?? {}
   const engState = {
     engDesignToken: sessionData.engDesignToken ?? null,
   }
@@ -131,7 +143,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   const prefs = { model: modelOverride || p.model, provider: providerName, reasoning: reasoning || "" }
   saveModelPrefs(panel._context.workspaceState, prefs)
 
-  panel._panel.webview.postMessage({ type: "loading", loading: true })
+  panel._panel?.webview.postMessage({ type: "loading", loading: true })
   panel._turnActive = true
   panel._setStatus("running")
   panel._abortController?.abort()
@@ -204,7 +216,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     onToolPanel: (name, chunk) => panel._panel?.webview.postMessage(toolPanelPayload(name, chunk)),
     onComplete: (content, agentState) => {
       lastAgentState = agentState ?? {}
-      panel._saveLines(fullHistory, history, { activeProvider: providerName, ...agentState })
+      panel._saveLines(fullHistory, history, { activeProvider: providerName, ...agentState }, turnSlot)
       panel._panel?.webview.postMessage({ type: "complete" })
       panel._pushSessions()
       // Native notification when the user is in another window (no-op when focused).
@@ -216,17 +228,18 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     // never write it into the new one (AC6). Silent (N3): a save failure must not surface.
     onDistilled: () => {
       if (panel._slot !== distillSlot) return
-      try { panel._saveLines(fullHistory, history, { activeProvider: providerName, ...lastAgentState }) }
+      try { panel._saveLines(fullHistory, history, { activeProvider: providerName, ...lastAgentState }, distillSlot) }
       catch (e) { console.error("[chat-panel] distill save failed:", e.message) }
     },
     onPermissionRequired: permissionGate(panel),
     onQuestion: (question, options) => askInPanel(question, options),
   })
-  const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume, planMode: panel._activeData()?.planMode ?? false, distillState: panel._distillState, distillSignal: panel._distillController?.signal })
+  const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume, planMode: panel._activeData(turnSlot)?.planMode ?? false, distillState: panel._distillState, distillSignal: panel._distillController?.signal })
   // Turn-cap continue loop (CLI agent-turn.mjs parity): each ContinueError offers
   // "Continue" — unlimited, resume:true keeps history, fresh budget per run. The loop
   // also folds in the Ctrl+I interrupt resume (same rebuild-controller semantics).
-  try {
+  // (The entry try at the top of this function owns the guard-flag finally; exceptions
+  // from the loop propagate through it and up to the message handler.)
   for (let resume = false; ; resume = true) {
     try {
       traceStop("runAgent: turn starting (no pending click)", panel._stopClickTs)
@@ -256,19 +269,19 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
           panel._abortController = new AbortController()
           continue
         }
-        panel._panel.webview.postMessage({ type: "aborted" })
+        panel._panel?.webview.postMessage({ type: "aborted" })
         break
       }
       // Persist the interrupted/errored turn: the user message and any partial output
       // were already pushed into both lines by runAgent (pushReal). Without this save,
       // an abort/error loses the whole turn from disk (CLI parity: at most half a turn lost).
       try {
-        panel._saveLines(fullHistory, history, { activeProvider: providerName })
+        panel._saveLines(fullHistory, history, { activeProvider: providerName }, turnSlot)
       } catch (saveErr) {
         console.error("[chat-panel] save after abort/error failed:", saveErr.message)
       }
       if (e.name === "AbortError") {
-        panel._panel.webview.postMessage({ type: "aborted" })
+        panel._panel?.webview.postMessage({ type: "aborted" })
       } else {
         console.error("[chat-panel] runAgent failed:", e.message, "provider:", p.baseURL, "model:", p.model)
         // Friendly surface: first line only, URLs stripped (provider errors leak
@@ -276,7 +289,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
         const rawMsg = e.message || String(e)
         const text = rawMsg.split("\n")[0].replace(/https?:\/\/[^\s,)"]+/g, "[endpoint]")
         const techInfo = [rawMsg, `→ Provider: ${p.baseURL}`, `→ Model: ${p.model}`].join("\n")
-        panel._panel.webview.postMessage({ type: "error", text, techInfo })
+        panel._panel?.webview.postMessage({ type: "error", text, techInfo })
       }
       break
     }
@@ -286,8 +299,8 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     panel._stopClickTs = null
     panel._turnActive = false
     panel._refreshStatus()
-    panel._panel.webview.postMessage({ type: "loading", loading: false })
+    panel._panel?.webview.postMessage({ type: "loading", loading: false })
   }
   // Generate session title from first message (after agent completes)
-  if (isFirstMessage) await panel._generateTitle()
+  if (isFirstMessage) await panel._generateTitle(turnSlot)
 }

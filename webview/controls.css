@@ -46,6 +46,27 @@
   gap: 6px;
 }
 
+/* Rejected-image toast (paste.unsupportedFormat) — fixed, auto-fades via .visible */
+.paste-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%) translateY(6px);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px 12px;
+  font-size: 11px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 60;
+}
+.paste-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 .paste-chip {
   display: inline-flex;
   align-items: center;
@@ -463,8 +484,6 @@ mark.search-hit.current {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-  border-bottom: 1px solid var(--border);
 }
 
 /* ─── Task items ────────────────────────────── */

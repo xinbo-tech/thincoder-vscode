@@ -11,6 +11,7 @@ import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flow
 import { selectProviderModel, loadRaw, loadMcpServers } from "../config-io.mjs"
 import { openDiffPreview } from "./diff-preview.mjs"
 import { traceStop } from "./stop-trace.mjs"
+import { savePastedImages } from "./image-handler.mjs"
 
 /** Current workspace folder (or process cwd) — shared with chat-panel. */
 let _cwdOverride = null
@@ -43,7 +44,15 @@ export async function handlePanelMessage(panel, msg) {
   switch (msg.type) {
     case "userMessage": {
       const text = msg.text || ""
-      panel._chat(text, msg.model, msg.reasoning, msg.provider, msg.images)
+      // Plan B (GitHub thincoder#3): the webview sends pasted images as base64
+      // dataURLs; the EXTENSION saves them to <cwd>/.thincoder/tmp/paste-*.<ext>
+      // and passes absolute PATHS downstream. The field stays `images` (wire
+      // compat), but from here on it carries paths — setupAgentRun appends the
+      // "[Attached images: ...]" pointer and the model views them via read_image.
+      const images = Array.isArray(msg.images) && msg.images.length > 0
+        ? savePastedImages(msg.images, _cwd())
+        : undefined
+      panel._chat(text, msg.model, msg.reasoning, msg.provider, images)
       break
     }
     case "selectModel": {
@@ -67,7 +76,17 @@ export async function handlePanelMessage(panel, msg) {
     }
     case "newSession": panel._newSession(); break
     case "switchSession": {
-      switchToSlot(_cwd(), msg.slot)  // persists the shared active pointer for CLI interop
+      // 会话切换竞态守卫（GitHub #2/#5，2026-08-28）：运行中禁止切换——此前只改 _slot 指针
+      // 不 abort，旧 turn 的 stream/complete/标题会灌进新会话视图（"思考串台"）、内容落错槽
+      // （"写错会话文件"）。与 applyProjectSwitch（panel-project.mjs）的运行中拒绝同模式。
+      if (panel._turnActive) {
+        vscode.window.showWarningMessage("ThinCoder: a task is running — stop it before switching sessions.")
+        break
+      }
+      // 交付评审 🔵#5：manifest 漂移（槽不存在）时 switchToSlot 返回 null 且不切指针——
+      // 此时不得把面板绑到幻影槽（否则渲染出空会话）。
+      const target = switchToSlot(_cwd(), msg.slot)  // persists the shared active pointer for CLI interop
+      if (target == null) break
       panel._slot = msg.slot          // bind this panel to the chosen slot
       await panel._loadSession()
       break
@@ -96,7 +115,7 @@ export async function handlePanelMessage(panel, msg) {
     case "retry": {
       const history = panel._activeHistory()
       const lastUser = [...history].reverse().find((m) => (m.type ?? m.role) === "user")
-      if (lastUser) panel._chat(lastUser.content, lastUser.provider, undefined, lastUser.provider)
+      if (lastUser) panel._chat(lastUser.content, undefined, undefined, lastUser.provider)
       break
     }
     case "abort":

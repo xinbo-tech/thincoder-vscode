@@ -216,9 +216,9 @@ user input
 **消息流**：
 ```
 用户输入 → chat.js:send()
-  → vscode.postMessage({ type:"userMessage", text, model, reasoning, provider })
-    → extension:_chat()
-      → runAgent() [agent 循环]
+  → vscode.postMessage({ type:"userMessage", text, model, reasoning, provider, images? })
+    → extension:_chat()   — images: 粘贴图 dataURL[] 先落盘 <cwd>/.thincoder/tmp/paste-*.<ext>（image-handler.mjs），路径[] 下传
+      → runAgent() [agent 循环] — setupAgentRun 在用户消息尾部追加 "[Attached images: …] — use the read_image tool"（GitHub thincoder#3 方案 B，图片走 read_image 工具通路）
         → onToken → webview.postMessage({ type:"token", text })
         → onToolCall → webview.postMessage({ type:"toolCall", name, args })
         → onToolResult → webview.postMessage({ type:"toolResult", name, text })
@@ -232,7 +232,7 @@ user input
 | Memory 三层体系 | ✅ 基础 | 文件式 markdown 条目 + frontmatter（CLI 条目格式兼容，put/search/list/remove）；配 embedding key 时走向量语义检索，否则关键词回退；不依赖 sqlite |
 | MCP 支持 | ✅ | stdio + HTTP/WS transport，工具**动态展开为原生工具**（`{server}_{tool}` 前缀，CLI parity——统一规范见 thincoder `docs/design/MCP.md`；旧 `mcpTool` 网关已废弃）。配置存 `~/.thincoder/config.json` 的 `mcp.servers[]`（面板 Settings 可管理；旧 `thincoder.mcpServers` 设置已随迁移删除） |
 | Checkpoint (git snapshot) | ✅ | git stash 快照 + list/create/rewind/cat，支持单文件恢复 |
-| Image input | ✅ | 粘贴/拖拽 + 附加按钮（`attach-btn`），`read_image` 工具；多模态模型支持（Kimi K3、Qwen、GPT-4o、MiniMax M3），非多模态模型自动剥离图片部分 |
+| Image input | ✅ | `read_image` 工具（多模态模型支持：Kimi K3、Qwen、GPT-4o、MiniMax M3、GLM-5.3-Flash；文本模型发送侧自动剥离图片部分）。**粘贴/拖拽/附加按钮**（GitHub thincoder#3 方案 B，2026-08-29）：webview 传 dataURL → 扩展端落盘 `<cwd>/.thincoder/tmp/paste-*.<ext>`（image-handler.mjs，随 offloadToolResult 的 mtime 清理回收）→ 用户消息追加 `[Attached images: …]` 指针（setup.mjs，非多模态模型直接 throw）→ 模型调 `read_image` 走工具通路带图进载荷 |
 | Skill 系统 | ✅ | 读取 `.thincoder/skills/` 目录下的 .md 文件，列表注入上下文 |
 | 权限审批 UI | ✅ | webview 逐工具弹窗（approve / deny / approve-all + diff 预览）；autoApprove 是**会话级槽位字段**（与 CLI 共享），AUTO 工具栏按钮或 approve-all 翻转它；agent 循环以 live getter 读取——轮次中途翻转立即停掉后续弹窗（2026-08-13 修复） |
 
@@ -360,3 +360,22 @@ user input
 | T3 | `onToolPanel("sub:explore#1", { kind:"text", text:"chunk" })`（无 model chunk） | 载荷 `model === undefined`（对象层 key 存在、JSON 序列化后消失）、不抛错；webview 三元渲染降级为空 | 范围边界 |
 | T4 | `toolPanelPayload(name, "raw string")`（string 兼容分支，直测纯函数） | 载荷 `model === undefined`、不抛错 | NF1 / 评审 #1 |
 | T5 | `advisorChunk({ kind:"start", round:1, model:"deepseek-v4" })` | 块标题含 `round 1 · deepseek-v4`；无 model 时无 `·` 后缀 | F1 / 评审 #2 |
+### Qwen 思考关闭映射（2026-08-28 · 引用）
+
+需求与设计见 CLI `docs/design/PROVIDER.md` §12（单一权威源，本文件不复制机制）。要点引用：qwen3.x（百炼混合思考默认开启）`off` 时请求体无思考控制字段 → 关不掉静默失效；`resolveEnableThinking(provider, spec)` 纯函数按白名单（qwen\* 且 百炼域名）在显式 off（`thinking === null`）时发 `enable_thinking: false`、effort 档位时发 `true`。
+
+本仓库改动点（与 CLI §12 同源）：
+- `src/config.mjs`：导出 `resolveEnableThinking`（与 CLI 同构造）
+- `src/provider/transports/openai.mjs`：body 组装（reasoning_effort 行附近）注入 `enable_thinking`
+- `src/extension/reasoning-mode.mjs`：off 已产 `thinking:null`（显式 off 约定天然一致）；**effort 分支补清 `thinking`（undefined）**——选档位 = 要思考，清 off 标记（评审 #1，与 CLI §12 语义统一，propagate 后 `enable_thinking` 映射为 `true`）
+
+测试：同 CLI §12 用例表 T1-T6（纯函数单测，双端各一份）；T7 冒烟**已由 CLI 侧真实端点闭环**（2026-08-28：`thincoder/test/smoke-qwen-thinking.mjs`，qwenplan/qwen3.8-max：off 无 reasoning / xhigh 有 / 默认无字段=默认思考）——服务端行为已证，vscode 端字段注入由 buildRequest 单测断言（`enable_thinking:true/false` 载荷），双端函数体 parity 互锁，无需重复真实调用。
+### GLM-5.3-Flash 模型支持（2026-08-28 · 引用）
+
+需求与设计见 CLI `docs/design/PROVIDER.md` §11（单一权威源，本文件不复制）。补充：图片输入在本仓**全部 spec 驱动**（非硬编码模型表）——`setup.mjs`（spec.multimodal 才挂 read_image）、`provider.mjs` `stripImagesForTextModel`（按 spec.multimodal 剥离/保留），`glm-5.3-flash` spec 已带 `multimodal: true`，故图片输入自动生效；仅 `setup.mjs` 错误提示文案与本文档扩展点列表（行 235）需同步模型清单（2026-08-28 设计评审 #2 处置，扩展点列表已更新，setup.mjs 文案随实现批次）。图片 gate 无代码改动。
+### 会话切换竞态修复（2026-08-28 · 引用）
+
+GitHub thincoder-vscode#2 / thincoder#5 同根修复（CHANGELOG 0.8.3）。根因三层：切换零守卫（旧 turn stream 灌新会话视图）、`saveLines` 每次取当前 slot（内容落错槽）、中间态只存 webview DOM。修复按用户决策"**运行中禁止切换**"：switchSession/newSession/deleteSession 三处 `_turnActive` 守卫（warning 拒绝，对齐 `panel-project.mjs` applyProjectSwitch 模式）+ `saveLines`/`_saveLines`/`generateTitle` 加 slotOverride（turn 启动捕获 turnSlot，纵深防御对标 onDistilled 既有 slot guard）。守卫测试 3 例（chat-panel.test.mjs，真实慢 turn + 跨槽零污染断言）。
+### 子代理工具描述：角色能力矩阵 + 委派动机（2026-08-28 · 引用）
+
+需求与设计见 CLI `docs/design/AGENT-LOOP.md` §7.1（单一权威源，本文件不复制）。本仓库改动点：`src/agent-tools/subagent.mjs`（description 与 role 参数与 CLI 逐字对齐：Available roles 矩阵 + Mode filtering + Why delegate? 段 + 开发注释泄漏清理）、`test/subagent.test.mjs`（内容断言 probe 10 项 + 防泄漏负断言，与 CLI 同构）。

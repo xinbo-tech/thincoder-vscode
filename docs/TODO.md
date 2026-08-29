@@ -23,6 +23,8 @@
 - [ ] advisor 子代理工具集补 lsp（原文档 T19 遗留）
 - [ ] 跨端文档漂移（2026-08-21 评审 advisory）：checkpoint 机制两端语义差异待明确（CLI v2 全量副本快照 vs VS Code git stash）、preset 计数 16/17、TUI 模块数 ~24/45、12 位旧 hash 改名侧未标注
 - [ ] 模块图补录（2026-08-26 模型显示交付评审 🔵4）：`src/extension/panel-chat.mjs` / `webview/streaming.js` / `webview/panels.js` / `webview/state.js` 未入 AGENTS.md 模块图与 ARCHITECTURE.md §6/§1——既有漂移，非本次引入
+- [ ] `src/agent/setup.mjs` 331 行超 300 建议线（2026-08-28 Qwen 交付评审 #6）——toolSchemas 构建或 context 注入段再抽一层；非本轮引入，低优先
+- [ ] vscode qwen 请求在 thinking 未设置时携带 `thinking:{type:"enabled"}`（智谱式参数，GLM 修复引入的通用 spec 默认注入，非 qwen 专属）——发往百炼的兼容性属 Qwen enable_thinking T7 冒烟/既有范畴，知悉（2026-08-28 Qwen 交付偏离 4）
 
 ## Issue 批量（2026-08-22，来源：Gitee/GitHub issue 巡检）
 
@@ -38,3 +40,15 @@
 - [ ] `loadIndex`/`searchIndex` 不校验 `manifest.vector_dim === decode.dim` 与 `embed_model`，切换 embedding 模型（维度不同）时静默产出全 0 得分
 - [ ] 方向决策（A/B 待定）：A=放弃 porcelain 快路径，改为「commit 预筛 + indexed∪discoverFiles 完整 mtime 对比」，一次性消除上面两个盲区并统一 reason（正确性/简单性优先，推荐）；B=保留快路径只做最小外科补丁
 - [ ] 版本 0.1.43 待办：为已提交但未进 changelog 的 indexer 系列修复（c45f1fe → 66ea83f 区间，约 7 个 commit）补一条 changelog 条目
+## 工具描述内容断言（2026-08-28，来源：GLM-5.3-Flash 设计评审 #3）
+
+- [x] read_image 工具描述的多模态模型清单（CLI `src/tools/read_image.md:8` / vscode `src/tools/read_image.mjs` 描述串）补内容断言测试——清单漏加新模型时测试应失败（现靠手工同步，已出现过 GLM-5.3-Flash 文案滞后）；**2026-08-28 完成**：vscode `test/tools.test.mjs:696-711` 数组驱动断言（含 4 模型关键字）；顺带修复两处描述缺陷（Qwen3.7→Qwen3.8 精确化、补 GLM-5.3-Flash，与 CLI 对齐）
+
+## config.json 外部写盘感知（2026-08-29，来源：GitHub #3 数据丢失修复 B2，用户指示记档）
+
+- [ ] config.json FileSystemWatcher：外部（CLI `/advisor` 等）写盘后扩展端实时感知 → 触发 `_pushSettingsLight`（chat-panel.mjs）推送全套快照。B1 已落地 openSettings 的 getAgentSettings 拉新（panel-messages.mjs:233 死代码 handler 激活），收窄了触发面（面板重开即见新值）；watcher 覆盖剩余场景——面板常开时外部写盘的实时刷新。
+
+## 粘贴图片 pipeline 收尾（2026-08-29，来源：GitHub thincoder#3 方案 B 交付评审）——已全部完成
+
+- [x] 非光栅图片静默丢失无反馈——**2026-08-29 完成**：autocomplete 收图改为光栅白名单（paste/file 两入口），非光栅 `image/*` 当场 toast 提示（`paste.unsupportedFormat` locale 键 en/zh）；不再产生"chip 显示但发送即消失"的静默路径
+- [x] `src/agent/setup.mjs` 超 300 建议线——**2026-08-29 完成**：运行期 user reminder 组装（AUTO/permission、时间注入、编辑器注入、图片指针）抽到 `src/agent/setup-reminders.mjs`，setup.mjs 337→264 行

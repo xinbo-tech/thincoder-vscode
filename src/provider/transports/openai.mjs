@@ -4,6 +4,7 @@
  */
 
 import { specForModel } from "../../specs.mjs"
+import { resolveEnableThinking } from "../../config.mjs"
 
 /** Convert our tool schemas to OpenAI format */
 export function normalizeTools(tools) {
@@ -36,6 +37,11 @@ export function buildRequest(provider, messages, tools) {
   if (provider.thinking) body.thinking = provider.thinking
   else if (spec.thinking && provider.thinking === undefined) body.thinking = { type: spec.thinkEnabledValue || "enabled" }
   if (provider.reasoningEffort) body.reasoning_effort = provider.reasoningEffort
+  // enable_thinking — Bailian hybrid-thinking switch (CLI parity, PROVIDER.md §12): qwen3.x
+  // defaults to thinking ON, so an explicit panel off (thinking:null) must send
+  // enable_thinking:false or the server silently keeps thinking.
+  const enableThinking = resolveEnableThinking(provider, spec)
+  if (enableThinking !== undefined) body.enable_thinking = enableThinking
   if (tools?.length) body.tools = tools
   if (provider.responseFormat) body.response_format = provider.responseFormat
 

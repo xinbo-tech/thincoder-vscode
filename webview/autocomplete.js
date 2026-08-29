@@ -3,6 +3,7 @@
  * Exports initAutocomplete(ui) to wire into the chat page.
  */
 import { escHtml } from "./ui.js"
+import { t } from "./i18n.js"
 
 /**
  * @param {object} ui
@@ -113,14 +114,23 @@ export function initAutocomplete({ inputEl, atDropdown, vscode, pastedImages }) 
   })
 
   // ── image paste ──
+  // Raster-only gate (GitHub thincoder#3 review #1): the extension's savePastedImages
+  // accepts png/jpeg/gif/webp only — accepting other image/* here would render a 📎 chip
+  // that silently vanishes on send (no pointer, no error on the model side).
+  const RASTER = /^(image\/(png|jpeg|jpg|gif|webp))$/
   document.addEventListener("paste", (e) => {
     const items = e.clipboardData?.items
     if (!items) return
     let hasImage = false
     for (const item of items) {
-      if (item.type.startsWith("image/")) {
+      if (RASTER.test(item.type)) {
         if (!hasImage) { e.preventDefault(); hasImage = true }
         readImageFile(item.getAsFile())
+      } else if (item.type.startsWith("image/")) {
+        // Non-raster image on the clipboard (svg/heic/bmp) — same rejection + feedback
+        // as the file-upload entry below; never a silent drop.
+        e.preventDefault()
+        showToast(t("paste.unsupportedFormat", { type: item.type }))
       }
     }
   })
@@ -130,7 +140,8 @@ export function initAutocomplete({ inputEl, atDropdown, vscode, pastedImages }) 
   document.getElementById("attach-btn").addEventListener("click", () => fileInput.click())
   fileInput.addEventListener("change", () => {
     for (const file of fileInput.files) {
-      if (file.type.startsWith("image/")) readImageFile(file)
+      if (RASTER.test(file.type)) readImageFile(file)
+      else if (file.type.startsWith("image/")) showToast(t("paste.unsupportedFormat", { type: file.type }))
     }
     fileInput.value = ""
   })
@@ -144,13 +155,29 @@ export function initAutocomplete({ inputEl, atDropdown, vscode, pastedImages }) 
     reader.readAsDataURL(file)
   }
 
+  /** Transient hint for rejected images (auto-fades; zero layout dependency). */
+  function showToast(text) {
+    let el = document.getElementById("paste-toast")
+    if (!el) {
+      el = document.createElement("div")
+      el.id = "paste-toast"
+      el.className = "paste-toast"
+      document.body.appendChild(el)
+    }
+    el.textContent = text
+    el.classList.add("visible")
+    clearTimeout(showToast._t)
+    showToast._t = setTimeout(() => el.classList.remove("visible"), 2600)
+  }
+
   function renderPasteBar() {
     const bar = document.getElementById("paste-bar")
     const badge = document.getElementById("paste-badge")
     if (pastedImages.length === 0) {
-      bar.style.display = "none"
+      if (bar) bar.style.display = "none"
       return
     }
+    if (!bar || !badge) return // fixture/test DOM without the paste bar
     badge.innerHTML = pastedImages.map((_, i) =>
       `<span class="paste-chip">📎 image ${i + 1}<span class="paste-chip-del" data-idx="${i}">✕</span></span>`
     ).join(" ")

@@ -52,7 +52,7 @@ const { showAtDropdown } = _ac
 
 // ─── Settings panel (init early so openSettings is available for toolbar binding) ──
 const _settings = initSettings({ onClose: () => ctx.inputEl.focus(), getModels: () => ctx._models })
-const { openSettings, closeSettings, renderMcpList, updateMcpTools, updateProviderStatus, updateIndexStatus, updateAgentSettings, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError } = _settings
+const { openSettings, closeSettings, renderMcpList, updateMcpTools, updateProviderStatus, updateIndexStatus, updateAgentSettings, notifyAgentSettingsRefreshed, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError } = _settings
 
 initOnboarding({ openSettings })
 
@@ -192,7 +192,7 @@ window.addEventListener("message", (e) => {
       showSettingsError(m.text)
       break
     case "autoApprove":      handleAutoApprove(m); break
-    case "agentSettings":    handleAgentSettings(m, updateAgentSettings); break
+    case "agentSettings":    handleAgentSettings(m, updateAgentSettings); notifyAgentSettingsRefreshed(); break
     case "websearchSettings":
       updateWebsearchSettings(m.settings || {})
       break

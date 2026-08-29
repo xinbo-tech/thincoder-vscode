@@ -91,6 +91,71 @@ describe("saveAgentSettingsFromPanel — single write channel (regression)", () 
   })
 })
 
+describe("saveAgentSettingsFromPanel — advisor merge (GitHub #3 data-loss fix)", () => {
+  // Disk preset written by the CLI: advisor carries provider/model plus CLI-only keys
+  // (thinking/reasoningEffort) the webview payload never contains.
+  const CLI_ADVISOR = {
+    provider: "glm",
+    model: "glm-5.2",
+    thinking: { type: "enabled" },
+    reasoningEffort: "high",
+    timeoutMs: 600,
+    guard: false,
+  }
+
+  // T1 regression (red on HEAD): the webview CHANGE-TO-SAVE payload sends
+  // { advisor: { guard } } only when the model slots are empty — provider/model keys
+  // MISSING (not null). The merge must backfill them (and every key it does not own)
+  // from disk instead of letting saveAgentSettings replace the whole object.
+  it("T1: payload with missing provider/model keys preserves the CLI-written advisor", () => {
+    writeFileSync(cfgPath, JSON.stringify({ agent: { advisor: { ...CLI_ADVISOR } } }))
+    saveAgentSettingsFromPanel({ advisor: { guard: true } })
+    const adv = loadRaw().agent.advisor
+    assert.equal(adv.guard, true, "guard updated from payload")
+    assert.equal(adv.provider, "glm", "missing provider key backfilled from disk")
+    assert.equal(adv.model, "glm-5.2", "missing model key backfilled from disk")
+    assert.equal(adv.reasoningEffort, "high", "CLI reasoningEffort survives the merge")
+    assert.deepEqual(adv.thinking, { type: "enabled" }, "CLI thinking survives the merge")
+    assert.equal(adv.timeoutMs, 600, "timeoutMs preserved (existing passthrough)")
+  })
+
+  // T2: A1 sends an explicit null for a CLEARED slot (undefined keys are dropped by
+  // postMessage JSON serialization). null = delete the field; everything else survives.
+  it("T2: explicit null provider/model clears them, the rest of the CLI advisor survives", () => {
+    writeFileSync(cfgPath, JSON.stringify({ agent: { advisor: { ...CLI_ADVISOR } } }))
+    saveAgentSettingsFromPanel({ advisor: { guard: true, provider: null, model: null } })
+    const adv = loadRaw().agent.advisor
+    assert.ok(!("provider" in adv), "explicit null deletes provider")
+    assert.ok(!("model" in adv), "explicit null deletes model")
+    assert.equal(adv.guard, true)
+    assert.equal(adv.reasoningEffort, "high", "CLI reasoningEffort survives the clear")
+    assert.deepEqual(adv.thinking, { type: "enabled" }, "CLI thinking survives the clear")
+    assert.equal(adv.timeoutMs, 600)
+  })
+
+  // T3: a payload that DOES carry provider/model is a full replacement — written as-is.
+  it("T3: payload carrying provider/model writes them (full replacement path)", () => {
+    writeFileSync(cfgPath, JSON.stringify({ agent: { advisor: { ...CLI_ADVISOR } } }))
+    saveAgentSettingsFromPanel({ advisor: { guard: true, provider: "deepseek", model: "deepseek-v4-pro" } })
+    const adv = loadRaw().agent.advisor
+    assert.equal(adv.provider, "deepseek")
+    assert.equal(adv.model, "deepseek-v4-pro")
+    assert.equal(adv.guard, true)
+    assert.equal(adv.timeoutMs, 600)
+  })
+
+  // Guard rail for the unknown-key backfill: merge copies only plain-object/scalar
+  // advisor keys, never arrays or functions.
+  it("unknown-key backfill skips array-valued advisor keys", () => {
+    writeFileSync(cfgPath, JSON.stringify({ agent: { advisor: { ...CLI_ADVISOR, weird: ["a"] } } }))
+    saveAgentSettingsFromPanel({ advisor: { guard: true } })
+    const adv = loadRaw().agent.advisor
+    assert.ok(!("weird" in adv), "array-valued advisor keys are not copied into the merge")
+    assert.equal(adv.provider, "glm")
+  })
+})
+
+
 describe("shell settings", () => {
   it("saveShellSettingsFromPanel writes shell; '' deletes it", () => {
     saveShellSettingsFromPanel("pwsh")

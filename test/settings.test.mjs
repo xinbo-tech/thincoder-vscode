@@ -18,10 +18,16 @@ before(() => {
 })
 after(() => env?.cleanup())
 
-// Reset module-level state between cases — update* REPLACES state wholesale and
+// Reset module-level state between cases — update* MERGES into SS.agentSettings (shallow
+// spread in settings-agent.js), not replace, so agent state still leaks across cases; the
+// beforeEach clears the keys the cases rely on. Keep new cases self-sufficient.
 // settings.js keeps it across cases, so ordering would otherwise leak.
 beforeEach(() => {
   mockModels = []
+  // Reinstall the capturing vscode stub — the save-flow case below REPLACES
+  // window._vscode with its own capture stub; without this, every later case
+  // in the file silently loses its postMessage traffic.
+  window._vscode = { postMessage: (m) => env.capturedPosts.push(m) }
   api.updateProviderStatus({})
   api.updateAgentSettings({})
   api.updateProxySettings({})
@@ -30,8 +36,17 @@ beforeEach(() => {
   api.updateIndexStatus(null)
 })
 
-function openPanel() {
+function openPanel(reply = {}) {
+  const before = env.capturedPosts.length
   api.openSettings()
+  // Simulate the extension side of the openSettings refresh (GitHub #3 B1):
+  // getAgentSettings → re-read config.json → push agentSettings → the waiter builds.
+  // `reply` is the disk-fresh payload the extension would push; the default {} merge
+  // keeps state exactly what the test installed, only the build fires.
+  if (env.capturedPosts.slice(before).some((m) => m.type === "getAgentSettings")) {
+    api.updateAgentSettings(reply)
+    api.notifyAgentSettingsRefreshed()
+  }
   return document.getElementById("settings-body")
 }
 
@@ -114,6 +129,8 @@ describe("updateProviderStatus — live refresh while the panel is open (add-pro
     assert.ok(after && after.dataset.marker === "keep", "no live re-render while the panel is closed")
     assert.ok(body.querySelector("#prov-deepseek") === null, "new provider not rendered while closed")
     api.openSettings()
+    api.updateAgentSettings({}) // extension answers the openSettings refresh → build fires
+    api.notifyAgentSettingsRefreshed()
     const reopened = document.getElementById("settings-body")
     assert.ok(reopened.querySelector("#prov-deepseek") !== null, "provider visible after opening")
   })
@@ -224,9 +241,25 @@ describe("buildSettings — advisor model menu + effort", () => {
 
   it("no effort dropdown for non-thinking models", () => {
     mockModels = [{ id: "gpt-4o", provider: "openai", reasoning: [] }]
-    api.updateAgentSettings({ advisor: { provider: "openai", model: "gpt-4o" } })
+    api.updateAgentSettings({ provider: "openai", model: "gpt-4o" })
     const body = openPanel()
     assert.equal(body.querySelector("#adv-effort"), null)
+  })
+
+  it("STATIC effort selects are change-bound to auto-save (交付评审 🔴 — silent-lost fix)", () => {
+    // The static #adv-effort (innerHTML-rendered) and .consult-effort selects had NO
+    // change listener — only the replaced ones (after a model pick) did. A lone effort
+    // change silently saved nothing (same bug class as the old unbound adv-guard).
+    mockModels = [{ id: "glm-5.2", provider: "zhipu-plan", reasoning: ["max", "high", "low"], effortDefault: "max" }]
+    api.updateAgentSettings({ advisor: { provider: "zhipu-plan", model: "glm-5.2" } })
+    openPanel()
+    const before = env.capturedPosts.length
+    const sel = document.getElementById("adv-effort")
+    sel.value = "high"
+    sel.dispatchEvent(new window.Event("change", { bubbles: true }))
+    const saves = env.capturedPosts.slice(before).filter((m) => m.type === "saveAgentSettings")
+    assert.ok(saves.length >= 1, "changing the STATIC effort select must post saveAgentSettings")
+    assert.equal(saves[0].settings?.advisor?.effort, "high", "payload carries the new effort")
   })
 })
 
@@ -309,6 +342,7 @@ describe("buildSettings — save flow (posts payload to extension)", () => {
     api.updateProviderStatus({ providers: {}, labels: {} })
     api.updateAgentSettings({ maxTurns: 100 })
     api.openSettings()
+    api.notifyAgentSettingsRefreshed() // the extension answers the openSettings refresh → build fires
     let posted = null
     window._vscode = { postMessage: (m) => { if (m.type === "saveAgentSettings") posted = m } }
     const el = document.getElementById("ag-maxturns")
@@ -364,3 +398,84 @@ describe("buildSettings — save flow (posts payload to extension)", () => {
 // was expected — the filter saw no .configured entries and the provider dropdown
 // rendered empty. Also: binding lived inside the agSave guard — any upstream
 // bind failure silently killed the add button.
+
+
+// ─── GitHub #3 B1: openSettings renders the DISK-fresh agent settings ───
+// The SS.agentSettings snapshot is pushed once at webviewReady; a CLI-side /advisor
+// write after that was invisible until reload. openSettings now posts getAgentSettings
+// first and builds only when the agentSettings push lands (or after a fallback
+// timeout). The suite's shared openPanel() simulates the extension reply; these cases
+// pin the acceptance criteria: disk values reach the rendered DOM, and the timeout
+// fallback still renders.
+describe("openSettings — fresh agent settings before render (GitHub #3 B1)", () => {
+  it("openSettings posts getAgentSettings, and the DISK-fresh advisor reaches the slot DOM", async () => {
+    // End-to-end over the real disk (acceptance criterion): the CLI writes an advisor
+    // to config.json AFTER webviewReady — the SS snapshot is stale. openSettings pulls;
+    // the extension's handler pushes agentSettings(), whose advisor comes straight from
+    // loadAgentSettings() (src/config-io.mjs — the same disk read).
+    const { _setConfigPathForTest, loadAgentSettings } = await import("../src/config-io.mjs")
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs")
+    const { join } = await import("node:path")
+    const { tmpdir } = await import("node:os")
+    const dir = mkdtempSync(join(tmpdir(), "thincoder-b1-"))
+    const cfg = join(dir, "config.json")
+    _setConfigPathForTest(cfg)
+    const postWindow = env.capturedPosts.length // scope the wire assertions to THIS test
+    try {
+      writeFileSync(cfg, JSON.stringify({ agent: { advisor: { guard: false, provider: "glm", model: "glm-5.2", thinking: { type: "enabled" }, reasoningEffort: "high", timeoutMs: 600 } } }))
+      const body = openPanel({ advisor: loadAgentSettings().advisor })
+      const slot = body.querySelector("#adv-model-slot")
+      assert.ok(slot, "advisor slot exists after the refresh build")
+      assert.equal(slot.dataset.provider, "glm", "data-provider is the disk-fresh value")
+      assert.equal(slot.dataset.model, "glm-5.2", "data-model is the disk-fresh value")
+    } finally {
+      _setConfigPathForTest(null)
+      rmSync(dir, { recursive: true, force: true })
+    }
+    // The pull happened BEFORE the build: no saveAgentSettings may fire during a mere open.
+    // (Windowed: env.capturedPosts is shared across the suite — earlier save tests pollute it.)
+    const posts = env.capturedPosts.slice(postWindow).map((m) => m.type)
+    assert.ok(posts.includes("getAgentSettings"), "getAgentSettings posted on open")
+    assert.ok(!posts.includes("saveAgentSettings"), "opening the panel never saves")
+  })
+
+  it("timeout fallback: an unanswered getAgentSettings still builds the panel (stale snapshot)", () => {
+    const before = env.capturedPosts.length
+    api.openSettings()
+    // No reply — wait past the 250ms fallback; the build must happen anyway so the
+    // panel is never left unrendered (then the simulated reply is dropped: waiter gone).
+    return new Promise((resolve) => setTimeout(resolve, 350)).then(() => {
+      assert.ok(document.getElementById("settings-body").querySelector("#providers-card"), "fallback build rendered the panel")
+      api.updateAgentSettings({ advisor: { provider: "late", model: "late-model" } })
+      api.notifyAgentSettingsRefreshed()
+      const slot = document.getElementById("adv-model-slot")
+      assert.ok(slot === null || slot.dataset.provider !== "late", "the late push no longer triggers a rebuild (waiter consumed)")
+      assert.ok(env.capturedPosts.slice(before).some((m) => m.type === "getAgentSettings"), "refresh was requested")
+    })
+  })
+})
+
+// ─── GitHub #3 A1: the CHANGE-TO-SAVE payload sends explicit null for empty slots ───
+// postMessage JSON serialization DROPS undefined keys — the extension could not tell
+// "slot missing" from "explicitly cleared". Missing keys now BACKFILL from disk, so a
+// dropped key would resurrect the old value; null is the only clear signal.
+describe("agent payload wire format — explicit null for cleared slots (GitHub #3 A1)", () => {
+  it("empty advisor slots serialize as null, not undefined (JSON round-trip keeps the keys)", () => {
+    openPanel({ advisor: { guard: true } }) // no provider/model on disk → slots empty
+    const advisorSlot = document.getElementById("adv-model-slot")
+    advisorSlot.dataset.provider = "" // simulate a cleared slot
+    advisorSlot.dataset.model = ""
+    const effortSel = document.getElementById("adv-effort")
+    if (effortSel) effortSel.value = ""
+    document.getElementById("ag-maxturns").value = "42"
+    document.getElementById("ag-maxturns").dispatchEvent(new window.Event("change"))
+    const msg = env.capturedPosts.filter((m) => m.type === "saveAgentSettings").at(-1)
+    assert.ok(msg, "auto-save posted")
+    assert.ok("provider" in msg.settings.advisor, "provider key present on the wire")
+    assert.equal(msg.settings.advisor.provider, null, "empty provider slot is an explicit null")
+    assert.equal(msg.settings.advisor.model, null, "empty model slot is an explicit null")
+    // JSON round-trip (what postMessage actually does): keys must survive.
+    const round = JSON.parse(JSON.stringify(msg.settings))
+    assert.ok("provider" in round.advisor && round.advisor.provider === null, "null survives JSON serialization")
+  })
+})

@@ -9,7 +9,7 @@
  *   UI value          → provider patch
  *   "enabled"         → thinking:{type:<thinkEnabledValue>}, effort cleared (thinkApi "type")
  *   "off" / "none"    → thinking:null + reasoningEffort:null (true off)
- *   any effort level  → reasoningEffort:<level>
+ *   any effort level  → reasoningEffort:<level> + thinking:undefined (clears a prior off-marker on merge)
  *
  * Note: some endpoints (Zhipu coding plan) force thinking server-side and ignore
  * thinking:"disabled" entirely — that is a provider behavior, not something the
@@ -26,6 +26,9 @@ export function resolveReasoningMode(reasoning, model, specForModelFn) {
     const thinkVal = spec.thinkEnabledValue || "enabled"
     return { thinking: { type: thinkVal }, ...(spec.thinkApi === "effort" ? { reasoningEffort: null } : {}) }
   }
-  if (reasoning) return { reasoningEffort: reasoning }
+  // Effort tier = thinking wanted: explicitly clear a prior thinking:null off-marker (merge
+  // overwrites the key with undefined), else enable_thinking:false would ride alongside
+  // reasoning_effort — a contradictory payload (PROVIDER.md §12 F2, delivery review #1).
+  if (reasoning) return { reasoningEffort: reasoning, thinking: undefined }
   return {}
 }

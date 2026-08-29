@@ -6,6 +6,7 @@
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { setupWebview } from "./helpers/webview-env.mjs"
+import { initAutocomplete } from "../webview/autocomplete.js"
 
 let env
 before(() => { env = setupWebview() })
@@ -103,3 +104,75 @@ it("mid-line @ activates and tracks the query", async () => {
   assert.equal(dd.style.display, "none", "space after the query closes the dropdown")
 })
 
+
+describe("paste-image raster gate + unsupported toast (thincoder#3 review)", () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+  /** happy-dom 的 FileReader 不支持 readAsDataURL —— 就地 stub 一个同步版本 */
+  function stubFileReader() {
+    class FakeFileReader {
+      readAsDataURL(file) {
+        this.result = "data:" + file.type + ";base64," + Buffer.from(file._bytes ?? "x").toString("base64")
+        if (this.onload) this.onload()
+      }
+    }
+    window.FileReader = FakeFileReader
+  }
+
+  function makeFixture() {
+    document.body.replaceChildren() // isolate from earlier describes' appends + stale toast
+    const inputEl = document.createElement("textarea")
+    const fileInput = document.createElement("input")
+    fileInput.id = "file-input"
+    const attachBtn = document.createElement("button")
+    attachBtn.id = "attach-btn"
+    document.body.append(inputEl, fileInput, attachBtn)
+    const pastedImages = []
+    initAutocomplete({ inputEl, atDropdown: document.createElement("div"), vscode: { postMessage: () => {} }, pastedImages })
+    return { inputEl, fileInput, pastedImages }
+  }
+
+  it("file entry: non-raster image shows the toast and does NOT join pastedImages", async () => {
+    stubFileReader()
+    const { fileInput, pastedImages } = makeFixture()
+
+    const svg = { type: "image/svg+xml", _bytes: "<svg/>" }
+    fileInput.files = [svg]
+    fileInput.dispatchEvent(new window.Event("change"))
+    await sleep(10)
+
+    const toast = document.getElementById("paste-toast")
+    assert.ok(toast, "toast element created")
+    assert.match(toast.textContent, /image\/svg\+xml/, "toast names the rejected mime type")
+    assert.ok(toast.classList.contains("visible"), "toast visible")
+    assert.equal(pastedImages.length, 0, "non-raster never enters pastedImages")
+    assert.equal(fileInput.value, "", "file input reset even on the rejected branch")
+  })
+
+  it("file entry: raster image still joins pastedImages (chip path intact)", async () => {
+    stubFileReader()
+    const { fileInput, pastedImages } = makeFixture()
+
+    fileInput.files = [{ type: "image/png", _bytes: "png-bytes" }]
+    fileInput.dispatchEvent(new window.Event("change"))
+    await sleep(10)
+
+    assert.equal(pastedImages.length, 1, "raster image accepted")
+    assert.match(pastedImages[0], /^data:image\/png;base64,/)
+  })
+
+  it("paste entry: clipboard with ONLY a non-raster image shows the toast (no silent drop)", async () => {
+    stubFileReader()
+    const { pastedImages } = makeFixture()
+
+    // happy-dom needs clipboardData on the event — attach after construction
+    const evt = new window.Event("paste", { bubbles: true })
+    evt.clipboardData = { items: [{ type: "image/heic" }] }
+    document.dispatchEvent(evt)
+    await sleep(10)
+
+    const toast = document.getElementById("paste-toast")
+    assert.ok(toast && toast.classList.contains("visible"), "paste entry also toasts for non-raster images")
+    assert.equal(pastedImages.length, 0)
+  })
+})

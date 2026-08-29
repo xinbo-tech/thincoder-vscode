@@ -186,7 +186,7 @@ test("modeRoleField(false): coder shown, eng-coder hidden, suffix empty", async 
   assert.equal(role.type, "string")
   assert.ok(role.enum.includes("coder"), "normal mode advertises coder")
   assert.ok(!role.enum.includes("eng-coder"), "normal mode hides eng-coder")
-  assert.match(role.description, /disabled in normal mode/)
+  assert.match(role.description, /role capability matrix/)
   assert.equal(suffix, "")
 })
 
@@ -196,7 +196,7 @@ test("modeRoleField(true): eng-coder shown, coder hidden, suffix names eng-coder
   assert.equal(role.type, "string")
   assert.ok(role.enum.includes("eng-coder"), "engineering mode advertises eng-coder")
   assert.ok(!role.enum.includes("coder"), "engineering mode hides coder")
-  assert.match(role.description, /disabled in engineering mode/)
+  assert.match(role.description, /role capability matrix/)
   assert.match(suffix, /role='eng-coder'/)
 })
 
@@ -388,4 +388,35 @@ test("variant roles fail closed — coder leak fix (2026-08-25)", async () => {
     subagentTool.execute({ task: "x", role: "coder" }, makeCtx(true)),
     /use role='eng-coder'/,
   )
+})
+test("subagent tool description exposes the role capability matrix (no dev-comment leaks)", async () => {
+  const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+  const d = subagentTool.description
+  for (const probe of [
+    "Available roles",
+    "Why delegate?",
+    "already verified",
+    "- explore",
+    "- plan",
+    "- coder",
+    "- eng-coder",
+    "git context auto-injected",
+    "delivery transparency table",
+    "Mode filtering",
+  ]) {
+    assert.ok(d.includes(probe), `description missing "${probe}"`)
+  }
+  assert.ok(!d.includes("OVERRIDDEN"), "dev-comment leak: OVERRIDDEN in description")
+  assert.ok(!d.includes("SETUP.MJS"), "internal impl path leaked into description")
+  const roleDesc = subagentTool.parameters.properties.role.description
+  assert.ok(!roleDesc.includes("OVERRIDDEN"), "role description leaks dev comment")
+})
+test("modeRoleField role description stays in sync with the matrix-pointer text (both modes)", async () => {
+  const { modeRoleField } = await import("../src/agent-tools/subagent.mjs")
+  for (const engineering of [false, true]) {
+    const f = modeRoleField(engineering)
+    assert.match(f.role.description, /role capability matrix/, `eng=${engineering}: role description drifted from matrix pointer`)
+    assert.ok(!f.role.description.includes("read-only search/analysis"), "stale one-line role label resurrected")
+    assert.equal(f.role.enum.length, 3, "enum must expose exactly 3 roles per mode")
+  }
 })

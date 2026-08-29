@@ -466,8 +466,27 @@ describe("resolveReasoningMode", () => {
   it('"enabled" uses thinkEnabledValue; effort levels pass through as reasoningEffort', async () => {
     const { resolveReasoningMode } = await import("../src/extension/reasoning-mode.mjs")
     assert.deepEqual(resolveReasoningMode("enabled", "glm-5.2", () => ({ thinkApi: "type", thinkEnabledValue: "enabled" })).thinking, { type: "enabled" })
-    assert.deepEqual(resolveReasoningMode("high", "x", () => ({})), { reasoningEffort: "high" })
+    assert.deepEqual(resolveReasoningMode("high", "x", () => ({})), { reasoningEffort: "high", thinking: undefined })
     assert.deepEqual(resolveReasoningMode(undefined, "x", () => ({})), {})
+  })
+
+  it("effort tier after off clears the null off-marker on merge — PROVIDER.md §12 T8 / delivery review #1", async () => {
+    const { resolveReasoningMode } = await import("../src/extension/reasoning-mode.mjs")
+    const { resolveEnableThinking, specForModel } = await import("../src/config.mjs")
+    const specFn = () => ({ thinkApi: "effort", reasoningEffortEnum: ["xhigh", "medium", "low"] })
+    // panel off persists thinking:null / reasoningEffort:null (unchanged off semantics)
+    assert.deepEqual(resolveReasoningMode("off", "qwen3.8-max", specFn), { thinking: null, reasoningEffort: null })
+    // off → pick a tier: patch must carry thinking:undefined so the spread-merge erases the null marker
+    const p0 = { model: "qwen3.8-max", thinking: null, reasoningEffort: null }
+    const patch = resolveReasoningMode("xhigh", "qwen3.8-max", specFn)
+    assert.equal(patch.reasoningEffort, "xhigh")
+    assert.ok("thinking" in patch && patch.thinking === undefined, "patch must explicitly clear thinking")
+    const merged = { ...p0, ...patch }
+    assert.equal(merged.thinking, undefined, "null off-marker erased after merge")
+    assert.equal(merged.reasoningEffort, "xhigh")
+    // mapping precondition: enable_thinking resolves true, no contradictory false + effort payload
+    const provider = { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", ...merged }
+    assert.equal(resolveEnableThinking(provider, specForModel(merged.model)), true)
   })
 })
 
@@ -544,3 +563,123 @@ describe("spec reasoningEffortDefault", () => {
     assert.equal(specForModel("gpt-4o").reasoningEffortDefault, undefined, "non-thinking models have no default")
   })
 })
+
+// ─── Qwen enable_thinking mapping (PROVIDER.md §12, 2026-08-28 — CLI parity) ──
+
+describe("resolveEnableThinking (PROVIDER.md §12 T1-T5)", () => {
+  it("T1: Bailian qwen explicit off (thinking:null) → false", async () => {
+    const { resolveEnableThinking, specForModel } = await import("../src/config.mjs")
+    const p = { model: "qwen3.8-max", baseURL: "https://dashscope.aliyuncs.com/v1", thinking: null }
+    assert.equal(resolveEnableThinking(p, specForModel(p.model)), false)
+  })
+
+  it("T2: Bailian qwen with effort tier → true", async () => {
+    const { resolveEnableThinking, specForModel } = await import("../src/config.mjs")
+    const p = { model: "qwen3.8-max", baseURL: "https://dashscope.aliyuncs.com/v1", reasoningEffort: "xhigh" }
+    assert.equal(resolveEnableThinking(p, specForModel(p.model)), true)
+  })
+
+  it("T3: non-whitelist model (kimi-k3) explicit off → undefined", async () => {
+    const { resolveEnableThinking, specForModel } = await import("../src/config.mjs")
+    const p = { model: "kimi-k3", baseURL: "https://api.moonshot.cn/v1", thinking: null }
+    assert.equal(resolveEnableThinking(p, specForModel(p.model)), undefined)
+  })
+
+  it("T4: qwen behind a non-Bailian host (self proxy) → undefined", async () => {
+    const { resolveEnableThinking, specForModel } = await import("../src/config.mjs")
+    const p = { model: "qwen3.7-max", baseURL: "https://my-proxy.example.com/v1", reasoningEffort: "high" }
+    assert.equal(resolveEnableThinking(p, specForModel(p.model)), undefined)
+  })
+
+  it("T5: qwen3-coder (non-thinking coding line) → undefined even on Bailian", async () => {
+    const { resolveEnableThinking, specForModel } = await import("../src/config.mjs")
+    const p = { model: "qwen3-coder-plus", baseURL: "https://coding-intl.dashscope.aliyuncs.com/v1", reasoningEffort: "high" }
+    assert.equal(resolveEnableThinking(p, specForModel(p.model)), undefined)
+  })
+
+  it(".maas.aliyuncs.com token-plan host whitelisted; unset thinking/effort → undefined (server default)", async () => {
+    const { resolveEnableThinking, isBailianHost, specForModel } = await import("../src/config.mjs")
+    const maas = { model: "qwen3.7-max", baseURL: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", reasoningEffort: "high" }
+    assert.equal(resolveEnableThinking(maas, specForModel(maas.model)), true)
+    const unset = { model: "qwen3.8-max", baseURL: "https://dashscope.aliyuncs.com/v1" }
+    assert.equal(resolveEnableThinking(unset, specForModel(unset.model)), undefined)
+    assert.equal(isBailianHost("https://dashscope.aliyuncs.com/v1"), true)
+    assert.equal(isBailianHost("https://token-plan.cn-beijing.maas.aliyuncs.com/v1"), true)
+    assert.equal(isBailianHost("https://api.moonshot.cn/v1"), false)
+    assert.equal(isBailianHost(undefined), false)
+  })
+})
+
+describe("buildRequest enable_thinking injection", () => {
+  it("off → enable_thinking:false; tier → true + reasoning_effort; non-whitelist → field absent", async () => {
+    const { buildRequest } = await import("../src/provider/transports/openai.mjs")
+    const bailian = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+    const off = JSON.parse(buildRequest({ baseURL: bailian, apiKey: "k", model: "qwen3.8-max", thinking: null }, [], []).body)
+    assert.equal(off.enable_thinking, false, "explicit panel off must send enable_thinking:false")
+    assert.equal("thinking" in off, false)
+    assert.equal("reasoning_effort" in off, false)
+
+    const tier = JSON.parse(buildRequest({ baseURL: bailian, apiKey: "k", model: "qwen3.8-max", reasoningEffort: "xhigh" }, [], []).body)
+    assert.equal(tier.enable_thinking, true, "effort tier sends enable_thinking:true")
+    assert.equal(tier.reasoning_effort, "xhigh", "rides alongside existing reasoning_effort")
+
+    const kimi = JSON.parse(buildRequest({ baseURL: "https://api.moonshot.cn/v1", apiKey: "k", model: "kimi-k3", thinking: null }, [], []).body)
+    assert.equal("enable_thinking" in kimi, false, "non-whitelist stays zero-change")
+
+    const proxy = JSON.parse(buildRequest({ baseURL: "https://my-proxy.example.com/v1", apiKey: "k", model: "qwen3.7-max", reasoningEffort: "high" }, [], []).body)
+    assert.equal("enable_thinking" in proxy, false, "non-Bailian host not whitelisted")
+    assert.equal(proxy.reasoning_effort, "high")
+  })
+
+  it("off → effort sequence (panel merge) sends enable_thinking:true — §12 T8 at body level", async () => {
+    const { buildRequest } = await import("../src/provider/transports/openai.mjs")
+    const { resolveReasoningMode } = await import("../src/extension/reasoning-mode.mjs")
+    const { specForModel } = await import("../src/config.mjs")
+    const bailian = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    // persisted off state (thinking:null) merged with the tier patch from the reasoning selector
+    const p = { baseURL: bailian, apiKey: "k", model: "qwen3.8-max", thinking: null, reasoningEffort: null }
+    const merged = { ...p, ...resolveReasoningMode("xhigh", p.model, specForModel) }
+    const body = JSON.parse(buildRequest(merged, [], []).body)
+    assert.equal(body.enable_thinking, true, "cleared off-marker + tier → enable_thinking:true")
+    assert.equal(body.reasoning_effort, "xhigh")
+    // thinking:undefined 触发 openai.mjs 既有 spec 默认注入（spec.thinking:true → {type:"enabled"}，
+    // GLM 修复引入的通用行为）——与 enable_thinking:true 同向，非 off 标记残留
+    assert.deepEqual(body.thinking, { type: "enabled" })
+  })
+})
+
+describe("resolveEnableThinking CLI parity", () => {
+  it("function bodies are identical to thincoder CLI config.mjs (NF3)", async () => {
+    const { existsSync, readFileSync } = await import("node:fs")
+    const { dirname, join } = await import("node:path")
+    const { fileURLToPath } = await import("node:url")
+    const cliConfig = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "thincoder", "src", "config.mjs")
+    if (!existsSync(cliConfig)) return // standalone vscode clone — CLI side runs the same check
+    const cliSrc = readFileSync(cliConfig, "utf8")
+    const { resolveEnableThinking, isBailianHost } = await import("../src/config.mjs")
+    const extract = (name) => {
+      const i = cliSrc.indexOf(`export function ${name}`)
+      assert.ok(i >= 0, `CLI config.mjs is missing ${name} (drift)`)
+      const end = /^}/m.exec(cliSrc.slice(i))
+      assert.ok(end, `${name} body extraction failed`)
+      return cliSrc.slice(i, i + end.index + 1)
+    }
+    const norm = (s) => s.replace(/^export\s+/, "").replace(/\s+/g, "")
+    for (const fn of [resolveEnableThinking, isBailianHost]) {
+      assert.equal(norm(extract(fn.name)), norm(fn.toString()), `${fn.name} drifted between CLI and vscode`)
+    }
+  })
+})
+it("stripLocalMessageFields removes the transient flag before payload (IKBGX4)", async () => {
+  const { stripLocalMessageFields } = await import("../src/provider.mjs")
+  assert.deepEqual(
+    stripLocalMessageFields([
+      { role: "user", content: "hi", transient: true },
+      { role: "assistant", content: "yo" },
+      "raw-string-message",
+    ]),
+    [{ role: "user", content: "hi" }, { role: "assistant", content: "yo" }, "raw-string-message"],
+  )
+})
+

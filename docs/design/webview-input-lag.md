@@ -61,3 +61,16 @@
 1. **归因 A/B**：长会话卡顿后，DevTools 控制台跑 `[...messages.children].slice(0,-30).forEach(e=>e.remove())` 再打字——立刻顺滑即证实 DOM 规模是根因；
 2. **量化**：Performance 录一段中文输入，看每键 Recalculate Style / Layout 时长是否随使用时长单调增长；`document.querySelectorAll('#messages *').length`（卡顿时预期 >3 万）；
 3. **修后回归**：节点数稳定在阈值内；IME 输入 Layout 回落到新开会话水平；上滚分页、Ctrl+F 搜索、滚动钉底、`finish()` flush 尾部完整性不回归。
+
+## 5. Ctrl+F 搜索白屏修复（2026-08-28）
+
+**用户报告**：长会话按 Ctrl+F 搜索输入时 webview 白屏。**根因（happy-dom 复现 10.7 万字符会话）**：`webview/search.js` 每次击键触发全量 `performSearch`——TreeWalker 全树扫描 + 逐文本节点 `replaceChild`/`normalize` + `scrollIntoView` 强制布局；高频词（"the"）单键实测 166ms 且爆出 4000 个 `<mark>` → 主线程阻塞数秒 → 渲染冻结呈白屏（非崩溃，停顿后恢复）。
+
+**修复三件套**：
+1. **input 150ms 防抖**——击键期零同步扫描（实测 4 键 1ms vs 原 4×166ms）
+2. **mark 上限 500**——超限截断且不丢文本（剩余原样补回），计数显示 `N/500+`
+3. **搜索不自动滚动**——`scrollIntoView` 仅 Enter/↑↓ 跳转时触发，去掉每次搜索的强制布局
+
+**顺带修复**：`search.*` locale 键（placeholder/prev/next/close/noMatch）缺失导致 UI 显示裸键名。
+
+**回归测试**：`test/search.test.mjs` 4 用例（防抖/上限/不滚动/i18n），已入 package.json test 清单；全量 731 绿。

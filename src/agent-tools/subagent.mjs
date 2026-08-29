@@ -19,7 +19,7 @@ export function modeRoleField(engineering) {
         role: {
           type: "string",
           enum: ["explore", "plan", "eng-coder"],
-          description: "Sub-agent role: 'explore' (read-only search/analysis), 'plan' (read-only implementation planning), 'eng-coder' (engineering coder — strict methodology, design-driven). 'coder' is disabled in engineering mode.",
+          description: "The sub-agent role — see the tool description for the role capability matrix. Exact spelling required.",
         },
         suffix: "In engineering mode, use role='eng-coder' for implementation (coder is disabled).",
       }
@@ -27,7 +27,7 @@ export function modeRoleField(engineering) {
         role: {
           type: "string",
           enum: ["explore", "plan", "coder"],
-          description: "Sub-agent role: 'explore' (read-only search/analysis), 'plan' (read-only implementation planning), or 'coder' (full implementation). 'eng-coder' is disabled in normal mode.",
+          description: "The sub-agent role — see the tool description for the role capability matrix. Exact spelling required.",
         },
         suffix: "",
       }
@@ -68,16 +68,24 @@ export const subagentTool = {
   name: "subagent",
   sideEffectExempt: true, // subagent mutations are tracked by the child, not the parent
   description:
-    "Spawn a sub-agent for an independent subtask. role: explore (read-only search — specify thoroughness in the task: quick / medium / thorough (default medium)), plan (architecture design), coder (implementation), eng-coder (engineering-mode coder — design-driven, requires designToken).\n" +
-    "Parameters:\n" +
-    "- task (required): Task description\n" +
-    "- role (required): explore | plan | coder | eng-coder\n" +
-    "- designToken (required for eng-coder): token from advisor(type='design') after design review passed",
+    "Spawn a sub-agent to handle an independent subtask in an isolated context. The sub-agent returns only its final report. Spawn MULTIPLE subagents in the SAME response for parallel work—they run concurrently.\n" +
+    "Why delegate? A sub-agent runs in its own isolated context — its reads, searches, tool calls and edits never enter your history or pollute your window; only its final report comes back. Delegation keeps your working context lean (you see the whole session, not the child's noise) and the child single-mindedly focused on one task. Parallel children run concurrently, saving wall-clock time. Every coder/eng-coder child carries its own verify + advisor self-review discipline — handed-off work is already verified before you read a word of it.\n\n" +
+    "Available roles (which roles are exposed depends on the active mode — see Mode filtering below):\n" +
+    "- explore — read-only search & analysis. Toolset: the read/search family (grep, read, glob, code_search, doc_search, repo_outline, lsp, tree...). Receives git context auto-injected (branch, recent commits, working-tree state) when the project is a git repo. Its report must list what it searched and what it did NOT find. Fast — specify thoroughness in the task: quick / medium / thorough (default medium).\n" +
+    "- plan — read-only implementation planning. Same read/search toolset; NEVER edits files. Returns a step-by-step plan for the parent to execute.\n" +
+    "- coder — full implementation. The parent's complete read/write/execute toolset plus verify and advisor for self-review. Its final report must include a delivery transparency table with one row per task requirement (Done / Simplified / Not done — no deferred column).\n" +
+    "- eng-coder — engineering-mode coder (available only in engineering mode, replacing coder). Same full toolset as coder plus the design-driven methodology overlay; REQUIRES a valid designToken arg obtained from a passed advisor(type='design') review.\n" +
+    "Mode filtering: normal mode exposes explore/plan/coder; engineering mode exposes explore/plan/eng-coder. The schema enum reflects the active mode.\n\n" +
+    "Writing the prompt:\n" +
+    "- The sub-agent starts with zero context — it has not seen this conversation. Brief it like a colleague who just walked into the room: state the goal, list what you already know, hand over the specifics.\n" +
+    "- Put exact paths and commands in the prompt when you know them. The sub-agent should not search for things you already know.\n" +
+    "- Do not delegate understanding: if the task hinges on a file path or line number, find it yourself first and write it into the prompt.\n" +
+    "- Once a sub-agent is running, leave that scope to it: don't redo its searches in parallel, and don't abandon it midway to finish manually.",
   parameters: {
     type: "object",
     properties: {
       task: { type: "string", description: "Task description" },
-      role: { type: "string", enum: ["explore", "plan", "coder", "eng-coder"], description: "Sub-agent role" },
+      role: { type: "string", enum: ["explore", "plan", "coder", "eng-coder"], description: "The sub-agent role — see the tool description for the role capability matrix. Exact spelling required." },
       model: { type: "string", description: "Provider/model override for this sub-agent: 'provider:model', a provider name from config, or a model name on the parent's provider. Defaults to the agent.subagentModel config, then the parent's provider. Useful for offloading heavy work to a cheaper model." },
       designToken: { type: "string", description: "Required when role='eng-coder': the token returned by advisor(type='design') after the design review passed. Without a valid token, eng-coder cannot modify files." },
     },

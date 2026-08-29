@@ -693,6 +693,22 @@ describe("read_image — svg as text source (Kimi 400 session-poisoning regressi
     await assert.rejects(() => readImageTool.execute({ path: "a.bmp" }, ctx()), /Convert it to PNG/)
   })
 })
+describe("read_image — description lists multimodal model keywords (content assertion)", () => {
+  it("mentions every declared vision-capable model keyword (array-driven)", async () => {
+    const { readImageTool } = await import("../src/tools/read_image.mjs")
+    // 多模态模型清单：未来加新模型时在数组加一项即可；若 description 漏掉数组中任一
+    // 模型，此测试必须失败（防手工同步清单滞后）。关键字按 description 实际措辞探测。
+    // 2026-08-28：修复 vscode description（Qwen3.7→Qwen3.8 精确化 + 补 GLM-5.3-Flash，
+    // 与 CLI read_image.md:8 对齐）后，本数组即两端完整清单 —— 已同步。
+    const visionModels = ["Kimi K3", "Qwen3.8", "MiniMax M3", "GLM-5.3-Flash"]
+    for (const model of visionModels) {
+      assert.ok(
+        readImageTool.description.includes(model),
+        `read_image description 必须提到 "${model}"（多模态模型清单漏项）— 实际: ${readImageTool.description}`,
+      )
+    }
+  })
+})
 
   describe("edit — EOL normalization (CRLF files, LF old_string)", () => {
   beforeEach(setup)

@@ -30,7 +30,8 @@
 
 ### 2.3 Agent 运行参数
 
-- 写入链：面板 → `saveAgentSettingsFromPanel`（单写通道，advisor 对象整体覆盖 + timeoutMs 透传保留手写值）→ config.json `agent.*`。
+- 写入链：面板 → `saveAgentSettingsFromPanel`（单写通道）→ config.json `agent.*`。**advisor 字段级合并**（GitHub #3 修复，2026-08-29）：payload 缺键从磁盘回填（CLI 写入的 provider/model/thinking/reasoningEffort 面板保存后存活），显式 `null`/`''` = 清空删除；wire 层空槽位必须发 `null` 而非 `undefined`（postMessage JSON 序列化丢弃 undefined 键——缺失与清空必须可区分）。timeoutMs 透传保留手写值。
+- 面板打开即拉新：`openSettings` → `getAgentSettings`（webview→extension）→ extension 重读盘推送 `agentSettings`（extension→webview）→ 收到后渲染（250ms 超时回退用快照）。CLI `/advisor` 写盘后打开面板即可见。
 - subagentModels 优先级：工具 model 参数 > `subagentModels[role]` > `subagentModel` > 父 provider。
 - Shell 为 config.json **顶层字段**（不在 agent 下），独立消息通道；平台感知候选（System default / pwsh / Git Bash / WSL）。
 

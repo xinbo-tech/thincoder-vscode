@@ -24,13 +24,18 @@ export function send() {
   ctx.hadToolResult = false
   clearPanels()
   addUser(ctx, text)
-  const images = ctx._pastedImages
-  ctx._pastedImages = []
+  // Snapshot + clear IN PLACE (GitHub thincoder#3): autocomplete.js holds this array
+  // BY REFERENCE (chat.js passes ctx._pastedImages into initAutocomplete). Reassigning
+  // ctx._pastedImages = [] orphanized the shared array — the paste bar kept rendering
+  // the old one, send() read the new empty one, so only the first paste+send ever
+  // carried images. length=0 preserves the identity; chips and ✕-delete keep working.
+  const images = [...ctx._pastedImages]
+  ctx._pastedImages.length = 0
   document.getElementById("paste-bar").style.display = "none"
   document.getElementById("paste-badge").innerHTML = ""
   vscode.postMessage({ type: "userMessage", text, model: ctx.selectedModel, reasoning: ctx.selectedReasoning, provider: ctx.selectedProvider, images })
   // If session title is auto-generated (Session N), show a hint that a better title is coming
   if (/^Session \d+$/.test(ctx.sessionTitle.textContent)) {
-    ctx.sessionTitle.textContent = ctx.sessionTitle.textContent + " — " + (t("session.generatingTitle") || "generating title…")
+    ctx.sessionTitle.textContent = ctx.sessionTitle.textContent + " — " + t("session.generatingTitle")
   }
 }

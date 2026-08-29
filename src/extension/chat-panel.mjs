@@ -166,14 +166,14 @@ export class ChatPanel {
   _activeData() { return activeData(this) }
   _activeHistory() { return activeHistory(this) }
   _activeLines() { return activeLines(this) }
-  _saveLines(fullHistory, contextHistory, extra = {}) { return saveLines(this, fullHistory, contextHistory, extra) }
+  _saveLines(fullHistory, contextHistory, extra = {}, slotOverride) { return saveLines(this, fullHistory, contextHistory, extra, slotOverride) }
   _loadModelPrefs() { return loadModelPrefs(this) }
   _loadSession() { return loadSession(this) }
   _loadOlder(before) { return loadOlder(this, before) }
   async _newSession() { return newSession(this) }
   async _deleteSession(slot) { return deleteSession(this, slot) }
   _pushSessions() { return pushSessions(this) }
-  async _generateTitle() { return generateTitle(this) }
+  async _generateTitle(slotOverride) { return generateTitle(this, slotOverride) }
   async _status() { return bootstrapStatus(this) }
 
   // ─── Project (implementations in panel-project.mjs) ───

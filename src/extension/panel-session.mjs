@@ -9,6 +9,7 @@ import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { stripEditorInjection } from "./editor-context.mjs"
 import { generateTitle as generateSessionTitle } from "./generate-title.mjs"
 import { _cwd } from "./panel-messages.mjs"
+import * as vscode from "vscode"
 
   /**
    * The slot number this panel is bound to. On first use, resolve it once from the
@@ -23,8 +24,8 @@ export function ensureSlot(panel) {
   }
 
   /** Current session's slot data (full session object) or null. Uses the bound slot. */
-export function activeData(panel) {
-    return loadSlot(_cwd(), ensureSlot(panel))
+export function activeData(panel, slotOverride) {
+    return loadSlot(_cwd(), slotOverride ?? ensureSlot(panel))
   }
 
   /** Human line (history) of the active session. */
@@ -33,17 +34,20 @@ export function activeHistory(panel) {
   }
 
   /** Load both persisted lines for the active session: human (history) + machine (contextHistory). */
-export function activeLines(panel) {
-    const data = activeData(panel)
+export function activeLines(panel, slotOverride) {
+    const data = activeData(panel, slotOverride)
     const history = data?.history ?? []
     const contextHistory = Array.isArray(data?.contextHistory) ? data.contextHistory : [...history]
     return { fullHistory: history, contextHistory }
   }
 
-  /** Persist both lines to the active slot + update manifest metadata. */
-export function saveLines(panel, fullHistory, contextHistory, extra = {}) {
+  /** Persist both lines to the active slot + update manifest metadata.
+ *  `slotOverride`（会话切换竞态修复，2026-08-28）: 保存目标显式绑定 turn 启动时的 slot——
+ *  缺省回退 ensureSlot(panel)（当前活跃）。此前每次取当前 slot，运行中切换会话后
+ *  onComplete/abort 的保存会把 A 会话整轮内容写进 B 槽（GitHub #2 "输出写错会话文件"）。 */
+export function saveLines(panel, fullHistory, contextHistory, extra = {}, slotOverride) {
     const cwd = _cwd()
-    const slot = ensureSlot(panel)
+    const slot = slotOverride ?? ensureSlot(panel)
     const existing = loadSlot(cwd, slot) ?? {}
     // Field-roundtrip contract (CLI docs/design/ARCHITECTURE.md): slot files are full-overwrite
     // writes, so any field we drop here is lost permanently. Spread ...existing so fields the
@@ -122,12 +126,25 @@ export function sendHistoryPage(panel, messages, hasOlder, older) {
   }
 
 export async function newSession(panel) {
+    // 会话切换竞态守卫（GitHub #2/#5，2026-08-28）：运行中禁止新建——与 applyProjectSwitch
+    // 同模式（_turnActive → warning → return）。运行中放行会让旧 turn 的 stream/complete
+    // 灌进新会话视图、内容落错槽。
+    if (panel._turnActive) {
+      vscode.window.showWarningMessage("ThinCoder: a task is running — stop it before creating a new session.")
+      return
+    }
     // Allocate a fresh slot, bind this panel to it, then load its (empty) content.
     panel._slot = newSlot(_cwd())
     loadSession(panel)
   }
 
 export async function deleteSession(panel, slot) {
+    // 会话切换竞态守卫（GitHub #2/#5，2026-08-28）：运行中禁止删除——运行 turn 可能正写
+    // 该槽（saveLines turnSlot 绑定），删除会产生半写/误删。
+    if (panel._turnActive) {
+      vscode.window.showWarningMessage("ThinCoder: a task is running — stop it before deleting a session.")
+      return
+    }
     if (typeof slot !== "number" || slot < 1) return
     const slots = listSlots(_cwd())
     if (slots.length <= 1) return  // Keep at least one session
@@ -137,10 +154,12 @@ export async function deleteSession(panel, slot) {
     loadSession(panel)
   }
 
-export async function generateTitle(panel) {
+export async function generateTitle(panel, slotOverride) {
     try {
       const cwd = _cwd()
-      const slot = ensureSlot(panel)
+      // slotOverride（会话切换竞态修复，2026-08-28）：turn 启动时捕获的槽——标题属于产生
+      // 首条消息的那个会话，切走后不得给新会话改名。
+      const slot = slotOverride ?? ensureSlot(panel)
       const data = loadSlot(cwd, slot)
       if (!data || data.title) return  // Already titled
       const firstUser = (data.history ?? []).find((m) => (m.type ?? m.role) === "user")

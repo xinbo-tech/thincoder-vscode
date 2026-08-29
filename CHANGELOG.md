@@ -4,11 +4,31 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.4] — 2026-08-29
+
+### Fixed
+
+- **设置面板整包回写清空 advisor 配置（GitHub #3，数据丢失）**：面板数据源是 webviewReady 时推送的旧快照（CLI `/advisor` 写盘后扩展无感知），任意控件 change 触发整包保存时 advisor 槽位为空 → 合并层把 `saveAgentSettings` 的对象级替换误当"缺省=不合并"，CLI 写入的 advisor provider/model/thinking/reasoningEffort 被静默清空。三层修复：① wire 层空槽位发显式 `null`（postMessage JSON 序列化丢弃 undefined 键——"槽位缺失"与"显式清空"必须可区分）；② 合并层 advisor 改字段级合并（缺键从磁盘回填、`null`/`''`= 清空删除、timeoutMs 透传保留手写值）；③ 面板打开即拉新（`openSettings` → `getAgentSettings` → 扩展重读盘推送 `agentSettings` → 落地后渲染，250ms 超时回退）。测试矩阵锁定（缺键保留/显式清空/全量替换/盘值直达 DOM）
+- **静态 effort 档位静默不保存**（交付评审发现）：`#adv-effort` 与会诊行 `.consult-effort` 由 innerHTML 静态渲染、不在任何绑定路径——只有 model 选过之后替换出的 select 才带监听，用户只改档位不保存。修复：build 后统一补绑 + 回归测试
+- **粘贴图片发送后 AI 收不到（GitHub thincoder#3）**：两个 bug 叠加——① `webview/send.js` 用 `ctx._pastedImages = []` 重新赋值，孤儿化了 chat.js 按引用共享给 autocomplete 的原数组（UI 标签照常渲染、send 却读到新空数组），webview 生命周期内只有第一次粘贴+发送带图；② `savePastedImages` 零调用者 + 注入块取 history 末尾当用户消息（实际是 transient 时间提醒），图挂错消息且每轮重发。改为方案 B（文件通路）：webview 传 dataURL → 扩展端落盘 `<cwd>/.thincoder/tmp/paste-*.<ext>` → 用户消息文本追加 `[Attached images: …]` 指针 → 模型调 `read_image` 走工具通路带图进载荷；send 原地清空保引用身份，注入块改挂在 pushReal 返回的用户消息引用上（不碰 transient）。测试 image-paste.test.mjs 11 例
+- **设置按钮双绑定**（交付评审发现）：settings.js 与 chat.js 各绑一次 → 打开面板每次触发两遍。修复：单点绑定（chat.js 工具栏接线）
+
+### Changed
+
+- `config-io.mjs` 超出 500 行硬限（新增合并逻辑后 516 行）→ 拆分：preset 表 `config-presets.mjs`（零依赖）、迁移核心 `config-migrate.mjs`；`config-io.mjs` re-export 保持全部 import 站点兼容
+- **非光栅图片收图时拒绝**（评审收尾）：粘贴/附件入口改光栅白名单（png/jpeg/gif/webp），svg/heic/bmp 当场 toast 提示（`paste.unsupportedFormat`）——不再产生"chip 显示但发送后静默消失"的路径
+- `agent/setup.mjs` 超出 300 行建议线（337 行）→ 运行期 user reminder 组装（AUTO/permission、时间注入、编辑器注入、图片指针）抽到 `agent/setup-reminders.mjs`（setup.mjs 264 行）
+
 ## [0.8.3] — 2026-08-28
 
 ### Changed
 
 - System prompt: added two constraints — (1) decide what's right before deciding what's smallest; (2) expose approach tradeoffs when confirming understanding. Targets the "smallest change" shortcut habit.
+
+### Fixed
+
+- **Ctrl+F 会话搜索白屏**：长会话搜索时每次击键全量扫描 + 强制布局（10 万字符 × 高频词实测 166ms/键、爆出 4000 个高亮节点）→ 主线程阻塞呈白屏。修复三件套：150ms 防抖、mark 上限 500（计数 N/500+）、搜索不自动滚动（仅跳转时滚动）；顺带补 `search.*` locale 键（此前显示裸键名）；回归测试 4 例（search.test.mjs）
+- **会话运行中切换的三重竞态（GitHub #2/#5）**：① switchSession/newSession/deleteSession 运行中放行 → 旧 turn 的 stream/complete 灌进新会话视图（"思考串台"）；② 保存链每次取当前 slot → 切换后 A 的整轮内容写进 B 槽（"输出写错会话文件"）；③ 中间态只存 webview DOM → 切回展示丢失。修复：三处运行中守卫（warning 拒绝，对齐项目切换模式）+ `saveLines`/`_generateTitle` 加 slotOverride（turn 启动时绑定槽位，纵深防御对标 onDistilled 既有模式）；守卫测试 3 例（真实慢 turn + 跨槽零污染断言）
 
 ## [0.8.2] — 2026-08-28
 

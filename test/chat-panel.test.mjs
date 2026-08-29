@@ -136,6 +136,26 @@ async function scriptedLLMServer(onRequest) {
   return { server, port: server.address().port, requests }
 }
 
+/** Real ChatPanel bound to a stub webview, provider routed to the scripted server. */
+async function makePanel(port, posted) {
+  const { ChatPanel } = await import("../src/extension/chat-panel.mjs")
+  const { _setConfigPathForTest } = await import("../src/config-io.mjs")
+  _setConfigPathForTest(join(tmp, "config.json"))
+  writeFileSync(join(tmp, "config.json"), JSON.stringify({
+    providers: [{ name: "t", baseURL: `http://127.0.0.1:${port}`, model: "unknown-model", apiKey: "sk-test" }],
+    activeProvider: "t",
+  }))
+  const panel = new ChatPanel({
+    globalStorageUri: { fsPath: tmp },
+    workspaceState: { get: () => undefined, update: async () => {} },
+    subscriptions: [],
+  })
+  panel._panel = { webview: { postMessage: async (m) => posted.push(m) } }
+  return panel
+}
+
+const mkFiles = () => { for (const f of ["a.mjs", "b.mjs", "c.mjs"]) writeFileSync(join(tmp, f), "x\n") }
+
 describe("async distillation — panel save + slot guard + rapid-fire (SEND-STALL-DISTILL)", () => {
   // Distill requests are a single user message carrying EXPLORE_SUMMARY_PROMPT. Detect by
   // message shape + prompt prefix — a raw body.includes() on the prompt fails because JSON
@@ -148,26 +168,6 @@ describe("async distillation — panel save + slot guard + rapid-fire (SEND-STAL
     } catch { return false }
   }
   const noteIn = (ctx) => ctx.some((m) => typeof m.content === "string" && m.content.startsWith("[Exploration summary]"))
-
-  /** Real ChatPanel bound to a stub webview, provider routed to the scripted server. */
-  async function makePanel(port, posted) {
-    const { ChatPanel } = await import("../src/extension/chat-panel.mjs")
-    const { _setConfigPathForTest } = await import("../src/config-io.mjs")
-    _setConfigPathForTest(join(tmp, "config.json"))
-    writeFileSync(join(tmp, "config.json"), JSON.stringify({
-      providers: [{ name: "t", baseURL: `http://127.0.0.1:${port}`, model: "unknown-model", apiKey: "sk-test" }],
-      activeProvider: "t",
-    }))
-    const panel = new ChatPanel({
-      globalStorageUri: { fsPath: tmp },
-      workspaceState: { get: () => undefined, update: async () => {} },
-      subscriptions: [],
-    })
-    panel._panel = { webview: { postMessage: async (m) => posted.push(m) } }
-    return panel
-  }
-
-  const mkFiles = () => { for (const f of ["a.mjs", "b.mjs", "c.mjs"]) writeFileSync(join(tmp, f), "x\n") }
 
   it("AC5 — onDistilled re-saves: the session file ends with the compressed machine line", async () => {
     const { server, port } = await scriptedLLMServer(async (i, body) => {
@@ -416,3 +416,108 @@ describe("toolPanel bridge — model passthrough (advisor/subagent model display
   })
 })
 
+describe("session switch race guards (GitHub #2/#5 — 2026-08-28)", () => {
+  it("switchSession while a turn is running is REJECTED: slot unchanged, turn untouched, content lands in the ORIGINAL slot (GitHub #2/#5)", async () => {
+    // Slow first response so the turn is genuinely in flight when the switch arrives.
+    const { server, port } = await scriptedLLMServer(async (i) => {
+      if (i === 1) { await new Promise((r) => setTimeout(r, 1500)); return sseTurn("slow reply for session 1") }
+      return sseTurn("done")
+    })
+    try {
+      mkFiles()
+      // Pre-create slot 2 (clean target) so "zero pollution" is meaningful.
+      const { saveSessionToSlot } = await import("../src/extension/session-io.mjs")
+      saveSessionToSlot(tmp, 2, { version: 2, cwd: tmp, updatedAt: Date.now(), title: "", history: [], contextHistory: [] })
+      const posted = []
+      const panel = await makePanel(port, posted)
+      const { handlePanelMessage } = await import("../src/extension/panel-messages.mjs")
+      panel._slot = 1
+      const turn = panel._chat("first message", undefined, undefined, "t")
+      await new Promise((r) => setTimeout(r, 100)) // let the turn actually start
+      assert.equal(panel._turnActive, true, "turn must be in flight")
+
+      // The user clicks another session while the turn runs → guard must reject.
+      await handlePanelMessage(panel, { type: "switchSession", slot: 2 })
+      assert.equal(panel._slot, 1, "slot must NOT change while running")
+      assert.equal(panel._turnActive, true, "running turn must be untouched by the rejected switch")
+      await turn
+
+      // Turn finishes → content must land in slot 1; slot 2 must stay untouched.
+      const slot1 = loadSlot(tmp, 1)
+      const slot2 = loadSlot(tmp, 2)
+      assert.ok(slot1.history.some((m) => m.role === "assistant" && String(m.content).includes("slow reply for session 1")),
+        "original slot holds the turn's reply")
+      assert.equal(slot2.history.length, 0, "new session untouched (no cross-slot pollution)")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("newSession while a turn is running is REJECTED (no fresh slot bound)", async () => {
+    const { server, port } = await scriptedLLMServer(async (i) => {
+      if (i === 1) { await new Promise((r) => setTimeout(r, 1500)); return sseTurn("slow") }
+      return sseTurn("done")
+    })
+    try {
+      mkFiles()
+      const panel = await makePanel(port, [])
+      const { handlePanelMessage } = await import("../src/extension/panel-messages.mjs")
+      panel._slot = 1
+      const turn = panel._chat("msg", undefined, undefined, "t")
+      await new Promise((r) => setTimeout(r, 100))
+      assert.equal(panel._turnActive, true, "turn must be in flight")
+      await handlePanelMessage(panel, { type: "newSession" })
+      assert.equal(panel._slot, 1, "no new session may be bound while running")
+      await turn
+    } finally {
+      server.close()
+    }
+  })
+
+  it("saveLines slotOverride writes to the explicit slot (distill-style guard rail)", async () => {
+    const { ChatPanel } = await import("../src/extension/chat-panel.mjs")
+    const panel = new ChatPanel({
+      globalStorageUri: { fsPath: tmp },
+      workspaceState: { get: () => undefined, update: async () => {} },
+      subscriptions: [],
+    })
+    const { saveSessionToSlot } = await import("../src/extension/session-io.mjs")
+    saveSessionToSlot(tmp, 3, { version: 2, cwd: tmp, updatedAt: Date.now(), title: "", history: [], contextHistory: [] })
+    panel._slot = 1 // "current" slot — must be ignored when slotOverride is given
+    panel._saveLines(
+      [{ role: "user", content: "hi" }],
+      [{ role: "user", content: "hi" }],
+      { activeProvider: "t" },
+      3,
+    )
+    const slot3 = loadSlot(tmp, 3)
+    assert.equal(slot3.history.length, 1, "content landed in the OVERRIDE slot")
+    const slot1 = loadSlot(tmp, 1)
+    assert.ok(!slot1 || slot1.history.length === 0, "current slot untouched when override given")
+  })
+
+  it("deleteSession while a turn is running is REJECTED — target slot file intact (交付评审 #2)", async () => {
+    const { server, port } = await scriptedLLMServer(async (i) => {
+      if (i === 1) { await new Promise((r) => setTimeout(r, 1500)); return sseTurn("slow") }
+      return sseTurn("done")
+    })
+    try {
+      mkFiles()
+      const panel = await makePanel(port, [])
+      const { handlePanelMessage } = await import("../src/extension/panel-messages.mjs")
+      const { saveSessionToSlot } = await import("../src/extension/session-io.mjs")
+      panel._slot = 1
+      const turn = panel._chat("msg", undefined, undefined, "t")
+      await new Promise((r) => setTimeout(r, 100))
+      assert.equal(panel._turnActive, true, "turn must be in flight")
+      // Pre-create slot 2 with content — the user tries to delete it mid-turn (any slot, not just active).
+      saveSessionToSlot(tmp, 2, { version: 2, cwd: tmp, updatedAt: Date.now(), title: "victim", history: [], contextHistory: [] })
+      await handlePanelMessage(panel, { type: "deleteSession", slot: 2 })
+      assert.equal(panel._slot, 1, "panel binding untouched")
+      assert.ok(loadSlot(tmp, 2), "target slot file must remain — guard rejected the delete")
+      await turn
+    } finally {
+      server.close()
+    }
+  })
+})

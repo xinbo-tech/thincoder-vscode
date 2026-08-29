@@ -21,7 +21,7 @@ export const readImageTool = {
     "Use this to view screenshots, UI mockups, diagrams, or any visual content. " +
     "The model only sees images through this tool — it cannot 'see' files directly. " +
     "Supports png, jpg, gif, webp. svg files are returned as text source (no vision API accepts svg). " +
-    "Note: only works with models that support vision input (Kimi K3, Qwen3.7, MiniMax M3).\n" +
+    "Note: only works with models that support vision input (Kimi K3, Qwen3.8, MiniMax M3, GLM-5.3-Flash).\n" +
     "Parameters:\n" +
     "- path (required): Image file path",
   parameters: {
