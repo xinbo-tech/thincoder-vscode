@@ -12,6 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **METHODOLOGY 三缺口修复**（与 CLI 0.12.50 同步）：需求文档三层结构落地（总目标/功能用户故事/非功能标准）；交付评审补测试文档口径（无覆盖=评审不通过）；METHODOLOGY.md 缺失警告点名后果（引用悬空+硬流程失效），删除 "eng tool's write mode" 陈旧指引
 - **工程模式 UI/交互决策全链路落档**（用户报告"agent 无视讨论过的 UI 设计"）：设计文档要素扩项——涉及界面时必须收录与用户达成的每条 UI/交互决策（布局/流程/控件行为/状态反馈），未定标 open 不静默发明；eng-coder 任务书必须复述这些决策（或指向设计文档具体章节）——子代理零上下文，留在聊天里的决策永远到不了它；`eng-coder.md` 执行侧闭合——缺失的界面决策停下报告，不自行发明。与 CLI 0.12.50 byte-identical
 
 ### Tests

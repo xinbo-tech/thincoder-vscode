@@ -706,6 +706,7 @@ describe("advisor guard loop pushback (2026-08-21 semantic refactor)", () => {
 // 两端 15 文件比对断言在 CLI 侧（thincoder/test/agent.test.mjs）。
 
 const PROMPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "prompts")
+const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "src")
 
 describe("prompt borrowing increments (kimi-code comparison)", () => {
   it("explore.md: Thoroughness levels — three levels with default", () => {
@@ -789,6 +790,31 @@ describe("pre-work plan confirmation discipline", () => {
     assert.ok(text.includes("UI/interaction: implement exactly what the task brief and design doc state"), "follow-the-brief clause")
     assert.ok(text.includes("stop and report the gap"), "missing-decision → stop and report")
     assert.ok(text.includes("do not invent your own interaction design"), "self-invention blocked")
+  })
+
+  it("methodology-template.md: requirements doc carries the three layers (2026-08-29 dangling-reference fix)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "methodology-template.md"), "utf8")
+    assert.ok(text.includes("three layers"), "three-layer structure named")
+    assert.ok(text.includes("Overall goal"), "layer 1: overall goal")
+    assert.ok(text.includes("Functional user stories"), "layer 2: functional user stories")
+    assert.ok(text.includes("Non-functional standards"), "layer 3: non-functional standards")
+    assert.ok(text.includes("concrete enough to design against"), "doneness criterion present")
+    assert.ok(text.includes("traces back to a user story"), "design acceptance criteria trace to stories")
+  })
+
+  it("engineering.md: METHODOLOGY test document is part of the delivery review (2026-08-29 test-doc alignment)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "engineering.md"), "utf8")
+    assert.ok(text.includes("METHODOLOGY test document is part of the delivery"), "test-doc required at delivery")
+    assert.ok(text.includes("normal / edge / error"), "coverage triple named")
+    assert.ok(text.includes("a delivery without\n   its test coverage fails the review"), "missing coverage fails the review")
+  })
+
+  it("setup-reminders: METHODOLOGY-missing warning names the consequence, not just absence (2026-08-29)", () => {
+    const text = readFileSync(join(SRC_DIR, "agent", "setup-reminders.mjs"), "utf8")
+    assert.ok(text.includes("every 'per METHODOLOGY' reference in the engineering prompt is dangling"), "dangling-reference consequence named")
+    assert.ok(text.includes("three-document hard flow"), "hard-flow consequence named")
+    assert.ok(text.includes("Ask the user whether to create METHODOLOGY.md"), "recovery path: ask the user")
+    assert.ok(!text.includes("eng tool's write mode"), "stale VS Code-specific scaffold pointer removed")
   })
 })
 // ─── Workflow/Debugging 必须用 task（2026-08-23）───

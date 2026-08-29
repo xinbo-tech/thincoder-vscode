@@ -38,10 +38,10 @@ export function pushModeReminders(history, { depth, freshMachineLine, getAuto, r
   if (engPromptActive && (engResult.templateMissing || engResult.methodologyMissing)) {
     const warnings = []
     if (engResult.templateMissing) warnings.push(`Engineering template (${role === "eng-coder" ? "engineering-sub.md" : "engineering.md"}) not found — the full engineering constraints may be incomplete.`)
-    if (engResult.methodologyMissing) warnings.push("METHODOLOGY.md not found — project-specific rules are absent.")
+    if (engResult.methodologyMissing) warnings.push("METHODOLOGY.md not found in the project root — no project methodology is loaded, so every 'per METHODOLOGY' reference in the engineering prompt is dangling and the three-document hard flow (requirements / design / test doc) is NOT enforced. Ask the user whether to create METHODOLOGY.md (scaffold: run `eng` guidance or copy the built-in methodology-template.md) before designing.")
     history.push({
       role: "user",
-      content: `[System reminder: ENGINEERING MODE is active but ${warnings.join(" ")} Create METHODOLOGY.md and engineering.md via the eng tool's write mode to load them.]`,
+      content: `[System reminder: ENGINEERING MODE is active but ${warnings.join(" ")}]`,
     })
   }
 }
