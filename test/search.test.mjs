@@ -12,7 +12,8 @@ before(async () => {
   setupWebview()
   globalThis.acquireVsCodeApi = () => ({})
   // 修复 3 观察点：统计 scrollIntoView 调用次数（真实浏览器该调用触发强制布局）
-  Element.prototype.scrollIntoView = () => { _scrollCalls++ }
+  // globalThis.Element：happy-dom 注册的全局 Element（lint no-undef 在 node 环境不识别 DOM 全局）
+  globalThis.Element.prototype.scrollIntoView = () => { _scrollCalls++ }
   const state = await import("../webview/state.js")
   ctx = state.ctx
   await import("../webview/search.js")

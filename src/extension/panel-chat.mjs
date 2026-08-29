@@ -51,7 +51,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   panel._turnActive = true
   const turnSlot = ensureSlot(panel)
   const distillSlot = turnSlot
-  let isFirstMessage = false // assigned inside the try (needs the loaded lines)
+  let isFirstMessage // assigned inside the try (needs the loaded lines); read after finally
   try {
 
   // Async distillation mount point (SEND-STALL-DISTILL): the distill promise survives across
