@@ -4,6 +4,17 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.6] — 2026-08-30
+
+### Changed
+
+- **会话人读线落盘瘦身（与 CLI 0.12.51 同款 `slimForDisplay`）**：`saveLines` 写入时对人类线 `history` 做 copy-on-write 映射——tool args 截 300 字符、tool 结果截 500、多模态图剥 base64 只留 text part；**机读线（contextHistory）一字不动**（provider 前缀缓存/配对零风险，与 CLI 逐字节同契约）；`historyWindow` 只渲染字符串 content（从不解析 arguments），瘦身后 webview 显示安全
+- **提示词同步**：`engineering.md` / `eng-coder.md` 与 CLI 端 byte-identical（含工程模式 UI/交互决策全链路落档条款、测试文档口径）
+
+### Tests
+
+- 新增 `_saveLines` 瘦身断言：人类线 args 301 / 结果 526 / 图剥除；机器线 args 3000+ / 结果 2000 / 图保留（786/786 全绿）
+
 ## [0.8.5] — 2026-08-29
 
 ### Fixed
