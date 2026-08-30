@@ -53,9 +53,18 @@ async function doInitialize(transport, _name) {
   if (initResp.error) throw new Error(`initialize error: ${initResp.error.message}`)
   transport.notify?.("notifications/initialized", {})
 
-  const toolsResp = await transport.send("tools/list", {})
-  if (toolsResp.error) throw new Error(`tools/list failed: ${toolsResp.error.message}`)
-  return toolsResp.result?.tools ?? []
+  // 2026-08-31 MCP 会诊 P6：tools/list 分页被忽略（nextCursor 多页工具静默丢失）——
+  // 循环跟随 cursor 直到 server 不再返回（上限 20 页防死循环）。
+  const tools = []
+  let cursor
+  for (let page = 0; page < 20; page++) {
+    const toolsResp = await transport.send("tools/list", cursor ? { cursor } : {})
+    if (toolsResp.error) throw new Error(`tools/list failed: ${toolsResp.error.message}`)
+    tools.push(...(toolsResp.result?.tools ?? []))
+    cursor = toolsResp.result?.nextCursor
+    if (!cursor) break
+  }
+  return tools
 }
 
 // ─── Server registry ────────────────────────────────────────────
@@ -78,18 +87,28 @@ export async function mcpConnect(config) {
 
   const serverName = config.name || (config.command ? config.command : (config.wsUrl || config.url))
 
-  // Idempotent: reuse an existing connection with the same server name.
+  // Idempotent: reuse an existing LIVE connection with the same server name.
+  // 2026-08-31 MCP 会诊 P3：原实现同名即复用——server 进程崩溃或 config 变更
+  // （url/command/args/env）后每 turn 展开的工具全部 "MCP connection closed" 且无法自愈。
+  // 现在复用前做 transport liveness 检查 + config 指纹比对（不一致即断开重连）。
+  const configFingerprint = JSON.stringify([config.command ?? null, config.args ?? null, config.url ?? null, config.wsUrl ?? null, config.env ?? null, config.headers ?? null])
   for (const [id, s] of _servers) {
     if (s.serverName === serverName) {
-      return {
-        id,
-        serverName,
-        tools: s.tools.map((t) => ({
-          name: t.name,
-          description: t.description ?? `MCP tool: ${t.name}`,
-          inputSchema: t.inputSchema ?? { type: "object", properties: {} },
-        })),
+      const sameConfig = s.configFingerprint === configFingerprint
+      if (s.transport.isAlive?.() && sameConfig) {
+        return {
+          id,
+          serverName,
+          tools: s.tools.map((t) => ({
+            name: t.name,
+            description: t.description ?? `MCP tool: ${t.name}`,
+            inputSchema: t.inputSchema ?? { type: "object", properties: {} },
+          })),
+        }
       }
+      // 死连接或配置变更：断开旧连接，走全新连（下方新建 transport）
+      try { s.transport.close() } catch { /* ignore */ }
+      _servers.delete(id)
     }
   }
 
@@ -105,13 +124,14 @@ export async function mcpConnect(config) {
       // Server doesn't support GET SSE — degrade to pure Streamable HTTP POST mode
     }
   } else {
-    transport = stdioTransport(config.command, config.args ?? [])
+    // 2026-08-31 MCP 会诊 P3：配置 env 此前被静默丢弃（stdioTransport 签名无 env 参数）
+    transport = stdioTransport(config.command, config.args ?? [], config.env)
   }
 
   try {
     const mcpTools = await doInitialize(transport, serverName)
     const id = `mcp-${++_serverSeq}`
-    _servers.set(id, { transport, tools: mcpTools, config, serverName })
+    _servers.set(id, { transport, tools: mcpTools, config, configFingerprint, serverName })
     return {
       id,
       serverName,
@@ -134,25 +154,52 @@ export async function mcpConnect(config) {
  */
 export function buildMcpTools(server) {
   const prefix = server.config?.name ? `${server.config.name}_` : "mcp_"
-  return server.tools.map((t) => ({
-    name: sanitizeToolName(prefix + t.name),
-    description: t.description ?? `MCP tool: ${t.name}`,
-    parameters: t.inputSchema ?? { type: "object", properties: {} },
-    readonly: false,
-    async execute(args, ctx) {
-      // 2026-08-31 会诊 #11：MCP tools/call 必须响应上层 signal——MCP server（ws/http/stdio）
-      // 挂死时用户 Stop 要能中断 turn；原实现 send 无 abort 也无超时，整个 turn 卡死。
-      const send = server.transport.send("tools/call", { name: t.name, arguments: args })
-      const resp = await sendWithSignal(send, ctx?.signal)
-      if (resp.error) throw new Error(`MCP tool "${t.name}": ${resp.error.message}`)
-      const content = resp.result?.content ?? []
-      return content
-        .map((c) => (c.type === "text" ? c.text : c.type === "resource" ? `[resource: ${c.resource?.uri}]` : JSON.stringify(c)))
-        .join("\n") || "(no output)"
-    },
-    _mcpTransport: server.transport,
-    _mcpName: server.config?.name,
-  }))
+  // 2026-08-31 MCP 会诊 P6：sanitize 后碰撞/空名无防御（原同名静默覆盖、全特殊字符产出空名）
+  // ——去重（追加 _2/_3）+ 空名跳过；schema/description 类型守卫（畸形直接回退默认）。
+  const seen = new Set()
+  const out = []
+  for (const t of server.tools) {
+    const rawName = sanitizeToolName(prefix + t.name)
+    if (!rawName || rawName === "mcp_") continue // 空名/纯前缀跳过
+    let name = rawName
+    for (let n = 2; seen.has(name); n++) name = `${rawName}_${n}`
+    seen.add(name)
+    out.push({
+      name,
+      description: typeof t.description === "string" ? t.description : `MCP tool: ${t.name}`,
+      parameters: (t.inputSchema && typeof t.inputSchema === "object") ? t.inputSchema : { type: "object", properties: {} },
+      readonly: false,
+      async execute(args, ctx) {
+        // 2026-08-31 会诊 #11：MCP tools/call 响应上层 signal（send 第 3 参做底层取消：
+        // pending 即刻作废 + cancelled 通知，原实现等满 CALL_TIMEOUT_MS）
+        const send = server.transport.send("tools/call", { name: t.name, arguments: args }, ctx?.signal)
+        const resp = await sendWithSignal(send, ctx?.signal)
+        if (resp.error) throw new Error(`MCP tool "${t.name}": ${resp.error.message}`)
+        // P6/P9 防御：isError 必须 throw（错误文本不等于成功输出）；content 非数组/元素非对象防御；
+        // 输出截断（MCP server 回 10MB 会撑爆上下文）
+        if (resp.result?.isError) throw new Error(`MCP tool "${t.name}": ${extractMcpText(resp.result.content) || "(server reported an error)"}`)
+        return truncateMcpOutput(extractMcpText(resp.result?.content ?? [])) || "(no output)"
+      },
+      _mcpTransport: server.transport,
+      _mcpName: server.config?.name,
+    })
+  }
+  return out
+}
+
+/** MCP content 数组 → 文本（P9：非数组/元素非对象防御）。 */
+function extractMcpText(content) {
+  if (!Array.isArray(content)) return typeof content === "string" ? content : JSON.stringify(content)
+  return content
+    .filter((c) => c && typeof c === "object")
+    .map((c) => (c.type === "text" ? c.text : c.type === "resource" ? `[resource: ${c.resource?.uri}]` : JSON.stringify(c)))
+    .join("\n")
+}
+
+/** 输出截断（P6：32KB 上限，防 server 回 10MB 撑爆上下文）。 */
+function truncateMcpOutput(text) {
+  if (text.length <= 32_000) return text
+  return text.slice(0, 32_000) + "\n[… truncated: " + (text.length - 32_000) + " chars omitted]"
 }
 
 /**
@@ -163,16 +210,21 @@ export function buildMcpTools(server) {
 export async function connectMcpServersExpanded(configs) {
   const tools = []
   const warnings = []
-  for (const cfg of configs) {
-    try {
-      const client = await mcpConnect(cfg)
-      const server = _servers.get(client.id)
-      if (server) tools.push(...buildMcpTools(server))
-    } catch (e) {
+  // 2026-08-31 MCP 会诊 P4（vscode-only）：原串行 for-await——N 个慢 server 顺延
+  // N×INIT_TIMEOUT_MS；改并行（保持逐 server 失败隔离，与 CLI ensureMcpServers 一致）。
+  const settled = await Promise.allSettled(configs.map(async (cfg) => {
+    const client = await mcpConnect(cfg)
+    const server = _servers.get(client.id)
+    return server ? buildMcpTools(server) : []
+  }))
+  settled.forEach((r, i) => {
+    if (r.status === "fulfilled") tools.push(...r.value)
+    else {
+      const cfg = configs[i]
       const label = cfg.name || cfg.command || cfg.url || cfg.wsUrl || "(unnamed)"
-      warnings.push(`MCP server "${label}" failed to connect: ${e.message}`)
+      warnings.push(`MCP server "${label}" failed to connect: ${r.reason?.message ?? String(r.reason)}`)
     }
-  }
+  })
   return { tools, warnings }
 }
 
@@ -206,18 +258,8 @@ export async function mcpCallTool(client, toolName, args) {
 
   const resp = await server.transport.send("tools/call", { name: toolName, arguments: args ?? {} })
   if (resp.error) throw new Error(`MCP tool "${toolName}": ${resp.error.message}`)
-  const content = resp.result?.content ?? []
-  return (
-    content
-      .map((c) =>
-        c.type === "text"
-          ? c.text
-          : c.type === "resource"
-            ? `[resource: ${c.resource?.uri}]`
-            : JSON.stringify(c),
-      )
-      .join("\n") || "(no output)"
-  )
+  if (resp.result?.isError) throw new Error(`MCP tool "${toolName}": ${extractMcpText(resp.result.content) || "(server reported an error)"}`)
+  return extractMcpText(resp.result?.content ?? []) || "(no output)"
 }
 
 /**

@@ -7,7 +7,19 @@
  * unavailable.
  */
 
-import { rpcId, withTimeout, CALL_TIMEOUT_MS, ENDPOINT_WAIT_MS } from "./utils.mjs"
+import { rpcId, withTimeout, CALL_TIMEOUT_MS, ENDPOINT_WAIT_MS, INIT_TIMEOUT_MS } from "./utils.mjs"
+
+/** AbortSignal.any fallback（vscode 引擎 Node 18 无 any——2026-08-31 MCP 会诊 P4）。
+ *  fetch 的 signal 只认单一 signal：包装一个 AbortController，任一输入 abort 即触发。 */
+function anySignal(signals) {
+  const ctrl = new AbortController()
+  for (const s of signals) {
+    if (!s) continue
+    if (s.aborted) { ctrl.abort(s.reason); return ctrl.signal }
+    s.addEventListener("abort", () => ctrl.abort(s.reason), { once: true })
+  }
+  return ctrl.signal
+}
 
 export function httpTransport(baseURL, extraHeaders = {}) {
   const url = baseURL.replace(/\/+$/, "")
@@ -60,10 +72,12 @@ export function httpTransport(baseURL, extraHeaders = {}) {
     if (closed) return
     abortController?.abort()
     abortController = new AbortController()
+    // 2026-08-31 MCP 会诊 P4：GET SSE 无超时（vscode-only）——服务器接受 TCP 但永不
+    // 响应头时 await fetch 永久挂起。CLI 端已有 AbortSignal.any 超时，此处用 polyfill 对齐。
     const resp = await fetch(url, {
       method: "GET",
       headers: { Accept: "text/event-stream", ...extraHeaders },
-      signal: abortController.signal,
+      signal: anySignal([abortController.signal, AbortSignal.timeout(INIT_TIMEOUT_MS)]),
     })
     if (!resp.ok) throw new Error(`SSE connect failed: HTTP ${resp.status}`)
     const eventSource = parseSSE(resp)
@@ -125,30 +139,52 @@ export function httpTransport(baseURL, extraHeaders = {}) {
       }).finally(() => pending.delete(id))
     }
 
-    const resp = await fetch(postUrl, {
-      method: "POST",
-      headers: headers(),
-      body,
-      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
-    })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-
-    const ct = resp.headers.get("content-type") ?? ""
-    const newSessionId = resp.headers.get("Mcp-Session-Id")
-    if (newSessionId) sessionId = newSessionId
-
-    if (ct.includes("text/event-stream")) {
-      const sse = parseSSE(resp)
-      for await (const { data } of sse) {
-        try {
-          const msg = JSON.parse(data)
-          if (msg.id === id) return msg
-        } catch { /* skip */ }
-      }
-      return { id, error: { code: -32000, message: "No JSON-RPC response in SSE stream" } }
-    }
-
-    return resp.json()
+    // 2026-08-31 MCP 会诊 P4：Streamable HTTP 规范路径（POST→202→GET SSE 回包）。
+    // 原实现非 legacy 分支从不注册 pending：202 空 body → resp.json() 抛 SyntaxError，
+    // SSE 流里 pending.get(id) 永远 miss——每次调用挂满 120s。
+    // 统一：先注册 pending，POST 直接 body / SSE / 202 等待三通道均经 pending resolve。
+    return new Promise((resolve) => {
+      pending.set(id, resolve)
+      fetch(postUrl, { method: "POST", headers: headers(), body, signal: AbortSignal.timeout(CALL_TIMEOUT_MS) })
+        .then(async (resp) => {
+          const ct = resp.headers.get("content-type") ?? ""
+          const newSessionId = resp.headers.get("Mcp-Session-Id")
+          if (newSessionId) sessionId = newSessionId
+          if (resp.status === 202) return // 已接受——响应经 GET SSE 流回，pending 保持
+          if (!resp.ok) {
+            pending.delete(id)
+            resolve({ id, error: { code: -32000, message: `HTTP ${resp.status}` } })
+            return
+          }
+          if (ct.includes("text/event-stream")) {
+            try {
+              for await (const { data } of parseSSE(resp)) {
+                try {
+                  const msg = JSON.parse(data)
+                  if (msg.id === id) { pending.delete(id); resolve(msg); return }
+                } catch { /* skip */ }
+              }
+              pending.delete(id)
+              resolve({ id, error: { code: -32000, message: "No JSON-RPC response in SSE stream" } })
+            } catch (e) {
+              pending.delete(id)
+              resolve({ id, error: { code: -32000, message: `SSE response failed: ${e.message}` } })
+            }
+            return
+          }
+          pending.delete(id)
+          try {
+            resolve(await resp.json())
+          } catch (e) {
+            resolve({ id, error: { code: -32000, message: `invalid JSON body: ${e.message}` } })
+          }
+        })
+        .catch((e) => {
+          if (pending.delete(id)) {
+            resolve({ id, error: { code: -32000, message: `POST failed: ${e.message}` } })
+          }
+        })
+    }).finally(() => pending.delete(id))
   }
 
   const send = async (method, params) => withTimeout(postRequest(method, params), CALL_TIMEOUT_MS)
