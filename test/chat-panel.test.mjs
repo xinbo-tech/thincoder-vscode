@@ -42,6 +42,35 @@ describe("ChatPanel._saveLines — display cleared (CLI resume parity)", () => {
     assert.deepEqual(data.display, [], "display must be cleared (CLI falls back to history)")
   })
 
+  it("slims the human line on save but keeps the machine line full (CLI parity, 2026-08-30)", async () => {
+    const { ChatPanel } = await import("../src/extension/chat-panel.mjs")
+    const panel = new ChatPanel({
+      globalStorageUri: { fsPath: tmp },
+      workspaceState: { get: () => undefined, update: async () => {} },
+      subscriptions: [],
+    })
+    const bigArgs = JSON.stringify({ code: "x".repeat(3000) })
+    const bigResult = "out " + "y".repeat(2000)
+    const full = [
+      { role: "user", content: "看图" },
+      { role: "assistant", content: "", tool_calls: [{ id: "t1", function: { name: "execute", arguments: bigArgs } }] },
+      { role: "tool", tool_call_id: "t1", content: bigResult },
+      { role: "user", content: [{ type: "text", text: "[read_image: a.png]" }, { type: "image_url", image_url: { url: "data:image/png;base64," + "Z".repeat(2000) } }] },
+    ]
+    panel._saveLines(full, full, { activeProvider: "deepseek" })
+
+    const data = loadSlot(tmp, 1)
+    const hist = data.history
+    const ctx = data.contextHistory
+    assert.ok(hist[1].tool_calls[0].function.arguments.length <= 301, "human line args trimmed")
+    assert.ok(hist[2].content.length <= 526, "human line tool result trimmed")
+    assert.ok(!JSON.stringify(hist[3].content).includes("base64,"), "human line image dropped to text part")
+    assert.equal(ctx[1].tool_calls[0].function.arguments, bigArgs, "machine line args kept in full")
+    assert.equal(ctx[2].content, bigResult, "machine line tool result kept in full")
+    assert.ok(JSON.stringify(ctx[3].content).includes("base64,"), "machine line image kept in full")
+  })
+
+
   it("clears a PRE-EXISTING stale display (CLI snapshot from before VS Code edits)", async () => {
     const { ChatPanel } = await import("../src/extension/chat-panel.mjs")
     const panel = new ChatPanel({

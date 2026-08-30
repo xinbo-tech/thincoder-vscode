@@ -3,7 +3,7 @@
  * chat-panel.mjs). Every function takes the ChatPanel instance as `panel` and
  * mutates panel._slot / panel._autoApprove exactly like the former methods did.
  */
-import { loadSlot, saveSessionToSlot, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs as loadStoredModelPrefs, historyWindow, listSlots } from "./session-io.mjs"
+import { loadSlot, saveSessionToSlot, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs as loadStoredModelPrefs, historyWindow, listSlots, slimForDisplay } from "./session-io.mjs"
 import { fullStatus } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { stripEditorInjection } from "./editor-context.mjs"
@@ -71,7 +71,11 @@ export function saveLines(panel, fullHistory, contextHistory, extra = {}, slotOv
       version: 2, cwd, updatedAt: Date.now(),
       title: existing.title ?? "",
       activeProvider: extra.activeProvider ?? existing.activeProvider ?? "",
-      history: fullHistory.filter(keepReal), contextHistory: contextHistory.filter(keepMachine),
+      // Human line is slimmed for storage (CLI parity — session-io.slimForDisplay):
+      // the never-compacted human line carried the bulk of session-file size
+      // (tool args JSON / full tool results / base64 images); the machine line
+      // below keeps everything byte-identical for the provider.
+      history: fullHistory.filter(keepReal).map(slimForDisplay), contextHistory: contextHistory.filter(keepMachine),
       // display (the CLI's old WYSIWYG render snapshot) is DEPRECATED — the CLI no
       // longer reads or writes it (restore always rebuilds from history, lazily).
       // Clear it defensively so OLD CLI builds still fall back to history instead

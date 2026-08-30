@@ -128,6 +128,41 @@ export function saveSlot(cwd, n, data) {
   writeFile(slotPath(cwd, n), data)
 }
 
+/** Slim the HUMAN line (history) for storage — CLI parity (CLI session.mjs
+ *  slimForDisplay, 2026-08-30 deepseek-consult design). The machine line
+ *  (contextHistory) must stay byte-identical for the provider prefix cache.
+ *  Copy-on-write ONLY — the two lines share object references via pushReal;
+ *  mutating in place would corrupt the machine line. Rules:
+ *   - assistant.tool_calls[].function.arguments → 300 chars (head + …)
+ *   - tool messages content → 500 chars (head + …)
+ *   - multimodal user content array → keep text parts, DROP image_url base64
+ *   - plain string messages → untouched
+ *  historyWindow only renders string content (never parses arguments), so the
+ *  trimmed shapes are display-safe on the webview side too. */
+export function slimForDisplay(m) {
+  if (m && Array.isArray(m.content)) {
+    const textParts = m.content.filter((p) => p?.type !== "image_url")
+    if (textParts.length === m.content.length) return m
+    return { ...m, content: textParts }
+  }
+  if (m && m.role === "assistant" && Array.isArray(m.tool_calls)) {
+    let changed = false
+    const tool_calls = m.tool_calls.map((tc) => {
+      const args = tc.function?.arguments
+      if (typeof args === "string" && args.length > 300) {
+        changed = true
+        return { ...tc, function: { ...tc.function, arguments: args.slice(0, 300) + "…" } }
+      }
+      return tc
+    })
+    return changed ? { ...m, tool_calls } : m
+  }
+  if (m && m.role === "tool" && typeof m.content === "string" && m.content.length > 500) {
+    return { ...m, content: m.content.slice(0, 500) + "\n… (truncated for storage)" }
+  }
+  return m
+}
+
 /** Delete a slot file. */
 export function deleteSlot(cwd, n) {
   try { unlinkSync(slotPath(cwd, n)) } catch {}

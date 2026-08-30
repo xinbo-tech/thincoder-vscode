@@ -735,6 +735,17 @@ describe("prompt borrowing increments (kimi-code comparison)", () => {
     assert.ok(line.includes("most important acceptance criteria"), line)
     assert.ok(line.includes("Wait for confirmation"), "rest of the sentence preserved")
   })
+
+  it("system.md: confirmed doc IS the contract — no silent mid-implementation downgrade (2026-08-30)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "system.md"), "utf8")
+    assert.ok(text.includes("This binding is UNCONDITIONAL and does not wait for a formal confirmation round"), "binding is unconditional, no formal round needed")
+    assert.ok(text.includes("every requirement the user states — mid-conversation, in a design doc, or in a confirmed plan — binds the moment it is stated"), "in-conversation requests bind immediately")
+    assert.ok(text.includes("A stated request IS the contract"), "stated request = contract")
+    assert.ok(text.includes("implementation may not quietly shrink it"), "no quiet shrinking")
+    assert.ok(text.includes("implement it anyway and note the cost, or stop and surface the trade-off BEFORE building the reduced version"), "costly elements still get implemented, or surface first")
+    assert.ok(text.includes("Disclosing a downgrade after delivery is not compliance"), "disclose-after is not compliance")
+    assert.ok(text.includes("reported instead of avoided"), "transparency duty prevents, not reports")
+  })
 })
 
 // ─── Pre-work plan confirmation discipline (2026-08-21) ───
@@ -807,6 +818,45 @@ describe("pre-work plan confirmation discipline", () => {
     assert.ok(text.includes("METHODOLOGY test document is part of the delivery"), "test-doc required at delivery")
     assert.ok(text.includes("normal / edge / error"), "coverage triple named")
     assert.ok(text.includes("a delivery without\n   its test coverage fails the review"), "missing coverage fails the review")
+  })
+
+  it("engineering.md: delegation guidance (explore/plan offload + precision exception + parallel exclusion + escalate unavailable)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "engineering.md"), "utf8")
+    assert.ok(text.includes("goes to an `explore` subagent"), "breadth-first exploration delegates to explore")
+    assert.ok(text.includes("quick / medium / thorough"), "thoroughness levels stated")
+    assert.ok(text.includes("never enter your history"), "isolated-context benefit stated")
+    assert.ok(text.includes("about to edit it immediately"), "precision exception present")
+    assert.ok(text.includes("same\n  file — conflicts waste"), "no same-file parallel edits")
+    assert.ok(text.includes("Do NOT redo the exploration you already delegated"), "no redoing delegated exploration")
+    assert.ok(text.includes("`escalate` is unavailable in engineering mode"), "escalate unavailable (matches setup.mjs fail-closed)")
+    assert.ok(text.includes("`consult` stays available"), "consult remains available")
+  })
+
+  it("engineering.md: first-delivery divergence audit + eng-coder fix round (2026-08-30)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "engineering.md"), "utf8")
+    assert.ok(text.includes("7. **Divergence audit"), "flow step 7 = divergence audit (automatic node)")
+    assert.ok(text.includes("do NOT go straight to the delivery review"), "first delivery does not go straight to the delivery review")
+    assert.ok(text.includes("spawn an `explore` subagent"), "audit runs via an explore subagent")
+    assert.ok(text.includes("silent simplifications"), "audit names silent simplifications")
+    assert.ok(text.includes("SECOND time with the\n     divergence list as the task brief"), "divergences → eng-coder second fix round")
+    assert.ok(text.includes("invent nothing new"), "fix round invents nothing new (audit report IS the task)")
+    assert.ok(text.includes("verify the\n     divergence list point by point"), "fix-round delivery verified point by point")
+    assert.ok(text.includes("First delivery audit"), "work-loop state table carries the audit state")
+  })
+
+  it("eng-coder.md: full-design fidelity — no silent degradation (2026-08-30)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "eng-coder.md"), "utf8")
+    assert.ok(text.includes("Implement to the full design — no silent degradation"), "positive prohibition present")
+    assert.ok(text.includes("implement it anyway and note the cost"), "costly elements still get implemented")
+    assert.ok(text.includes("A \"simpler\n  approximation\" of a specified behavior IS a deviation"), "approximation = deviation")
+    assert.ok(text.includes("BEFORE coding —\n  never ship a reduced version and disclose it afterwards"), "surface first, never disclose-after")
+    assert.ok(text.includes("the parent approved the design, not your\n  discount"), "approved the design, not the discount")
+  })
+
+  it("eng-coder.md: final-review item 6 — structural snapshot sync (2026-08-30)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "eng-coder.md"), "utf8")
+    assert.ok(text.includes("6. Update the affected design-doc sections"), "final-review item 6 present")
+    assert.ok(text.includes("module map / affected-files table"), "module map / affected-files table named")
   })
 
   it("setup-reminders: METHODOLOGY-missing warning names the consequence, not just absence (2026-08-29)", () => {
