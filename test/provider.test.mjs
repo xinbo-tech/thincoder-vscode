@@ -376,6 +376,106 @@ function createMockResponse(sseLines) {
   }
 }
 
+// ─── 2026-08-31 vscode 会诊鲁棒性修复 ───────────────────────────
+
+describe("2026-08-31 会诊：非 SSE 降级 / BOM / 多行 data / reasoning 方言", () => {
+  it("非 SSE 完整 chat.completion（message 形态）读到内容（会诊 #3）", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const jsonBody = JSON.stringify({
+      id: "x", object: "chat.completion", model: "m",
+      choices: [{ index: 0, message: { role: "assistant", content: "完整回复" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    })
+    const tokens = []
+    const result = await parseStream({
+      body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(jsonBody)); c.close() } }),
+      ok: true,
+      headers: new Map([["content-type", "application/json"]]),
+      text: async () => jsonBody,
+    }, { onToken: (t) => tokens.push(t), onReasoning: () => {} })
+    assert.equal(result.content, "完整回复", "message 形态 content 必须读出")
+    assert.deepEqual(tokens, ["完整回复"])
+    assert.equal(result.finishReason, "stop")
+  })
+
+  it("SSE body + content-type 缺失/未知时走流路径不误伤（unknown 回退）", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const sse = [
+      'data: {"choices":[{"delta":{"content":"hi"}}]}\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n',
+      "data: [DONE]\n",
+    ]
+    const result = await parseStream({
+      body: new ReadableStream({
+        start(c) { for (const l of sse) c.enqueue(new TextEncoder().encode(l)); c.close() },
+      }),
+      ok: true,
+      headers: new Map(), // 无 content-type（advisor mock 同款）
+    }, { onToken: () => {}, onReasoning: () => {} })
+    assert.equal(result.content, "hi", "无 content-type 的 SSE body 必须走流解析")
+  })
+
+  it("BOM 首 chunk 不吞事件 + 多行 data 拼接（会诊 #7/#8）", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const lines = [
+      "\uFEFFdata: " + JSON.stringify({ choices: [{ delta: { content: "先" } }] }) + "\n",
+      "data: " + JSON.stringify({ choices: [{ delta: { content: "后" } }] }) + "\n",
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n',
+      "data: [DONE]\n",
+    ]
+    const tokens = []
+    const result = await parseStream(createMockResponse(lines), {
+      onToken: (t) => tokens.push(t), onReasoning: () => {},
+    })
+    assert.equal(result.content, "先后")
+    assert.equal(result.finishReason, "stop")
+  })
+
+  it("reasoning 方言：delta.reasoning 而非 reasoning_content（会诊 #9）", async () => {
+    const { parseStream } = await import("../src/provider/transports/openai.mjs")
+    const lines = [
+      'data: {"choices":[{"delta":{"reasoning":"思考中","content":"正文"}}]}\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n',
+    ]
+    let seen = ""
+    const result = await parseStream(createMockResponse(lines), {
+      onToken: () => {}, onReasoning: (r) => { seen += r },
+    })
+    assert.equal(result.reasoning, "思考中")
+    assert.equal(seen, "思考中")
+  })
+})
+
+describe("2026-08-31 会诊：Retry-After / rateGate 超预算 / listModels 兜底", () => {
+  it("parseRetryAfter：秒数/HTTP-date + 300s 上限（会诊 #5）", async () => {
+    const { parseRetryAfter } = await import("../src/provider.mjs")
+    assert.equal(parseRetryAfter("42", 0), 42_000)
+    assert.equal(parseRetryAfter("1200", 0), 300_000, "超上限钳到 300s")
+    assert.equal(parseRetryAfter(null, 2), 60_000, "缺失头退回退避表第 3 档")
+    assert.equal(parseRetryAfter("garbage", 0), 15_000, "非法退回第 1 档")
+    const future = new Date(Date.now() + 65_000).toUTCString()
+    const ms = parseRetryAfter(future, 0)
+    assert.ok(ms >= 64_000 && ms <= 65_500, `HTTP-date：${ms}ms ≈ 65s`)
+  })
+
+  it("rateGate 单请求超 tpm 告警且不死等（会诊 #4）", async () => {
+    const { rateGate, _rateHooks } = await import("../src/provider/rate.mjs")
+    const waits = []
+    const orig = _rateHooks.sleep
+    _rateHooks.sleep = async (ms) => { waits.push(ms) }
+    try {
+      const warned = []
+      const provider = { baseURL: "https://x", apiKey: "k", tpm: 100, rpm: null }
+      await rateGate(provider, 5000, (w) => warned.push(w), undefined)
+      assert.ok(warned.some((w) => w.phase === "warn" && /estimated 5000 tokens > tpm 100/.test(w.message)), "超预算必须告警")
+      assert.equal(waits.length, 0, "单请求超预算不得睡窗口（原实现死循环）")
+    } finally {
+      _rateHooks.sleep = orig
+    }
+  })
+})
+
+
 // ─── Abort-aware sleeps (Stop during retry backoff / rate waits) ───
 
 describe("abortableSleep", () => {

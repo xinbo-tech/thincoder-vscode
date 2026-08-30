@@ -157,19 +157,30 @@ export async function parseStream(response, { onToken, onReasoning, signal }) {
     return e
   }
 
+  /** 逐事件处理（2026-08-31 会诊 #8 多行 data 拼接：按空行分事件，事件内 data 行按 SSE 规范 \n 拼接） */
+  const processDataLines = (lines) => {
+    let currentData = ""
+    for (const line of lines) {
+      if (line.startsWith("data:")) {
+        const v = line.slice(5).trim()
+        if (v === "[DONE]") { currentData = ""; continue }
+        currentData = currentData ? currentData + "\n" + v : v
+        continue
+      }
+      if (line === "" && currentData) { processData(currentData); currentData = "" }
+    }
+    if (currentData) processData(currentData)
+  }
+
   const readLoop = async () => {
     for await (const chunk of response.body) {
       if (signal?.aborted) throw abortErr()
       buffer += decoder.decode(chunk, { stream: true })
+      // BOM 剥除（2026-08-31 会诊 #7）：首 chunk 可带 \uFEFF，否则首个 data 事件被静默丢弃
+      if (buffer.charCodeAt(0) === 0xfeff) buffer = buffer.slice(1)
       const lines = buffer.split("\n")
       buffer = lines.pop()
-
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue
-        const data = line.slice(5).trim()
-        if (!data || data === "[DONE]") continue
-        processData(data)
-      }
+      processDataLines(lines)
     }
   }
 
@@ -198,12 +209,7 @@ export async function parseStream(response, { onToken, onReasoning, signal }) {
   }
 
   buffer += decoder.decode()
-  for (const line of buffer.split("\n")) {
-    if (!line.startsWith("data:")) continue
-    const data = line.slice(5).trim()
-    if (!data || data === "[DONE]") continue
-    processData(data)
-  }
+  processDataLines(buffer.split("\n"))
 
   return result
 }

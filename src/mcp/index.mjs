@@ -13,6 +13,26 @@
  *   closeAllMcp() / mcpConnectedNames() / mcpConnectedToolCounts() / mcpDisconnectByName(name)
  */
 
+/** Race a pending MCP request against an abort signal — a hung MCP server must not
+ *  hold the turn hostage. signal absent → passthrough (panel paths have no signal). */
+async function sendWithSignal(promise, signal) {
+  if (!signal) return promise
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      const e = new DOMException("The operation was aborted", "AbortError")
+      e.reason = signal.reason
+      reject(e)
+    }
+    if (signal.aborted) return onAbort()
+    signal.addEventListener("abort", onAbort, { once: true })
+    promise.then(
+      (v) => { signal.removeEventListener("abort", onAbort); resolve(v) },
+      (e) => { signal.removeEventListener("abort", onAbort); reject(e) },
+    )
+  })
+}
+
+
 import { withTimeout, INIT_TIMEOUT_MS, sanitizeToolName } from "./utils.mjs"
 import { stdioTransport } from "./stdio.mjs"
 import { httpTransport } from "./http.mjs"
@@ -119,8 +139,11 @@ export function buildMcpTools(server) {
     description: t.description ?? `MCP tool: ${t.name}`,
     parameters: t.inputSchema ?? { type: "object", properties: {} },
     readonly: false,
-    async execute(args) {
-      const resp = await server.transport.send("tools/call", { name: t.name, arguments: args })
+    async execute(args, ctx) {
+      // 2026-08-31 会诊 #11：MCP tools/call 必须响应上层 signal——MCP server（ws/http/stdio）
+      // 挂死时用户 Stop 要能中断 turn；原实现 send 无 abort 也无超时，整个 turn 卡死。
+      const send = server.transport.send("tools/call", { name: t.name, arguments: args })
+      const resp = await sendWithSignal(send, ctx?.signal)
       if (resp.error) throw new Error(`MCP tool "${t.name}": ${resp.error.message}`)
       const content = resp.result?.content ?? []
       return content

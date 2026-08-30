@@ -64,9 +64,13 @@ function abortError(signal) {
  * body 边收边吐（SSE 流式消费方可逐 chunk 读取）；text() 消费流到底（非流式调用方用）。
  * opts.signal 全程有效：abort 即 destroy socket 并 reject/终止流。
  * absoluteForm: 请求行发绝对 URI（http:// 目标的经典代理转发用），默认发 origin-form。
+ * 2026-08-31 会诊（与 CLI 465b9c3 对齐 #1/#4）：timeout 只覆盖"响应头阶段"；settle 后
+ * body 空闲 > bodyIdleMs 即断流（原实现头部 timer 到齐即清，流式中途停摆会无限挂起）。
+ * 空闲看门狗用 'readable' 而非 'data'——'data' 会切 flowing 模式、抢走消费方未认领的
+ * 已写缓冲（CLI 实测 readableLength=0 定位，分包响应头首段被吞）。
  * 导出供测试（裸 socket，无需 TLS/CONNECT）；生产路径走 tunnelHttps / proxyFetch。
  */
-export function streamHttpResponse(sock, urlStr, opts = {}, timeout = FETCH_TIMEOUT, absoluteForm = false) {
+export function streamHttpResponse(sock, urlStr, opts = {}, timeout = FETCH_TIMEOUT, absoluteForm = false, bodyIdleMs = 120_000) {
   return new Promise((resolve, reject) => {
     const target = new URL(urlStr)
     const method = opts.method ?? "GET"
@@ -78,6 +82,7 @@ export function streamHttpResponse(sock, urlStr, opts = {}, timeout = FETCH_TIME
     const body = new PassThrough()
     let settled = false
     let headerBuf = ""
+    let idleTimer = null
 
     const timer = setTimeout(() => fail(new Error("Response timeout")), timeout)
     const onAbort = () => { sock.destroy(); fail(abortError(signal)) }
@@ -85,6 +90,7 @@ export function streamHttpResponse(sock, urlStr, opts = {}, timeout = FETCH_TIME
 
     function cleanup() {
       clearTimeout(timer)
+      clearTimeout(idleTimer)
       signal?.removeEventListener("abort", onAbort)
     }
     /** 头部阶段失败 reject；resolve 后失败则终止 body 流（for-await 抛出，不挂起） */
@@ -92,6 +98,11 @@ export function streamHttpResponse(sock, urlStr, opts = {}, timeout = FETCH_TIME
       cleanup()
       if (!settled) { settled = true; reject(err) }
       else body.destroy(err)
+    }
+    /** body 阶段空闲看门狗：每次数据到达重置；无数据超时 → 断流（流式消费方抛错） */
+    function armIdle() {
+      clearTimeout(idleTimer)
+      if (bodyIdleMs > 0) idleTimer = setTimeout(() => body.destroy(new Error("Response body timeout (idle)")), bodyIdleMs)
     }
 
     sock.on("data", (d) => {
@@ -113,11 +124,17 @@ export function streamHttpResponse(sock, urlStr, opts = {}, timeout = FETCH_TIME
       sock.removeAllListeners("data")
       settled = true
       cleanup()
+      armIdle()
       const remaining = headerBuf.slice(idx + 4)
       if (remaining) body.write(Buffer.from(remaining, "utf8"))
       sock.pipe(body)
-      // body 结束后才移除 abort 监听（流式中途 abort 要能终止流）
-      body.on("close", () => signal?.removeEventListener("abort", onAbort))
+      // 空闲看门狗随数据到达重置（'readable' 不切 flowing、不抢消费方缓冲，见函数头注记）
+      body.on("readable", armIdle)
+      // body 结束后才移除 abort 监听（流式中途 abort 要能终止流）；空闲看门狗一并清
+      body.on("close", () => {
+        clearTimeout(idleTimer)
+        signal?.removeEventListener("abort", onAbort)
+      })
       signal?.addEventListener("abort", onAbort, { once: true })
 
       resolve({
@@ -156,6 +173,10 @@ export function streamHttpResponse(sock, urlStr, opts = {}, timeout = FETCH_TIME
 /**
  * HTTPS request through HTTP CONNECT proxy tunnel.
  * CONNECT + TLS 建立后交给 streamHttpResponse — 响应头到齐即 resolve，body 为流式。
+ * 2026-08-31 会诊（与 CLI 465b9c3 对齐 #1/#4）：TLS 默认全量证书校验（rejectUnauthorized:true，
+ * opts.insecureTls=true 显式放行——走代理的流量含 API key 不得在未验证链路传输）；
+ * 响应头超时用 opts._headerTimeoutMs（默认 60s，与 CONNECT 建隧道的 15s 分离——
+ * 原实现共用 15s，推理模型 TTFB>15s 即误报 "Response timeout"）。
  */
 export function tunnelHttps(urlStr, opts, proxyUri, timeout = FETCH_TIMEOUT) {
   return new Promise((resolve, reject) => {
@@ -168,6 +189,8 @@ export function tunnelHttps(urlStr, opts, proxyUri, timeout = FETCH_TIMEOUT) {
       return reject(new Error(`Invalid proxy URI: "${proxyUri}" — expected http://host:port`))
     }
     const signal = opts?.signal
+    const headerTimeoutMs = Number.isFinite(opts?._headerTimeoutMs) ? opts._headerTimeoutMs : 60_000
+    const bodyIdleMs = opts?._bodyIdleMs ?? 120_000
 
     if (signal?.aborted) return reject(abortError(signal))
 
@@ -187,12 +210,13 @@ export function tunnelHttps(urlStr, opts, proxyUri, timeout = FETCH_TIMEOUT) {
       if (!statusLine.includes("200")) { sock.destroy(); clearTimeout(timer); return reject(new Error(`Proxy CONNECT: ${statusLine}`)) }
       sock.removeAllListeners("data"); clearTimeout(timer)
 
-      const tlsSock = tlsConnect({ socket: sock, servername: target.hostname, rejectUnauthorized: false, timeout })
+      // 安全默认：TLS 全量校验。企业 MITM/自签代理显式 opts.insecureTls=true 才放行。
+      const tlsSock = tlsConnect({ socket: sock, servername: target.hostname, rejectUnauthorized: opts?.insecureTls !== true })
       if (buf) tlsSock.unshift(Buffer.from(buf))
       tlsSock.on("secureConnect", () => {
         // TLS 之后的请求/响应阶段：abort 交由 streamHttpResponse 接管
         signal?.removeEventListener("abort", onAbort)
-        streamHttpResponse(tlsSock, urlStr, opts, timeout).then(resolve, reject)
+        streamHttpResponse(tlsSock, urlStr, opts, headerTimeoutMs, false, bodyIdleMs).then(resolve, reject)
       })
       tlsSock.on("error", e => { sock.destroy(); reject(e) })
     })
@@ -243,5 +267,7 @@ export async function proxyFetch(urlStr, opts, proxyUri) {
   if (target.protocol === "https:") return tunnelHttps(urlStr, opts, proxyUri)
   // http:// 目标：TCP 直连代理，请求行发绝对 URI（GET http://host/path HTTP/1.1）
   const sock = await tcpConnectProxy(proxyUri, opts?.signal, FETCH_TIMEOUT)
-  return streamHttpResponse(sock, urlStr, opts, FETCH_TIMEOUT, true)
+  const headerTimeoutMs = Number.isFinite(opts?._headerTimeoutMs) ? opts._headerTimeoutMs : FETCH_TIMEOUT
+  const bodyIdleMs = opts?._bodyIdleMs ?? 120_000
+  return streamHttpResponse(sock, urlStr, opts, headerTimeoutMs, true, bodyIdleMs)
 }

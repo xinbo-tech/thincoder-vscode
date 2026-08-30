@@ -133,6 +133,9 @@ export async function parseStream(response, { onToken, onReasoning, signal }) {
     for await (const chunk of response.body) {
       if (signal?.aborted) throw abortErr()
       buffer += decoder.decode(chunk, { stream: true })
+      // BOM 剥除（2026-08-31 会诊 #7）：首 chunk 可带 \uFEFF，否则 message_start 事件
+      //（含 usage）被静默丢弃
+      if (buffer.charCodeAt(0) === 0xfeff) buffer = buffer.slice(1)
       const lines = buffer.split("\n")
       buffer = lines.pop()
 
@@ -144,7 +147,7 @@ export async function parseStream(response, { onToken, onReasoning, signal }) {
           currentData = ""
         } else if (line.startsWith("data: ")) {
           currentData = line.slice(6).trim()
-        } else if (line === "") {
+        } else if (line === "" || line === "\r") { // CRLF 空行是 "\r"（2026-08-31 会诊 #12）
           // Empty line = event separator
           if (currentEvent) processEvent(currentEvent, currentData)
           currentEvent = ""

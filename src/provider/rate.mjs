@@ -108,6 +108,17 @@ export async function rateGate(provider, estimated, onWait, signal) {
   const effectiveTpm = tpm ?? 1_000_000
   const effectiveRpm = rpm ?? 500
 
+  // 2026-08-31 会诊 #4（与 CLI 465b9c3 #16 对齐）：单请求估算已超 tpm 时
+  // `tokens + estimated > effectiveTpm` 恒真 → 原实现无限空转（sleep 10s 循环永不放行）。
+  // 保持放行（睡到窗口再无意义），但明确告警让上层/用户知情。
+  if (estimated > effectiveTpm) {
+    onWait?.({ phase: "warn", message: `estimated ${estimated} tokens > tpm ${effectiveTpm} — request proceeds and may hit a server 429` })
+    const w = ensureWindow(key)
+    w.entries.push({ ts: _rateHooks.now(), tokens: estimated })
+    w.reqCount++
+    return
+  }
+
   const w = ensureWindow(key)
   const now = _rateHooks.now()
   pruneWindow(w, now)

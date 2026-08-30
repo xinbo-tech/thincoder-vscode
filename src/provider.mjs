@@ -192,11 +192,16 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
     )
     result.content += continued.content
     result.reasoning += continued.reasoning ?? ""
+    // 2026-08-31 会诊 #6（与 CLI 465b9c3 #7 对齐）：续写合并时 readSSE 输出的 tc 已
+    // finalize（无 index 字段）——原实现恒 append，provider 重发完整 tc 会把 tool 名
+    // 拼成 "get_weatherget_weather"、arguments 重复。按 id/name 定位已有槽位，name 只设一次。
     for (const tc of continued.toolCalls ?? []) {
-      const idx = tc.index ?? result.toolCalls.length
-      const s = (result.toolCalls[idx] ??= { id: "", name: "", arguments: "" })
-      if (tc.id) s.id = tc.id
-      s.name += tc.name ?? ""
+      if (!tc) continue
+      let s = tc.id ? result.toolCalls.find((x) => x && x.id === tc.id) : undefined
+      if (!s) s = tc.name ? result.toolCalls.find((x) => x && x.name === tc.name) : undefined
+      if (!s) { s = { id: "", name: "", arguments: "" }; result.toolCalls.push(s) }
+      if (tc.id && !s.id) s.id = tc.id
+      if (tc.name && !s.name) s.name = tc.name
       s.arguments += tc.arguments ?? ""
     }
     result.finishReason = continued.finishReason
@@ -228,8 +233,12 @@ export async function listModels(provider, { signal } = {}) {
       const text = await response.text().catch(() => "")
       throw new Error(`GET /models failed ${response.status}: ${text}`)
     }
-    const data = await response.json()
-    return (data.data ?? []).map((m) => m.id).filter(Boolean).sort()
+    // 2026-08-31 会诊 #10：代理/网关返回 HTML 或非 JSON 时 response.json() 抛 SyntaxError
+    // 直接冒到模型下拉框——先 text 再容错解析，失败返回空列表（下拉框自然显示无模型）。
+    const rawText = await response.text().catch(() => "")
+    let data = null
+    try { data = JSON.parse(rawText) } catch { /* non-JSON body → empty list */ }
+    return (data?.data ?? []).map((m) => m.id).filter(Boolean).sort()
   } catch (e) {
     if (e.name === "AbortError") return [] // timeout/silence → empty list
     throw e
@@ -254,6 +263,10 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
         headers,
         body,
         signal: signal ? _anySignal([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) : AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        // 2026-08-31 会诊 #2（与 CLI 465b9c3 #4 对齐）：代理路径响应头超时对齐直连语义——
+        // 原 15s 与直连 600s 割裂，推理模型走代理 TTFB>15s 即误报 "Response timeout"。
+        _headerTimeoutMs: FETCH_TIMEOUT_MS,
+        _bodyIdleMs: 120_000,
       }, provider.proxyUri)
     } catch (error) {
       if (error.name === "AbortError") throw error
@@ -279,11 +292,10 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
     }
     if (isNonRetryableError(response.status, text)) throw new Error(message)
     if (response.status === 429) {
-      const retryAfter = Number(response.headers.get("retry-after"))
-      const waitMs =
-        Number.isFinite(retryAfter) && retryAfter > 0
-          ? retryAfter * 1000
-          : RATE_LIMIT_BACKOFF_MS[Math.min(rateLimitHits++, RATE_LIMIT_BACKOFF_MS.length - 1)]
+      // 2026-08-31 会诊 #5（与 CLI 465b9c3 #11 对齐）：Retry-After 支持秒数/HTTP-date，
+      // 上限 300s——服务端异常头（1 小时级）不得让 CLI 干等。
+      const waitMs = parseRetryAfter(response.headers.get("retry-after"), rateLimitHits)
+      rateLimitHits++
       lastError = new Error(message)
       lastWas429 = true
       if (attempt < MAX_RETRIES) {
@@ -300,6 +312,23 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
   }
   throw lastError
 }
+
+/** Parse Retry-After: 秒数 or HTTP-date；上限 300s（2026-08-31 会诊 #5）— 异常头不得让 CLI 睡数小时。
+ *  header 缺失/非法时退回指数退避表（rateLimitHits 计数取档）。 */
+export function parseRetryAfter(header, rateLimitHits = 0) {
+  const fallback = RATE_LIMIT_BACKOFF_MS[Math.min(rateLimitHits, RATE_LIMIT_BACKOFF_MS.length - 1)]
+  if (header == null) return fallback
+  let waitMs = 0
+  const numeric = Number(header.trim())
+  if (Number.isFinite(numeric) && numeric >= 0) waitMs = numeric * 1000
+  else {
+    const date = Date.parse(header.trim())
+    if (Number.isFinite(date)) waitMs = Math.max(0, date - Date.now())
+  }
+  if (waitMs <= 0) return fallback
+  return Math.min(waitMs, 300_000)
+}
+
 
 /**
  * Detect errors that should NOT be retried — quota, billing, auth, invalid params.

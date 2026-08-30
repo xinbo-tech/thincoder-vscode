@@ -129,38 +129,91 @@ export async function parseStream(response, { onToken, onReasoning, signal }) {
   let buffer = ""
   let hasChoices = false
 
+  // 2026-08-31 会诊（CLI 465b9c3 #3 对齐）：网关无视 stream:true 返回完整 JSON completion
+  // （内容在 choice.message）时，原实现只会抛 "Response is not SSE" 整轮报废。
+  // 触发条件收窄：content-type 明确为 JSON/HTML 等非 event-stream 才拦截（部分 mock/网关
+  // 不设 content-type 但 body 是 SSE——unknown 类型必须走流路径，否则 body 被消费无法回退）。
+  // 注意：此分支消费了 body——要么 return 要么 throw，绝不可回落 readLoop（body 已锁）。
+  const contentType = (response.headers.get("content-type") || "").replace(/;.*$/, "").trim().toLowerCase()
+  if (contentType && !contentType.includes("event-stream")) {
+    const raw = await response.text().catch(() => "")
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        const choice = parsed.choices?.[0]
+        if (choice) {
+          const src = choice.delta ?? choice.message ?? {}
+          result.content = src.content ?? ""
+          result.reasoning = src.reasoning_content ?? src.reasoning ?? ""
+          result.finishReason = choice.finish_reason ?? null
+          result.usage = normalizeUsageCache(parsed.usage ?? null)
+          mergeToolCalls(result, src)
+          if (result.content) onToken?.(result.content)
+          if (result.reasoning) onReasoning?.(result.reasoning)
+          finalizeToolCalls(result)
+          return result
+        }
+      } catch { /* not parseable JSON — error reporting below */ }
+    }
+    let errorMsg = ""
+    try {
+      const parsed = raw ? JSON.parse(raw) : null
+      errorMsg = parsed?.error?.message
+        || parsed?.base_resp?.status_msg
+        || parsed?.detail
+        || parsed?.message
+        || parsed?.msg
+        || (typeof parsed.error === "string" ? parsed.error : "")
+    } catch { /* not JSON */ }
+    if (!errorMsg) errorMsg = `unexpected non-SSE response (${contentType || "unknown"}): ${raw.slice(0, 200)}`
+    throw new Error(`API error: ${errorMsg}`)
+  }
+
   const abortError = () => {
     const e = new DOMException("The operation was aborted", "AbortError")
     e.reason = signal?.reason
     return e
   }
 
-  const processLines = (lines) => {
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue
-      const data = line.slice(5).trim()
-      if (!data || data === "[DONE]") continue
+  /** 处理一个完整 SSE 事件（data 行以 \n 拼接——2026-08-31 会诊 #8/#9/#7：
+   *  多行 data 支持（原逐行 parse 丢后半段）、reasoning 方言（delta.reasoning）、
+   *  BOM 剥除在 readLoop 统一做）。单行事件行为与原本一致。 */
+  const handleEvent = (data) => {
+    if (!data || data === "[DONE]") return
+    let json
+    try { json = JSON.parse(data) } catch { return }
 
-      let json
-      try { json = JSON.parse(data) } catch { continue }
+    if (json.usage) result.usage = normalizeUsageCache(json.usage)
+    const choice = json.choices?.[0]
+    if (!choice) return
+    hasChoices = true
+    if (choice.finish_reason) result.finishReason = choice.finish_reason
 
-      if (json.usage) result.usage = normalizeUsageCache(json.usage)
-      const choice = json.choices?.[0]
-      if (!choice) continue
-      hasChoices = true
-      if (choice.finish_reason) result.finishReason = choice.finish_reason
-
-      const delta = choice.delta ?? {}
-      if (delta.reasoning_content) {
-        result.reasoning += delta.reasoning_content
-        onReasoning?.(delta.reasoning_content)
-      }
-      if (delta.content) {
-        result.content += delta.content
-        onToken?.(delta.content)
-      }
-      mergeToolCalls(result, delta)
+    const delta = choice.delta ?? choice.message ?? {}
+    const rDelta = delta.reasoning_content ?? delta.reasoning
+    if (rDelta) {
+      result.reasoning += rDelta
+      onReasoning?.(rDelta)
     }
+    if (delta.content) {
+      result.content += delta.content
+      onToken?.(delta.content)
+    }
+    mergeToolCalls(result, delta)
+  }
+
+  const processLines = (lines) => {
+    let currentData = ""
+    for (const line of lines) {
+      if (line.startsWith("data:")) {
+        const v = line.slice(5).trim()
+        if (v === "[DONE]") { currentData = ""; continue }
+        currentData = currentData ? currentData + "\n" + v : v
+        continue
+      }
+      if (line === "" && currentData) { handleEvent(currentData); currentData = "" }
+    }
+    if (currentData) handleEvent(currentData)
   }
 
   if (!response.body) throw new Error("No stream response body")
@@ -169,6 +222,8 @@ export async function parseStream(response, { onToken, onReasoning, signal }) {
     for await (const chunk of response.body) {
       if (signal?.aborted) throw abortError()
       buffer += decoder.decode(chunk, { stream: true })
+      // BOM 剥除（2026-08-31 会诊 #7）：首 chunk 可带 \uFEFF，否则首 data 事件被静默丢弃
+      if (buffer.charCodeAt(0) === 0xfeff) buffer = buffer.slice(1)
       const lines = buffer.split("\n")
       buffer = lines.pop()
       processLines(lines)
