@@ -90,6 +90,8 @@ npx @vscode/vsce publish major   # 0.2.0 → 1.0.0
 
 **推荐方式(2026-08-29 机械化,1be4bcf)**:`npm run publish:all` —— 一条命令完成双源发布 + 双源 LIVE 轮询确认(marketplace gallery query + open-vsx API 各自轮询到 version 翻转),任一源未确认即非零退出;`--skip-marketplace` / `--skip-openvsx` 可显式跳过单源(两个都跳则中止)。凭据走 env:`VSCE_PAT` + `OVSX_PAT`。
 
+> **2026-08-31 用户裁定——轮询确认已废止**：Marketplace 与 Open VSX 的新版本都要经审核/病毒扫描队列，上线天然滞后数分钟到更久，**不值得在线等**。发布完成的判定 = **publish 命令本身正确返回**（exit 0、`DONE Published`）；审核队列是平台侧事务，随时间自然消化，无需当场确认。`publish:all` 的 LIVE 轮询随之退役——直接分别跑 `vsce publish` 与 `ovsx publish` 即可，两个都正确返回 = 发布完成。历史教训保留价值：open-vsx 报 "already published" 时先查 API——上一条命令可能**已成功**（本版 0.8.7 实例：60s 超时的 publish 实际已把包发上去，重复 publish 报 already published，API 查询确认 0.8.7 已生效）。
+
 ## 4. 本地验证(不发布)
 
 ```bash
@@ -139,21 +141,23 @@ code --install-extension thincoder-vscode-0.1.0.vsix   # 本地安装验证
 
 ### 发布
 
+**凭据环境变量（权威名）**：`VSCE_PAT`（Marketplace）/ `OVSX_PAT`（Open VSX，格式 `ovsxat_*`）。两变量均已在本机环境配置；CLI 用法 `npx @vscode/vsce publish` / `npx ovsx publish --pat %OVSX_PAT%`（vsce 也可不传 --pat 直接读 VSCE_PAT）。**没有别的别名**——2026-08-31 实测曾误用 `%OPEN_VSX_PAT%` 报 Invalid access token；正确名以本节为准。
+
 ```bash
 cd thincoder-vscode
 
 # 验证 token 对命名空间的发布权限:
-npx ovsx verify-pat xinbo-tech --pat <OVSX-PAT>
+npx ovsx verify-pat xinbo-tech --pat %OVSX_PAT%
 # 成功输出:🚀 PAT valid to publish at xinbo-tech
 
 # 发布(ovsx 已加入 devDependencies):
-npx ovsx publish --pat <OVSX-PAT>          # 现场打包并发布当前版本
-npx ovsx publish thincoder-vscode-0.1.0.vsix --pat <OVSX-PAT>   # 直接发已有 vsix
+npx ovsx publish --pat %OVSX_PAT%          # 现场打包并发布当前版本
+npx ovsx publish thincoder-vscode-0.1.0.vsix --pat %OVSX_PAT%   # 直接发已有 vsix
 ```
 
 - 发布后可查:https://open-vsx.org/extension/xinbo-tech/thincoder-vscode (API:`https://open-vsx.org/api/xinbo-tech/thincoder-vscode`,新版本/搜索索引可能延迟数分钟)
 - `publishedBy` 是发布者的 GitHub 账号(实测:eprom2006),与 marketplace 的 Azure DevOps 身份无关
-- **发布后必须回查 API 确认 `version` 已翻转**(2026-08-29 教训:0.8.4 首次 `ovsx publish` 输出 🚀 但版本进入 inactive 队列——API 仍返回旧版、新版本端点 404,属静默假成功)。轮询 `GET /api/xinbo-tech/thincoder-vscode` 直到 `version` 变为刚发的版本;此时重复 publish 会明确报 "already published, but currently isn't active",只能等队列消化,不可误判为成功后不管
+- **发布后必须回查 API 确认 `version` 已翻转**~~（2026-08-29 教训:0.8.4 首次 `ovsx publish` 输出 🚀 但版本进入 inactive 队列——API 仍返回旧版、新版本端点 404,属静默假成功)。轮询 `GET /api/xinbo-tech/thincoder-vscode` 直到 `version` 变为刚发的版本;此时重复 publish 会明确报 "already published, but currently isn't active",只能等队列消化,不可误判为成功后不管~~ **2026-08-31 用户裁定：不再要求发布后回查/轮询**——新版本经审核队列上线是常态（数分钟到更久），publish 正确返回即发布完成，API 翻转交给时间。回查仅在 publish 报错需要诊断时做一次（如区分 "already published" 是重复发还是上条已成功）。
 - Cursor 用户兜底:任何 vsix 都能在 Cursor 里 "Install from VSIX" 手动安装
 
 ## 6. 发布者职责
@@ -167,4 +171,4 @@ git -c http.proxy=http://10.2.2.112:3128 push github master
 git -c http.proxy=http://10.2.2.112:3128 push github v0.8.6
 ```
 
-- **发布后双源确认(轮询版,首选 `npm run publish:all`)**:marketplace + Open VSX 各自 `version` 已翻转才算完成;open-vsx 报 "already published, but currently isn't active" = 在扫描队列,不可误判为成功。
+- **发布后双源确认(轮询版,首选 `npm run publish:all`)**:~~marketplace + Open VSX 各自 `version` 已翻转才算完成;open-vsx 报 "already published, but currently isn't active" = 在扫描队列,不可误判为成功。~~ **2026-08-31 用户裁定废止轮询**——发布判定 = 两条 publish 命令正确返回(exit 0);两市场审核各有队列,不在线等。仅当 publish 报错（如 Invalid access token）才需要处理；报 "already published" 先查 API 再判断（可能是上一条命令实际已成功的信号，§3 末尾 0.8.7 实例）。
