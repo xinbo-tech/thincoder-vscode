@@ -12,10 +12,10 @@ import { resolve, relative, isAbsolute, sep } from "node:path"
 
 /** Run git and report failure (stderr + exit code) instead of swallowing it.
  *  Used by write ops (commit/push/rm) where runGit's silent "" would masquerade
- *  as success (CLI parity: runGitStrict). */
-function runGitStrict(cwd, cmdArgs) {
+ *  as success (CLI parity: runGitStrict). config = `-c` overrides (proxy). */
+function runGitStrict(cwd, cmdArgs, config = []) {
   try {
-    const out = execFileSync("git", cmdArgs, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim().replace(/\r/g, "")
+    const out = execFileSync("git", [...config, ...cmdArgs], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim().replace(/\r/g, "")
     return { ok: true, out }
   } catch (e) {
     return { ok: false, out: String(e.stdout || "").trim(), err: String(e.stderr || e.message || "").trim() }
@@ -26,6 +26,18 @@ function runGitStrict(cwd, cmdArgs) {
 function validateRef(ref, what = "git ref") {
   if (!/^[A-Za-z0-9._/~^@][A-Za-z0-9._/~^@{}-]*$/.test(ref)) throw new Error(`Invalid ${what}: ${ref}`)
   return ref
+}
+
+/** Normalize args.config into `-c key=value` pairs (git -c overrides, e.g. a proxy). */
+function gitConfigArgs(config) {
+  if (config == null) return []
+  if (!Array.isArray(config)) throw new Error("config must be an array of \"key=value\" strings")
+  const out = []
+  for (const c of config) {
+    if (typeof c !== "string" || !c.trim() || c.includes("\n")) throw new Error(`invalid git -c config entry: ${String(c).slice(0, 60)}`)
+    out.push("-c", c)
+  }
+  return out
 }
 
 /** True when `abs` is inside `root` (handles `..` and cross-drive, which relative()
@@ -66,9 +78,9 @@ async function snapshotBefore(ctx, label) {
 
 /** Run git PRESERVING per-line leading whitespace — porcelain " M"/"M " staged/unstaged markers
  *  are significant (runGit trims the whole output's leading space, corrupting an unstaged-first-line). */
-function runGitRaw(cwd, cmdArgs) {
+function runGitRaw(cwd, cmdArgs, config = []) {
   try {
-    return execFileSync("git", cmdArgs, { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }).replace(/\r/g, "").replace(/\n$/, "")
+    return execFileSync("git", [...config, ...cmdArgs], { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }).replace(/\r/g, "").replace(/\n$/, "")
   } catch (e) {
     return String(e.stdout || "").replace(/\r/g, "")
   }
@@ -84,21 +96,23 @@ export const gitTool = {
     "- 'push'/'fetch'/'pull': sync with remote (remote, ref=branch/tag, tags=true for --tags).\n" +
     "- 'tag'/'branch'/'stash': manage them (tagAction/branchAction/stashAction: list/create/delete/switch, push/pop/list).\n" +
     "- 'checkout'/'restore': switch to ref, or restore a file (path). - 'reset': soft/mixed/hard (hard snapshots first). - 'revert'/'merge'/'cherry-pick': ref.\n" +
-    "- 'checkpoint': snapshots (checkpointAction: list/create/rewind/cat).\n\n" +
-    "**Route to git instead of bash:** `git status`→status, `git log`→log, `git diff`→diff, `git show`→show, `git add`→add, `git rm`→rm, `git commit -m`→commit, `git push <remote> <branch> <tag>`→push, `git tag`→tag, `git branch`→branch, `git checkout`→checkout, `git restore`→restore, `git stash`→stash, `git fetch/pull`→fetch/pull, `git reset`→reset, `git revert`→revert, `git merge`→merge, `git cherry-pick`→cherry-pick.\n\n" +
+    "- 'checkpoint': snapshots (checkpointAction: list/create/rewind/cat).\n" +
+    "- 'ls-remote': light remote-ref check — which refs a remote has (read-only, network). remote=<origin>, ref=<branch/tag> optional; config for a proxy.\n\n" +
+    "**Route to git instead of bash:** `git status`→status, `git log`→log, `git diff`→diff, `git show`→show, `git add`→add, `git rm`→rm, `git commit -m`→commit, `git push <remote> <branch> <tag>`→push, `git tag`→tag, `git branch`→branch, `git checkout`→checkout, `git restore`→restore, `git stash`→stash, `git fetch/pull`→fetch/pull, `git reset`→reset, `git revert`→revert, `git merge`→merge, `git cherry-pick`→cherry-pick, `git ls-remote`→ls-remote.\n\n" +
     "Parameters:\n" +
-    "- action (required): diff / status / log / show / checkpoint / add / rm / commit / push / tag / branch / checkout / restore / stash / fetch / pull / reset / revert / merge / cherry-pick\n" +
+    "- action (required): diff / status / log / show / checkpoint / add / rm / commit / push / tag / branch / checkout / restore / stash / fetch / pull / reset / revert / merge / cherry-pick / ls-remote\n" +
     "- path: (diff/log/add/commit/checkout/restore/rm) file/dir to scope/stage/restore\n" +
     "- ref: (show/diff/checkout/reset/revert/merge/cherry-pick) commit/branch/ref; (push/pull/fetch) branch or tag (space-separated for multiple)\n" +
     "- name: (branch/tag) the branch or tag name — remote: (push/fetch/pull) remote name — tags: (push) push all tags\n" +
     "- workdir: run git in this workspace subdirectory (monorepo / multi-repo). Confined to the workspace. Default: cwd\n" +
+    "- config: (network actions push/fetch/pull/ls-remote) git -c overrides, e.g. [\"http.proxy=http://10.2.2.112:3128\"] for blocked remotes\n" +
     "- staged: (diff/restore) staged copy — count/oneline: (log) — message: (commit/stash) — filter: (read-only) output-line regex\n" +
     "- mode: (reset) soft/mixed/hard — tagAction/branchAction/stashAction: the sub-action\n" +
     "- checkpointAction / checkpointId: (checkpoint) sub-action / snapshot id",
   parameters: {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["diff", "status", "log", "show", "checkpoint", "add", "rm", "commit", "push", "tag", "branch", "checkout", "restore", "stash", "fetch", "pull", "reset", "revert", "merge", "cherry-pick"], description: "diff / status / log / show / checkpoint / add / rm / commit / push / tag / branch / checkout / restore / stash / fetch / pull / reset / revert / merge / cherry-pick" },
+      action: { type: "string", enum: ["diff", "status", "log", "show", "checkpoint", "add", "rm", "commit", "push", "tag", "branch", "checkout", "restore", "stash", "fetch", "pull", "reset", "revert", "merge", "cherry-pick", "ls-remote"], description: "diff / status / log / show / checkpoint / add / rm / commit / push / tag / branch / checkout / restore / stash / fetch / pull / reset / revert / merge / cherry-pick / ls-remote" },
       staged: { type: "boolean", description: "(diff) Show staged changes instead of working tree; (restore) restore the staged copy" },
       path: { type: "string", description: "(diff/log/add/commit/checkout/restore/checkpoint:cat/rewind/rm) File or directory to scope to / stage / restore" },
       ref: { type: "string", description: "(diff/show/checkout/reset/revert/merge/cherry-pick/tag:create/branch:create) Commit/branch/ref; (push/pull/fetch) the branch or tag (space-separated for multiple)" },
@@ -109,6 +123,7 @@ export const gitTool = {
       name: { type: "string", description: "(branch/tag) The branch or tag name (create/delete/switch)" },
       remote: { type: "string", description: "(push/fetch/pull) Remote name (e.g. origin). Default: current upstream" },
       workdir: { type: "string", description: "Run git in this workspace subdirectory (monorepo / multi-repo). Confined to the workspace. Default: cwd" },
+      config: { type: "array", items: { type: "string" }, description: "(network actions: push/fetch/pull/ls-remote) git -c overrides, e.g. [\"http.proxy=http://10.2.2.112:3128\"] for blocked remotes" },
       tags: { type: "boolean", description: "(push) Also push all tags (--tags)" },
       mode: { type: "string", enum: ["soft", "mixed", "hard"], description: "(reset) reset mode — hard snapshots the tree first + needs confirmation" },
       tagAction: { type: "string", enum: ["list", "create", "delete"], description: "(tag) list tags / create one / delete one" },
@@ -133,7 +148,7 @@ export const gitTool = {
    */
   isReadonlyAction(args) {
     if (!args || typeof args.action !== "string") return false
-    if (["diff", "status", "log", "show"].includes(args.action)) return true
+    if (["diff", "status", "log", "show", "ls-remote"].includes(args.action)) return true
     if (args.action === "checkpoint") return ["list", "cat"].includes(args.checkpointAction)
     if (args.action === "tag") return args.tagAction === "list"
     if (args.action === "branch") return args.branchAction === "list"
@@ -143,6 +158,7 @@ export const gitTool = {
 
   /** 内部实现：执行各 action。 */
   async _execute(args, ctx) {
+    // 判断是否只读（供审批过滤用）——ls-remote 是只读网络检查
     // filter 只在只读 action 上生效
     const applyFilter = (text) => {
       if (!args.filter) return text
@@ -154,6 +170,7 @@ export const gitTool = {
         return `filter error: ${e.message}`
       }
     }
+    const cfgArgs = gitConfigArgs(args.config)
 
     switch (args.action) {
       case "diff": {
@@ -234,8 +251,17 @@ export const gitTool = {
         if (args.remote) cmdArgs.push(validateRef(args.remote, "remote"))
         if (args.ref) for (const r of args.ref.split(/\s+/).filter(Boolean)) cmdArgs.push(validateRef(r, "ref"))
         if (args.tags) cmdArgs.push("--tags")
-        const r = runGitStrict(ctx.cwd, cmdArgs)
+        const r = runGitStrict(ctx.cwd, cmdArgs, cfgArgs)
         return r.ok ? (r.out || "(push done)") : `git push failed: ${r.err || r.out || "(no output)"}`
+      }
+      case "ls-remote": {
+        // Lightweight remote-ref check — read-only network action, config for proxy.
+        const cmdArgs = ["ls-remote"]
+        if (args.remote) cmdArgs.push(validateRef(args.remote, "remote"))
+        if (args.ref) for (const r of args.ref.split(/\s+/).filter(Boolean)) cmdArgs.push(validateRef(r, "ref"))
+        const out = runGit(ctx.cwd, cmdArgs, cfgArgs)
+        if (!out) return "(no refs / remote unreachable)"
+        return truncate(applyFilter(out))
       }
       case "add": {
         // Granular staging: stage `path` when given, else all changes (add -A).
@@ -332,14 +358,14 @@ export const gitTool = {
         const cmdArgs = ["fetch"]
         if (args.remote) cmdArgs.push(validateRef(args.remote, "remote"))
         if (args.ref) cmdArgs.push(validateRef(args.ref, "ref"))
-        const r = runGitStrict(ctx.cwd, cmdArgs)
+        const r = runGitStrict(ctx.cwd, cmdArgs, cfgArgs)
         return r.ok ? (r.out || "(fetch complete — no output)") : `git fetch failed: ${r.err || r.out}`
       }
       case "pull": {
         const cmdArgs = ["pull"]
         if (args.remote) cmdArgs.push(validateRef(args.remote, "remote"))
         if (args.ref) cmdArgs.push(validateRef(args.ref, "ref"))
-        const r = runGitStrict(ctx.cwd, cmdArgs)
+        const r = runGitStrict(ctx.cwd, cmdArgs, cfgArgs)
         return r.ok ? (r.out || "(pull complete — no output)") : `git pull failed: ${r.err || r.out}`
       }
       case "reset": {

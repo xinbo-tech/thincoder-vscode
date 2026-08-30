@@ -469,6 +469,7 @@ describe("git — unified tool (CLI parity: action subcommands)", () => {
     assert.ok(gitTool.isReadonlyAction({ action: "diff" }))
     assert.ok(gitTool.isReadonlyAction({ action: "log" }))
     assert.ok(gitTool.isReadonlyAction({ action: "show" }))
+    assert.ok(gitTool.isReadonlyAction({ action: "ls-remote" }))
     assert.ok(gitTool.isReadonlyAction({ action: "checkpoint", checkpointAction: "list" }))
     assert.ok(gitTool.isReadonlyAction({ action: "checkpoint", checkpointAction: "cat" }))
     assert.ok(!gitTool.isReadonlyAction({ action: "rm" }))
@@ -557,6 +558,16 @@ describe("git — unified tool (CLI parity: action subcommands)", () => {
     writeFileSync(join(sub, "x.js"), "1\n")
     execFileSync("git", ["add", "x.js"], { cwd: sub })
     execFileSync("git", ["commit", "-qm", "init"], { cwd: sub })
+
+    // 2026-08-31：ls-remote 读取本地子仓库远端（bare）——不依赖网络；config 数组合法化
+    const bare = join(cwd, "bare.git")
+    execFileSync("git", ["init", "-q", "--bare", bare])
+    execFileSync("git", ["-C", sub, "remote", "add", "origin", bare])
+    execFileSync("git", ["-C", sub, "push", "-q", "origin", "HEAD"])
+    const lsr = await gitTool.execute({ action: "ls-remote", remote: "origin", ref: "HEAD", workdir: "sub" }, ctx())
+    assert.match(lsr, /[0-9a-f]{40}\s+HEAD/, `ls-remote should list the head ref: ${lsr}`)
+    await assert.rejects(() => gitTool.execute({ action: "status", config: "x=y" }, ctx()), /config must be an array/)
+    await assert.rejects(() => gitTool.execute({ action: "status", config: ["x\n--global"] }, ctx()), /invalid git -c config entry/)
 
     const log = await gitTool.execute({ action: "log", workdir: "sub" }, ctx())
     assert.match(log, /init/)

@@ -42,7 +42,8 @@ export const websearchTool = {
     "Search the web. Returns result titles, URLs, and snippets.\n" +
     "Parameters:\n" +
     "- query (required): Search query\n" +
-    "- limit: Max results (default 8)",
+    "- limit: Max results (default 8)\n" +
+    "Notes: Bing's index is noisy for technical queries — if a first search returns irrelevant results, DO NOT retry the same query. Configure a search MCP tool (e.g. glm-websearch) for technical lookups; websearch is the fallback. Call memory_search first — the answer may already be in a previous session.",
   parameters: {
     type: "object",
     properties: {
@@ -118,7 +119,14 @@ export const fetchTool = {
         .replace(/<[^>]+>/g, " ")
         .replace(/\s+/g, " ")
         .trim()
-      return stripped.slice(0, 20000)
+      const hint = stripped.length < 300
+        ? (/unavailable in (your )?region|not available in (your )?region|app-unavailable|enable.?javascript|just a moment|attention required|cf-browser-verification/i.test(text)
+          ? "\n\n[fetch hint: page looks region-blocked or JS-gated (body <300 chars). Try a search MCP tool or the site's .md/raw/mirror endpoint]"
+          : /<div[^>]+id="(app|root)"[^>]*>\s*<\/div>|id="app"|id="root"/i.test(text)
+            ? "\n\n[fetch hint: page is a JS-rendered SPA shell (body <300 chars). Try a search MCP tool or the site's .md/API endpoint]"
+            : "")
+        : ""
+      return stripped.slice(0, 20000) + hint
     } catch (e) {
       return `fetch error: ${e.message}`
     }

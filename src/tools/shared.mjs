@@ -182,10 +182,11 @@ export function runInterruptible(cmd, args, opts = {}) {
 }
 
 
-/** Run git with args, return trimmed stdout ("" on failure). CLI parity. */
-export function runGit(cwd, cmdArgs) {
+/** Run git with args, return trimmed stdout ("" on failure). CLI parity.
+ *  config: optional `-c key=value` overrides (e.g. proxy) — inserted after `git`. */
+export function runGit(cwd, cmdArgs, config = []) {
   try {
-    return execFileSync("git", cmdArgs, { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }).trim().replace(/\r/g, "")
+    return execFileSync("git", [...config, ...cmdArgs], { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }).trim().replace(/\r/g, "")
   } catch (e) {
     // ERR_CHILD_PROCESS_STDIO_MAXBUFFER: e.stdout contains partial output, return first 200 lines
     if (e.stdout) return String(e.stdout).trim().replace(/\r/g, "").split("\n").slice(0, 200).join("\n")
