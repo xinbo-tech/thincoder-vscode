@@ -4,6 +4,20 @@ All notable changes to ThinCoder VS Code are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.7] — 2026-08-31
+
+### Fixed
+
+- **模型菜单飞出层实时过滤（GitHub #4，CLI picker 同语义）**：provider 飞出层加过滤框（大小写不敏感子串）——输入即收窄，↑↓ 高亮、Enter 选中、无匹配提示；**点击已展开的 provider 行不再误关飞出层**（此前"点了没反应"体感）。新 i18n 键 `model.filterPlaceholder` / `model.noMatch`；happy-dom 3 用例（收窄到一/无匹配提示/点击不关闭）
+
+### Changed
+
+- **提示词同步**：`system.md` task 跟踪条款升级为 "EVERY tier — even Small"（与 CLI byte-identical）
+
+### Tests
+
+- 786/786 全绿；eslint globals 增补 webview 测试环境（Event/MouseEvent/KeyboardEvent）
+
 ## [0.8.6] — 2026-08-30
 
 ### Changed
