@@ -9,7 +9,8 @@
  *   - fresh class names (mm-*), zero inheritance from the legacy .dropdown styles
  *
  * Every model selection in the panel (main model button, subagent slots, advisor, consult rows)
- * goes through openModelMenu(). No search box (user decision).
+ * goes through openModelMenu(). The provider flyout has a live filter box
+ * (type-to-narrow, case-insensitive substring — CLI pickers parity, GitHub #4 2026-08-31).
  */
 import { t } from "./i18n.js"
 
@@ -58,6 +59,15 @@ function injectStyles() {
   box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 12px; color: var(--fg, #ccc);
 }
 .mm-flyout .mm-row .mm-check { color: var(--accent, #4ec9b0); }
+.mm-filter {
+  width: calc(100% - 18px); margin: 5px 9px 3px; padding: 4px 6px;
+  box-sizing: border-box; min-width: 0;
+  background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #ccc);
+  border: 1px solid var(--vscode-input-border, #555); border-radius: 4px; font-size: 12px;
+  outline: none;
+}
+.mm-filter:focus { border-color: var(--vscode-focusBorder, #0078d4); }
+.mm-filter-nomatch { padding: 8px 12px; opacity: .6; }
 .mm-loading { padding: 8px 12px; opacity: .6; }
 `
   document.head.appendChild(st)
@@ -174,7 +184,7 @@ function providerRow(provider, group, models, value, onPick, overlay) {
   // Close condition: a mouseover bubbles up landing OUTSIDE (row ∪ flyout).
   // A stationary pointer generates no events → nothing closes. Ever.
   let flyout = null
-  const closeFlyout = () => { flyout?.remove(); flyout = null; delete item.dataset.flyoutOpen }
+  const pickModel = (m) => { closeModelMenu(); onPick({ provider: m.provider || provider, model: m.id }) }
   const openFlyout = () => {
     // The overlay-level mouseover handler removes flyouts from the DOM WITHOUT touching
     // this closure — a stale `flyout` reference made "hover back onto the same row" a
@@ -187,36 +197,75 @@ function providerRow(provider, group, models, value, onPick, overlay) {
     flyout = document.createElement("div")
     flyout.className = "mm-flyout"
     item.dataset.flyoutOpen = "1"
-    for (const m of models) {
-      const row = document.createElement("div")
-      row.className = "mm-row"
-      row.setAttribute("role", "option")
-      const sel = m.id === value?.model && (m.provider || "") === (value?.provider || "")
-      if (sel) row.setAttribute("aria-selected", "true")
-      const lbl = document.createElement("span")
-      lbl.textContent = m.label
-      row.appendChild(lbl)
-      if (sel) { const c = document.createElement("span"); c.className = "mm-check"; c.textContent = "✓"; row.appendChild(c) }
-      row.addEventListener("click", (e) => {
-        e.stopPropagation()
-        closeModelMenu()
-        onPick({ provider: m.provider || provider, model: m.id })
+
+    // Filter box (GitHub #4, 2026-08-31): type to narrow by case-insensitive
+    // substring, same semantics as the CLI picker. ↑↓ moves a highlight,
+    // Enter picks the highlighted (or first) match. Empty query shows all.
+    const filter = document.createElement("input")
+    filter.className = "mm-filter"
+    filter.placeholder = t("model.filterPlaceholder") || "Filter models…"
+    filter.addEventListener("click", (e) => e.stopPropagation()) // typing must not bubble to overlay-close
+    flyout.appendChild(filter)
+
+    const listBox = document.createElement("div")
+    flyout.appendChild(listBox)
+
+    let filtered = models.slice()
+    let highlight = 0
+    const renderList = () => {
+      listBox.textContent = ""
+      const q = filter.value.trim().toLowerCase()
+      filtered = q ? models.filter((m) => (m.label || m.id).toLowerCase().includes(q)) : models.slice()
+      highlight = Math.min(highlight, Math.max(0, filtered.length - 1))
+      if (filtered.length === 0) {
+        const nm = document.createElement("div")
+        nm.className = "mm-filter-nomatch"
+        nm.textContent = t("model.noMatch") || "No models match"
+        listBox.appendChild(nm)
+        return
+      }
+      filtered.forEach((m, i) => {
+        const row = document.createElement("div")
+        row.className = "mm-row"
+        row.setAttribute("role", "option")
+        const sel = m.id === value?.model && (m.provider || "") === (value?.provider || "")
+        if (sel) row.setAttribute("aria-selected", "true")
+        else if (i === highlight) row.setAttribute("aria-selected", "true")
+        if (i === highlight) row.style.outline = "1px solid var(--vscode-focusBorder, #0078d4)"
+        const lbl = document.createElement("span")
+        lbl.textContent = m.label
+        row.appendChild(lbl)
+        if (sel) { const c = document.createElement("span"); c.className = "mm-check"; c.textContent = "✓"; row.appendChild(c) }
+        row.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); pickModel(m) })
+        row.addEventListener("click", (e) => { e.stopPropagation(); pickModel(m) })
+        listBox.appendChild(row)
       })
-      flyout.appendChild(row)
     }
+    filter.addEventListener("input", () => { highlight = 0; renderList() })
+    filter.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); highlight = Math.min(highlight + 1, filtered.length - 1); renderList() }
+      else if (e.key === "ArrowUp") { e.preventDefault(); highlight = Math.max(highlight - 1, 0); renderList() }
+      else if (e.key === "Enter") { e.preventDefault(); const m = filtered[highlight] ?? filtered[0]; if (m) pickModel(m) }
+    })
+
+    renderList()
+    // Render the container first so the flyout has a measurable height, then focus the filter.
     overlay.appendChild(flyout)
     const rr = item.getBoundingClientRect()
-    const fh = Math.min(flyout.offsetHeight || models.length * 26, 320)
+    const fh = Math.min(flyout.offsetHeight || 200, 320)
     // FLUSH against the row's right edge (1px overlap) — no dead zone crossing.
     let left = rr.right - 1
     if (left + 190 > window.innerWidth) left = rr.left - 191 // flip left when no room on the right
     flyout.style.left = Math.max(4, left) + "px"
     flyout.style.top = Math.max(0, Math.min(rr.top - 1, window.innerHeight - fh - 4)) + "px"
+    filter.focus()
   }
 
   item.addEventListener("mouseenter", openFlyout)
   // Leaving the row alone does NOT close — the shared overlay mouseover handler decides
   // based on where the pointer actually lands (row ∪ flyout stays open, anything else closes).
-  item.addEventListener("click", (e) => { e.stopPropagation(); flyout ? closeFlyout() : openFlyout() })
+  // Click on the row is a NO-OP toggle fix (GitHub #4): it only ensures the flyout is open —
+  // with hover already having opened it, clicking no longer closes it ("clicked, nothing happened").
+  item.addEventListener("click", (e) => { e.stopPropagation(); openFlyout() })
   return item
 }

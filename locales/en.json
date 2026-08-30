@@ -61,6 +61,8 @@
   "model.addProvider": "+ Add provider…",
   "model.removeProvider": "− Remove provider…",
   "model.setKey": "Key…",
+  "model.filterPlaceholder": "Filter models…",
+  "model.noMatch": "No models match",
   "settings.title": "Settings",
   "settings.changeKey": "Change",
   "settings.addKey": "Add Key",

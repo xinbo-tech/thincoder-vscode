@@ -10,6 +10,7 @@ export default [
         // Browser / Webview
         document: "readonly", window: "readonly", navigator: "readonly",
         acquireVsCodeApi: "readonly", FileReader: "readonly",
+        Event: "readonly", MouseEvent: "readonly", KeyboardEvent: "readonly", // happy-dom webview tests
         fetch: "readonly", AbortSignal: "readonly", AbortController: "readonly",
         DOMException: "readonly", FormData: "readonly", URLSearchParams: "readonly",
         setTimeout: "readonly", clearTimeout: "readonly", setInterval: "readonly",

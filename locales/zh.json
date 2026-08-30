@@ -61,6 +61,8 @@
   "model.addProvider": "+ 添加 provider…",
   "model.removeProvider": "− 移除 provider…",
   "model.setKey": "设置密钥…",
+  "model.filterPlaceholder": "过滤模型…",
+  "model.noMatch": "没有匹配的模型",
   "settings.title": "设置",
   "settings.changeKey": "修改",
   "settings.addKey": "添加 Key",
