@@ -160,3 +160,11 @@ npx ovsx publish thincoder-vscode-0.1.0.vsix --pat <OVSX-PAT>   # 直接发已�
 
 - 发布是外发操作 —— 每次发布前确认 CHANGELOG、版本号、README 一致
 - package.json 的 `publisher`、`repository`、`homepage` 保持准确,市场页直接展示
+- **双远端 push(2026-08-30 实测)**:仓库有 `origin`(gitee)+ `github`(github.com/xinbo-tech/thincoder-vscode)两个 remote,**发布 commit + tag 两端都要推**,只推 origin 会漏 github。本机 GitHub 直连被墙时走代理:
+
+```bash
+git -c http.proxy=http://10.2.2.112:3128 push github master
+git -c http.proxy=http://10.2.2.112:3128 push github v0.8.6
+```
+
+- **发布后双源确认(轮询版,首选 `npm run publish:all`)**:marketplace + Open VSX 各自 `version` 已翻转才算完成;open-vsx 报 "already published, but currently isn't active" = 在扫描队列,不可误判为成功。
