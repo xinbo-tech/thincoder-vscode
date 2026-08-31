@@ -299,7 +299,7 @@ export function setSlotAdvisorGuard(cwd, slot, value) {
 
 
 /** Page size for lazy history loading (initial paint + scroll-back pages). */
-export const HISTORY_PAGE_SIZE = 50
+export const HISTORY_PAGE_SIZE = 20
 
 /**
  * Window into the human line for lazy history loading. `before` = null takes the

@@ -37,7 +37,7 @@ describe("historyWindow", () => {
   })
 
   it("scroll-back pages end just before `before` and chain without overlap", () => {
-    const h = fakeHistory(137)
+    const h = fakeHistory(60) // 3 页精确整除（2026-08-31 页大小 50→20 后 60 恰好整除）
     const first = historyWindow(h, null)
     const second = historyWindow(h, first.messages[0].idx)
     assert.equal(second.messages.length, HISTORY_PAGE_SIZE)
@@ -45,7 +45,7 @@ describe("historyWindow", () => {
     assert.equal(second.hasOlder, true)
 
     const third = historyWindow(h, second.messages[0].idx)
-    assert.equal(third.messages.length, 137 - 2 * HISTORY_PAGE_SIZE)  // remainder
+    assert.equal(third.messages.length, 60 - 2 * HISTORY_PAGE_SIZE)  // remainder（整除）
     assert.equal(third.hasOlder, false)  // start === 0
   })
 
