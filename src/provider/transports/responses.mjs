@@ -27,9 +27,14 @@ function isStatefulHost(baseURL) {
 
 /** store 必开 host（链保留依赖 store:true——真机：百炼/GLM store:false → 链 400）。 */
 function isStoreRequiredHost(baseURL) {
-  return /(^|\.)bigmodel\.cn$/.test(baseURL ?? "")
-    || (baseURL ?? "").includes("dashscope.aliyuncs.com")
-    || (baseURL ?? "").includes(".maas.aliyuncs.com")
+  try {
+    const host = new URL(baseURL).hostname
+    return /(^|\.)bigmodel\.cn$/.test(host)
+      || host.includes("dashscope.aliyuncs.com")
+      || host.includes(".maas.aliyuncs.com")
+  } catch {
+    return false
+  }
 }
 
 /** 灰名单：链未证实/不支持——仅剩 DeepSeek（官方明说 previous_response_id 不支持且静默忽略）。 */
