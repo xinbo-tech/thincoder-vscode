@@ -215,3 +215,48 @@ describe("F5 — CRLF offset drift + same-family hazards (EDIT-TOOL-EOL)", () =>
     assert.equal(doc.getText(), "alpha\r\nbeta\r\nbetaAndHalf\r\ngamma\r\n")
   })
 })
+
+describe("edit 数组形态（2026-08-31 工具顺手度，CLI ebd70eb parity）：多文件原子替换", () => {
+  it("两文件原子替换——都成功", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    writeFileSync(join(cwd, "a.txt"), "const A = 1\n", "utf8")
+    writeFileSync(join(cwd, "b.txt"), "const B = 2\n", "utf8")
+    const r = await editTool.execute({
+      edits: [
+        { path: "a.txt", old_string: "const A = 1", new_string: "const A = 10" },
+        { path: "b.txt", old_string: "const B = 2", new_string: "const B = 20" },
+      ],
+    }, { cwd })
+    assert.match(r, /Replaced 1 occurrence\(s\) in a\.txt/)
+    assert.match(r, /Replaced 1 occurrence\(s\) in b\.txt/)
+    assert.ok(readFileSync(join(cwd, "a.txt"), "utf8").includes("const A = 10"), "a.txt 已改")
+    assert.ok(readFileSync(join(cwd, "b.txt"), "utf8").includes("const B = 20"), "b.txt 已改")
+  })
+
+  it("任一失败 → 全不写（原子回滚）", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    writeFileSync(join(cwd, "a.txt"), "const A = 1\n", "utf8")
+    writeFileSync(join(cwd, "b.txt"), "const B = 2\n", "utf8")
+    const r = await editTool.execute({
+      edits: [
+        { path: "a.txt", old_string: "const A = 1", new_string: "const A = 100" },
+        { path: "b.txt", old_string: "NOT FOUND", new_string: "x" },
+      ],
+    }, { cwd })
+    assert.match(r, /edit aborted \(atomic — no files written\)/)
+    assert.ok(readFileSync(join(cwd, "a.txt"), "utf8").includes("const A = 1"), "a.txt 未被写（原子回滚）")
+  })
+
+  it("与 path/old_string/new_string 互斥", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    writeFileSync(join(cwd, "a.txt"), "x\n", "utf8")
+    const r = await editTool.execute({
+      path: "a.txt",
+      old_string: "x",
+      new_string: "y",
+      edits: [{ path: "a.txt", old_string: "x", new_string: "y" }],
+    }, { cwd })
+    assert.match(r, /mutually exclusive/)
+  })
+})
+

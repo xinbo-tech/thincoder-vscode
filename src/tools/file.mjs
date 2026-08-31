@@ -111,7 +111,8 @@ export const editTool = {
     "- path (required): File path, relative to cwd or absolute (alias: filePath)\n" +
     "- old_string (required): Exact text to find and replace\n" +
     "- new_string (required): Replacement text\n" +
-    "- replace_all: Replace all occurrences instead of just one (default false)",
+    "- replace_all: Replace all occurrences instead of just one (default false)\n" +
+    "- edits: 2026-08-31 工具顺手度（CLI ebd70eb parity）：一次多文件原子替换 [{path, old_string, new_string, replace_all?}, ...]——先全量检查所有替换可执行，任一失败全不写。与 path/old_string/new_string 互斥。",
   parameters: {
     type: "object",
     properties: {
@@ -120,10 +121,88 @@ export const editTool = {
       old_string: { type: "string", description: "Exact text to replace" },
       new_string: { type: "string", description: "Replacement text" },
       replace_all: { type: "boolean", description: "Replace all occurrences" },
+      edits: {
+        type: "array",
+        description: "一次多文件原子替换——任一失败全不写",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            old_string: { type: "string" },
+            new_string: { type: "string" },
+            replace_all: { type: "boolean" },
+          },
+          required: ["path", "old_string", "new_string"],
+        },
+      },
     },
-    required: ["path", "old_string", "new_string"],
+    required: [],
   },
-  async execute({ path, old_string, new_string, replace_all, filePath }, ctx) {
+  async execute(args, ctx) {
+    // 2026-08-31 工具顺手度（CLI ebd70eb parity）：数组形态——一次多文件原子替换
+    if (args.edits) {
+      if (!Array.isArray(args.edits) || args.edits.length === 0) {
+        return "Error: edits must be a non-empty array of {path, old_string, new_string}"
+      }
+      if (args.path || args.old_string !== undefined || args.new_string !== undefined) {
+        return "Error: edits array is mutually exclusive with path/old_string/new_string"
+      }
+      // 原子：先全量检查（所有文件都能替换）——任一失败全不写
+      const prepared = []
+      for (const e of args.edits) {
+        if (!e.path) return "Error: each edit must have a path"
+        if (!e.old_string) return `Error: edit for ${e.path}: old_string must not be empty`
+        const oldS = normalizeEOL(e.old_string)
+        const newS = normalizeEOL(e.new_string)
+        const abs = resolvePath(e.path, ctx.cwd)
+        const doc = getOpenDoc(abs)
+        const rawText = doc ? doc.getText() : await readFile(abs, "utf8").catch(() => null)
+        if (rawText === null) return `Error: edit aborted (atomic — no files written): cannot read ${e.path}`
+        const fileEol = detectFileEol(rawText)
+        const text = normalizeEOL(rawText)
+        const count = text.split(oldS).length - 1
+        if (count === 0) {
+          return `Error: edit aborted (atomic — no files written): old_string not found in ${e.path}\n` +
+            `  searched: "${oldS.slice(0, 100).split("\n")[0]}${oldS.length > 100 ? "…" : ""}"`
+        }
+        if (!e.replace_all && count > 1) {
+          return `Error: edit aborted (atomic — no files written): old_string matches ${count} times in ${e.path}; ` +
+            `provide more context or set replace_all`
+        }
+        if (doc?.isDirty) return `Error: edit aborted (atomic — no files written): ${e.path} has unsaved changes in the editor`
+        prepared.push({ abs, path: e.path, doc, rawText, fileEol, text, oldS, newS, count, replaceAll: !!e.replace_all })
+      }
+      // 全部检查通过——逐个执行
+      const results = []
+      for (const p of prepared) {
+        if (p.doc) {
+          if (p.replaceAll) {
+            const replaced = p.text.replaceAll(p.oldS, () => p.newS)
+            const out = p.fileEol === "\r\n" ? normalizeEOL(replaced).replace(/\n/g, "\r\n") : replaced
+            await applyEditorEdit(p.doc, out)
+          } else {
+            const idx = p.text.indexOf(p.oldS)
+            const start = lfOffsetToRaw(p.rawText, idx)
+            const end = lfOffsetToRaw(p.rawText, idx + p.oldS.length)
+            const newText = p.fileEol === "\r\n" ? normalizeEOL(p.newS).replace(/\n/g, "\r\n") : normalizeEOL(p.newS)
+            const pos = p.doc.positionAt(start)
+            const endPos = p.doc.positionAt(end)
+            await applyEditorRangeEdit(p.doc, pos.line, pos.character, endPos.line, endPos.character, newText)
+          }
+          results.push(`Replaced ${p.replaceAll ? p.count : 1} occurrence(s) in ${p.path} (via editor)`)
+        } else {
+          const replaced = p.replaceAll ? p.text.replaceAll(p.oldS, () => p.newS) : p.text.replace(p.oldS, () => p.newS)
+          const out = p.fileEol === "\r\n" ? normalizeEOL(replaced).replace(/\n/g, "\r\n") : replaced
+          await writeFile(p.abs, out, "utf8")
+          refreshMarkdownPreview(p.abs)
+          results.push(`Replaced ${p.replaceAll ? p.count : 1} occurrence(s) in ${p.path}`)
+        }
+      }
+      return results.join("\n")
+    }
+
+    // 单文件（现状路径）
+    let { path, old_string, new_string, replace_all, filePath } = args
     path = path || filePath
     if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
     if (typeof old_string !== "string" || typeof new_string !== "string") return "Error: old_string and new_string must be strings"
