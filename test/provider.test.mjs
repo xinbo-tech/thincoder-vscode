@@ -474,7 +474,7 @@ describe("2026-08-31 会诊：Retry-After / rateGate 超预算 / listModels 兜�
     const req1 = buildRequest(p, [{ role: "user", content: "查天气" }], null, {})
     const b1 = JSON.parse(req1.body)
     assert.equal(b1.input.length, 1)
-    assert.equal(b1.store, false, "本地有全量，不托管服务端")
+    assert.equal(b1.store, true, "百炼开链必须 store:true（真机冒烟 2026-08-31：false → 链 400 Not found；云端留存 7 天，warning 知悉）")
     assert.ok(req1._chainMeta, "白名单 host 建立链元数据")
     p._responsesChain = { ...req1._chainMeta, id: "resp_1" }
     // turn 内增量：只发 function_call_output

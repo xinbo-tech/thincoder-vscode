@@ -133,7 +133,9 @@ export function buildRequest(provider, messages, tools, { toolChoice, stateful }
   let chain = provider._responsesChain ?? null
   const key = chainKey(messages)
 
-  if (hostNonStateful && !stateful) {
+  if (!wantStateful) {
+    chain = null // stateful:false 显式覆盖：残留链必须作废（与 CLI 同修）
+  } else if (hostNonStateful && !stateful) {
     if (wantStateful) warnings.push({ name: "responses-stateful-unsupported", message: "endpoint 未实证支持 previous_response_id；已发送全量上下文" })
     chain = null
   } else if (chain && chain.key !== key) {
@@ -146,7 +148,13 @@ export function buildRequest(provider, messages, tools, { toolChoice, stateful }
     model: provider.model,
     input: items,
     stream: true,
-    store: false,
+    // 2026-08-31 真机冒烟实锤（与 CLI 同）：百炼开链要求 store:true；OpenAI 官方 store:false 链可用
+    store: wantStateful && hostStateful && (/(^|\.)dashscope\.aliyuncs\.com$/.test(new URL(provider.baseURL).hostname) || /\.maas\.aliyuncs\.com$/.test(new URL(provider.baseURL).hostname) || provider.baseURL.includes("dashscope.aliyuncs.com") || provider.baseURL.includes(".maas.aliyuncs.com")),
+  }
+  // 2026-08-31 真机冒烟：百炼开链 = 云端留存 7 天——首次知情警告
+  if (wantStateful && hostStateful && (provider.baseURL.includes("dashscope.aliyuncs.com") || provider.baseURL.includes(".maas.aliyuncs.com")) && !provider._responsesStoreWarned) {
+    provider._responsesStoreWarned = true
+    warnings.push({ name: "responses-store-retention", message: "百炼链生效需要 store:true——对话将在阿里云留存 7 天（provider.stateful=false 可退出）" })
   }
   // 内置工具声明追加（2026-08-31 用户拍板）：web_search 与本地 function 工具共存
   const builtin = builtinToolsFor(provider.baseURL, provider.builtinTools)
@@ -234,11 +242,21 @@ export async function parseStream(response, { onToken, onReasoning, signal } = {
     while ((idx = buffer.indexOf("\n\n")) >= 0) {
       const frame = buffer.slice(0, idx)
       buffer = buffer.slice(idx + 2)
-      // 2026-08-31 真机冒烟：百炼 SSE 帧为 `data:{...}` 无空格（OpenAI/DeepSeek 带空格）——兼容两种
+      // 2026-08-31 真机冒烟（与 CLI 同）：百炼帧 data: 无空格 + event:error 帧（HTTP 200 内嵌 400，
+      // data 无 type 字段）——必须识别抛错，否则静默空响应
+      const eventHeader = frame.split("\n").find((l) => l.startsWith("event:"))?.slice(6).trim() ?? ""
       const data = frame.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("\n")
       if (!data) continue
       let ev
-      try { ev = JSON.parse(data) } catch { continue }
+      try { ev = JSON.parse(data) } catch {
+        if (eventHeader === "error") throw new Error(`responses API error frame: ${data.slice(0, 300)}`)
+        continue
+      }
+      if (eventHeader === "error" && !ev.type) {
+        const e = new Error(`responses API error ${ev.code ?? ev.status ?? ""}: ${ev.message ?? JSON.stringify(ev).slice(0, 300)}`)
+        e.status = 400
+        throw e
+      }
       switch (ev.type) {
         case "response.output_item.added": {
           const item = ev.item ?? {}
