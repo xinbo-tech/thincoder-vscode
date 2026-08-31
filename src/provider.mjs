@@ -320,6 +320,12 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
       const e = new Error(message); e.status = response.status; throw e // status 供 responses D6 回退识别（2026-08-31 评审 #1）
     }
     if (response.status === 429) {
+      // 计费/配额类 429（余额不足/充值/insufficient_quota 等）不是限流：立即抛错不干等
+      // （round3 #4，CLI b86c453 后对齐）——isNonRetryableError 同文本特征
+      if (/余额不足|充值|insufficient_quota|quota exhausted|billing|1113|1114/i.test(text ?? "")) {
+        onWait?.({ phase: "quota", message: `quota exhausted: ${text.slice(0, 200)}` })
+        const e = new Error(message); e.status = 429; throw e
+      }
       // 2026-08-31 会诊 #5（与 CLI 465b9c3 #11 对齐）：Retry-After 支持秒数/HTTP-date，
       // 上限 300s——服务端异常头（1 小时级）不得让 CLI 干等。
       const waitMs = parseRetryAfter(response.headers.get("retry-after"), rateLimitHits)
