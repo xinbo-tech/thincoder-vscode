@@ -12,22 +12,31 @@
 
 import { specForModel } from "../../specs.mjs"
 
-/** 白名单：已实证 previous_response_id 的官方端（2026-08-31 官方文档核实）。 */
+/** 白名单：已实证 previous_response_id 的官方端（2026-08-31 真机验证：
+ *  百炼 store:true 全链路 ✅；GLM（open.bigmodel.cn/api/v1）store:true 全链路 ✅）。 */
 function isStatefulHost(baseURL) {
   try {
     const host = new URL(baseURL).hostname
     return /(^|\.)openai\.com$/.test(host)
       || host.includes("dashscope.aliyuncs.com") || host.includes(".maas.aliyuncs.com")
+      || /(^|\.)bigmodel\.cn$/.test(host)
   } catch {
     return false
   }
 }
 
-/** 灰名单：格式完整但链未证实/不支持——显式全量 + 一次警告。 */
+/** store 必开 host（链保留依赖 store:true——真机：百炼/GLM store:false → 链 400）。 */
+function isStoreRequiredHost(baseURL) {
+  return /(^|\.)bigmodel\.cn$/.test(baseURL ?? "")
+    || (baseURL ?? "").includes("dashscope.aliyuncs.com")
+    || (baseURL ?? "").includes(".maas.aliyuncs.com")
+}
+
+/** 灰名单：链未证实/不支持——仅剩 DeepSeek（官方明说 previous_response_id 不支持且静默忽略）。 */
 function isNonStatefulHost(baseURL) {
   try {
     const host = new URL(baseURL).hostname
-    return /(^|\.)deepseek\.com$/.test(host) || /(^|\.)bigmodel\.cn$/.test(host)
+    return /(^|\.)deepseek\.com$/.test(host)
   } catch {
     return false
   }
@@ -72,15 +81,18 @@ function toItems(messages) {
   for (const m of messages ?? []) {
     if (m.role === "system") continue
     if (typeof m.tool_call_id === "string" && m.tool_call_id.startsWith("web_search_call_") && typeof m.content === "string") {
-      // 内置工具结果本地化消息 → 原样 web_search_call item 回传（服务端自动恢复搜索结果）
+      // 内置工具结果本地化消息 → 原样 web_search_call item 回传（服务端自动恢复搜索结果）。
+      // id 用 content 里的原始服务端 id（msg_xxx），前缀只是本地锚点（2026-08-31 真机修正）。
       let query = ""
       let srcs = []
+      let wsId = m.tool_call_id.slice("web_search_call_".length)
       try {
         const parsed = JSON.parse(m.content)
         query = parsed.query ?? ""
         srcs = parsed.sources ?? []
+        if (parsed.id) wsId = parsed.id
       } catch { /* 非 JSON 纯展示 → query 缺省 */ }
-      items.push({ type: "web_search_call", id: m.tool_call_id, status: "completed", action: { query, type: "search", sources: srcs } })
+      items.push({ type: "web_search_call", id: wsId, status: "completed", action: { query, type: "search", sources: srcs } })
       continue
     }
     if (m.role === "user") {
@@ -148,13 +160,13 @@ export function buildRequest(provider, messages, tools, { toolChoice, stateful }
     model: provider.model,
     input: items,
     stream: true,
-    // 2026-08-31 真机冒烟实锤（与 CLI 同）：百炼开链要求 store:true；OpenAI 官方 store:false 链可用
-    store: wantStateful && hostStateful && (/(^|\.)dashscope\.aliyuncs\.com$/.test(new URL(provider.baseURL).hostname) || /\.maas\.aliyuncs\.com$/.test(new URL(provider.baseURL).hostname) || provider.baseURL.includes("dashscope.aliyuncs.com") || provider.baseURL.includes(".maas.aliyuncs.com")),
+    // 2026-08-31 真机冒烟实锤（与 CLI 同）：百炼/GLM 开链要求 store:true；OpenAI 官方 store:false 链可用
+    store: wantStateful && hostStateful && isStoreRequiredHost(provider.baseURL),
   }
-  // 2026-08-31 真机冒烟：百炼开链 = 云端留存 7 天——首次知情警告
-  if (wantStateful && hostStateful && (provider.baseURL.includes("dashscope.aliyuncs.com") || provider.baseURL.includes(".maas.aliyuncs.com")) && !provider._responsesStoreWarned) {
+  // 2026-08-31 真机冒烟：百炼/GLM 开链 = 云端留存 7 天——首次知情警告
+  if (wantStateful && hostStateful && isStoreRequiredHost(provider.baseURL) && !provider._responsesStoreWarned) {
     provider._responsesStoreWarned = true
-    warnings.push({ name: "responses-store-retention", message: "百炼链生效需要 store:true——对话将在阿里云留存 7 天（provider.stateful=false 可退出）" })
+    warnings.push({ name: "responses-store-retention", message: "链生效需要 store:true——对话将在云端留存 7 天（provider.stateful=false 可退出）" })
   }
   // 内置工具声明追加（2026-08-31 用户拍板）：web_search 与本地 function 工具共存
   const builtin = builtinToolsFor(provider.baseURL, provider.builtinTools)

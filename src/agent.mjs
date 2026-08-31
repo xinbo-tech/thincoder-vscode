@@ -181,12 +181,14 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
 
     // 内置工具（Responses web_search）结果本地化：服务端已执行——入历史为 tool 消息，
     // 模型下一轮可见；全量回传时 transport 依 tool_call_id 前缀还原 web_search_call item。
+    // 服务端 item id 是 msg_xxx 非 web_search_call_ 前缀——必须合成前缀（toItems 识别锚点），
+    // 原始 id 存入 content（真机冒烟 2026-08-31，与 CLI 同修）。
     for (const btr of response.builtinToolResults ?? []) {
       if (!btr?.id) continue
       pushReal(history, fullHistory, {
         role: "tool",
-        tool_call_id: btr.id,
-        content: JSON.stringify({ query: btr.query ?? "", sources: btr.sources ?? [], status: btr.status ?? "completed" }),
+        tool_call_id: `web_search_call_${btr.id}`,
+        content: JSON.stringify({ id: btr.id, query: btr.query ?? "", sources: btr.sources ?? [], status: btr.status ?? "completed" }),
       })
     }
 

@@ -11,7 +11,7 @@
 |---|---|---|---|---|---|
 | **OpenAI 官方** `api.openai.com/v1` | ✅ | ✅（store:true + 30 天） | ✅ encrypted_content（**明文不可回传**） | ✅ 全家桶 | **完整 → 开链** |
 | **阿里 Qwen（百炼）** `/compatible-mode/v1/responses` | ✅ | ✅ previous_response_id（**7 天有效**，官方多轮示例；传顶层 response id） | ✅ summary 明文 | ✅ 全家桶（联网/网页抓取/code_interpreter/文搜图/图搜图/知识库） | **完整 → 开链** |
-| **智谱 GLM** `open.bigmodel.cn/api/v1` | ✅（Coding Plan 专属，Codex 兼容驱动；quick-start 端点表实证） | 未文档化 | ✅ | **未证实 → 全量模式（灰名单）**；**搜索/读取 = 官方 MCP 生态**（联网搜索/网页读取/视觉/仓库四件 MCP Server，Coding Plan 专属）——**非 responses 内置工具**，GLM 用户接入姿势为 MCP server（我们 MCP 客户端已全套加固，2026-08-31） |
+| **智谱 GLM** `open.bigmodel.cn/api/v1` | ✅（Coding Plan 专属，Codex 兼容驱动；quick-start 端点表实证） | ✅ **2026-08-31 真机验证：store:true 链全链路工作**（store:false → HTTP 400 not_found；事件流与官方一致含 reasoning_text.delta） | ✅ | **升级白名单**（store:true 规则与百炼并列）；**搜索/读取 = 官方 MCP 生态**（四件 MCP Server）——非 responses 内置工具，GLM 用户接入姿势为 MCP server（我们 MCP 客户端全套加固） |
 | **DeepSeek 官方** `api.deepseek.com` | ✅（官方指南，事件流完整：response.reasoning_text.delta 等） | ❌ **不支持 previous_response_id**（官方兼容性表；不支持参数**静默忽略** = 无声丢上下文） | ✅ 明文 content 归并相邻消息 | 仅 web_search + apply_patch（Codex 专用） | **格式完整、无链 → 全量模式，链禁用** |
 | Kimi/Moonshot | ❌ 平台 API 无 responses 端点 | — | — | — | **不接**（同 8-15） |
 | 火山方舟（豆包） | ✅（迁移文档存在） | 未核实完整 | 未核实 | 联网插件 | **留位 → 一期不接** |
