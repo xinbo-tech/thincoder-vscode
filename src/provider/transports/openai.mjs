@@ -12,7 +12,7 @@ export function normalizeTools(tools) {
 }
 
 /** Build the HTTP request */
-export function buildRequest(provider, messages, tools) {
+export function buildRequest(provider, messages, tools, { toolChoice, parallelToolCalls } = {}) {
   const spec = specForModel(provider.model)
   const body = {
     model: provider.model,
@@ -44,6 +44,10 @@ export function buildRequest(provider, messages, tools) {
   if (enableThinking !== undefined) body.enable_thinking = enableThinking
   if (tools?.length) body.tools = tools
   if (provider.responseFormat) body.response_format = provider.responseFormat
+  // 2026-08-31：tool_choice 能力层（"auto"/"required"/"none"/{type:"function",function:{name}}）
+  // 直接透传 OpenAI 语义；parallel_tool_calls 仅显式 true 时发送（默认不发=不改变现有行为）
+  if (toolChoice !== undefined) body.tool_choice = toolChoice
+  if (parallelToolCalls === true) body.parallel_tool_calls = true
 
   return {
     url: `${provider.baseURL}${provider.chatPath ?? "/chat/completions"}`,

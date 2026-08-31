@@ -4,6 +4,16 @@
  * Docs: https://ai.google.dev/gemini-api/docs
  */
 
+/** OpenAI 语义 tool_choice → Gemini FunctionCallingConfig（2026-08-31 能力层）。 */
+function mapFunctionCallingConfig(choice) {
+  if (choice === "auto") return { mode: "AUTO" }
+  if (choice === "required") return { mode: "ANY" }
+  if (choice === "none") return { mode: "NONE" }
+  if (choice && typeof choice === "object" && choice.function?.name) return { mode: "ANY", allowedFunctionNames: [choice.function.name] }
+  throw new Error(`Invalid tool_choice for Gemini format: ${JSON.stringify(choice).slice(0, 120)}`)
+}
+
+
 /** Convert OpenAI-format tools to Gemini format */
 export function normalizeTools(tools) {
   if (!tools?.length) return null
@@ -56,7 +66,7 @@ function convertMessages(messages) {
 }
 
 /** Build the HTTP request for Gemini API */
-export function buildRequest(provider, messages, tools) {
+export function buildRequest(provider, messages, tools, { toolChoice } = {}) {
   const systemMessages = messages.filter((m) => m.role === "system")
   const contents = convertMessages(messages)
 
@@ -79,6 +89,11 @@ export function buildRequest(provider, messages, tools) {
     }
   }
   if (tools?.length) body.tools = tools
+  // 2026-08-31：tool_choice 能力层 → Gemini toolConfig.functionCallingConfig：
+  // auto→AUTO / required→ANY / none→NONE / {type:"function",function:{name}}→ANY+allowedFunctionNames
+  if (toolChoice !== undefined) {
+    body.toolConfig = { functionCallingConfig: mapFunctionCallingConfig(toolChoice) }
+  }
 
   // Gemini uses API key as query parameter, not header
   const url = `${provider.baseURL}/models/${provider.model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(provider.apiKey)}`

@@ -447,6 +447,26 @@ describe("2026-08-31 会诊：非 SSE 降级 / BOM / 多行 data / reasoning 方
 })
 
 describe("2026-08-31 会诊：Retry-After / rateGate 超预算 / listModels 兜底", () => {
+
+  it("buildRequest: tool_choice/parallel_tool_calls 三格式映射（能力层 2026-08-31）", async () => {
+    const openai = await import("../src/provider/transports/openai.mjs")
+    const anthropic = await import("../src/provider/transports/anthropic.mjs")
+    const google = await import("../src/provider/transports/google.mjs")
+    const provider = { model: "m", baseURL: "https://x", apiKey: "k" }
+    const messages = [{ role: "user", content: "hi" }]
+    const o = JSON.parse(openai.buildRequest(provider, messages, null, { toolChoice: "required", parallelToolCalls: true }).body)
+    assert.equal(o.tool_choice, "required", "openai 透传")
+    assert.equal(o.parallel_tool_calls, true, "parallel 显式 true 才发")
+    const a = JSON.parse(anthropic.buildRequest(provider, [{ role: "system", content: "s" }, ...messages], null, { toolChoice: { type: "function", function: { name: "w" } } }).body)
+    assert.deepEqual(a.tool_choice, { type: "tool", name: "w" }, "anthropic 映射")
+    const g = JSON.parse(google.buildRequest(provider, messages, null, { toolChoice: "required" }).body)
+    assert.deepEqual(g.toolConfig, { functionCallingConfig: { mode: "ANY" } }, "google 映射")
+    // 不传 toolChoice → 不产生字段（默认行为不变）
+    const o2 = JSON.parse(openai.buildRequest(provider, messages, null).body)
+    assert.equal("tool_choice" in o2, false)
+    assert.equal("parallel_tool_calls" in o2, false)
+  })
+
   it("parseRetryAfter：秒数/HTTP-date + 300s 上限（会诊 #5）", async () => {
     const { parseRetryAfter } = await import("../src/provider.mjs")
     assert.equal(parseRetryAfter("42", 0), 42_000)

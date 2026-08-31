@@ -134,7 +134,7 @@ export function stripLocalMessageFields(messages) {
 }
 
 /** Send a streaming chat completion request with automatic continuation on truncation */
-export async function chat(provider, { messages, tools, onToken, onReasoning, onWait, signal }) {
+export async function chat(provider, { messages, tools, onToken, onReasoning, onWait, signal, toolChoice, parallelToolCalls }) {
   const spec = specForModel(provider.model)
   const transport = getTransport(provider)
   messages = stripImagesForTextModel(messages, spec)
@@ -152,7 +152,8 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
   }
 
   const normalizedTools = transport.normalizeTools(tools)
-  const req = transport.buildRequest(provider, messages, normalizedTools)
+  // 2026-08-31：tool_choice/parallel_tool_calls 能力层（OpenAI 直传；anthropic/google 各自映射）
+  const req = transport.buildRequest(provider, messages, normalizedTools, { toolChoice, parallelToolCalls })
   const estimated = estimateRequestTokens(JSON.parse(req.body))
   traceStop(`chat: awaiting rate gate (est ${estimated} tokens)`)
   await rateGate(provider, estimated, onWait, signal)

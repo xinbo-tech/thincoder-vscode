@@ -8,6 +8,17 @@ import { specForModel } from "../../specs.mjs"
 
 const ANTHROPIC_VERSION = "2023-06-01"
 
+/** OpenAI 语义 tool_choice → Anthropic tool_choice（2026-08-31 能力层）。
+ *  传入值形态：undefined | "auto" | "required" | "none" | {type:"function",function:{name}} */
+function mapToolChoice(choice) {
+  if (choice === "auto") return { type: "auto" }
+  if (choice === "required") return { type: "any" }
+  if (choice === "none") return { type: "none" }
+  if (choice && typeof choice === "object" && choice.function?.name) return { type: "tool", name: choice.function.name }
+  throw new Error(`Invalid tool_choice for Anthropic format: ${JSON.stringify(choice).slice(0, 120)}`)
+}
+
+
 /** Convert OpenAI-format tools to Anthropic format */
 export function normalizeTools(tools) {
   return (tools || []).map((t) => ({
@@ -18,7 +29,7 @@ export function normalizeTools(tools) {
 }
 
 /** Build the HTTP request for Anthropic Messages API */
-export function buildRequest(provider, messages, tools) {
+export function buildRequest(provider, messages, tools, { toolChoice } = {}) {
   // Extract system message(s) — Anthropic uses a top-level `system` field
   const systemMessages = []
   const chatMessages = []
@@ -47,6 +58,10 @@ export function buildRequest(provider, messages, tools) {
     body.temperature = t
   }
   if (tools?.length) body.tools = tools
+  // 2026-08-31：tool_choice 能力层映射——OpenAI 语义 → Anthropic tool_choice：
+  // auto→{type:"auto"} / required→{type:"any"} / none→{type:"none"} /
+  // {type:"function",function:{name}}→{type:"tool",name:…}（Anthropic 只支持单 tool）
+  if (toolChoice !== undefined) body.tool_choice = mapToolChoice(toolChoice)
 
   // Anthropic uses x-api-key header, not Bearer
   return {
