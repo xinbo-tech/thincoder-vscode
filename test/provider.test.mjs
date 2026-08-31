@@ -467,6 +467,52 @@ describe("2026-08-31 会诊：Retry-After / rateGate 超预算 / listModels 兜�
     assert.equal("parallel_tool_calls" in o2, false)
   })
 
+  it("Responses API transport：buildRequest 链增量 + 灰名单 + parseStream 全事件（2026-08-31）", async () => {
+    const { buildRequest, parseStream } = await import("../src/provider/transports/responses.mjs")
+    // 白名单（百炼）：首轮建链元数据
+    const p = { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", apiKey: "k", model: "qwen3.8-max", stateful: true }
+    const req1 = buildRequest(p, [{ role: "user", content: "查天气" }], null, {})
+    const b1 = JSON.parse(req1.body)
+    assert.equal(b1.input.length, 1)
+    assert.equal(b1.store, false, "本地有全量，不托管服务端")
+    assert.ok(req1._chainMeta, "白名单 host 建立链元数据")
+    p._responsesChain = { ...req1._chainMeta, id: "resp_1" }
+    // turn 内增量：只发 function_call_output
+    const req2 = buildRequest(p, [
+      { role: "user", content: "查天气" },
+      { role: "assistant", content: "", tool_calls: [{ id: "c1", function: { name: "g", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "c1", content: "晴" },
+    ], null, {})
+    const b2 = JSON.parse(req2.body)
+    assert.equal(b2.input.length, 1, "增量只发工具结果")
+    assert.equal(b2.input[0].type, "function_call_output")
+    // 灰名单（DeepSeek）：全量 + 一次性警告
+    const dp = { baseURL: "https://api.deepseek.com", apiKey: "k", model: "deepseek-chat", stateful: true }
+    const dreq = buildRequest(dp, [{ role: "user", content: "hi" }], null, {})
+    assert.ok(dreq._warnings?.some((w) => w.name === "responses-stateful-unsupported"), "灰名单警告")
+    assert.ok(!dreq._chainMeta, "灰名单不建链")
+    // parseStream：文本/reasoning/工具/completed 全事件 + responseId 提取
+    const events = [
+      { type: "response.reasoning_text.delta", delta: "想" },
+      { type: "response.output_text.delta", delta: "你" },
+      { type: "response.output_item.added", item: { id: "f1", call_id: "c1", type: "function_call", name: "read" } },
+      { type: "response.function_call_arguments.delta", item_id: "f1", delta: "{}" },
+      { type: "response.output_item.done", item: { id: "f1", call_id: "c1", type: "function_call", name: "read", arguments: "{}" } },
+      { type: "response.completed", response: { id: "resp_9", usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3, input_tokens_details: { cached_tokens: 1 } } } },
+    ]
+    const payload = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("")
+    const result = await parseStream({ body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(payload)); c.close() } }) }, {
+      onToken: () => {}, onReasoning: () => {},
+    })
+    assert.equal(result.content, "你", "output_text 累加")
+    assert.equal(result.reasoning, "想", "reasoning_text 累加")
+    assert.equal(result.toolCalls.length, 1)
+    assert.equal(result.toolCalls[0].name, "read")
+    assert.equal(result.responseId, "resp_9", "completed 提取 responseId（链推进用）")
+    assert.equal(result.usage.prompt_cache_hit_tokens, 1)
+  })
+
+
   it("parseRetryAfter：秒数/HTTP-date + 300s 上限（会诊 #5）", async () => {
     const { parseRetryAfter } = await import("../src/provider.mjs")
     assert.equal(parseRetryAfter("42", 0), 42_000)

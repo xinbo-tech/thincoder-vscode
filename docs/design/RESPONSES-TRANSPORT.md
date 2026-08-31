@@ -1,25 +1,29 @@
 # Responses API Transport — 设计
 
-> 状态：**已核实、已会诊、决定不做（2026-08-15）**——保留为待触发预案。核实矩阵与消息⇄item 映射已完备，真触发时实施成本不变。
-> 会诊结论（三模型一致）：用户收益约等于零（Qwen 是唯一完整支持者，但服务端状态/内置工具/reasoning 回传三项差异化能力恰好都是我们不用或已有的）；真实成本被原设计低估（截断续跑循环 provider.mjs L106-152 硬编码 chat-completions 语义、Qwen partialMode 续走会掉进不匹配分支、CLI 端内联分派无注册表、×2 仓库永久同步）。
-> 关联：`MODEL-PICKER-UNIFY.md`（provider format 体系）、各厂商官方文档（2026-08-15 核实）
+> 状态：**2026-08-31 重启实施**（用户确认：国产已大量支持 + 长会话请求体痛点）。2026-08-15 会诊"决定不做"的存档已被今天的新事实推翻——支持矩阵已过期（DeepSeek 官方已发布 responses 格式支持；百炼 7 天链为官方实证）。
+> 本文件为扩展端预案；实施契约以 CLI 侧权威源 `thincoder/docs/design/PROVIDER.md §13` 为准（2026-08-31，同规格不复制）。§1 旧矩阵见 2026-08-31 更新版（见下）。
 
 ---
 
-## 1. 背景：支持矩阵核实（一手源）
-
-Responses API（OpenAI 2025-03 推出的 agent 原生协议）已被国产模型大面积跟进，但**支持完整度差异极大**。按用户决策：只实现完整支持者，残缺支持者不接。
+## 1. 背景：支持矩阵核实（一手源，**2026-08-31 更新**）
 
 | 厂商/端点 | 输入输出格式 | 服务端状态 (`store`+`previous_response_id`) | reasoning 回传 | 内置工具 | 判定 |
 |---|---|---|---|---|---|
-| **OpenAI 官方** `api.openai.com/v1/responses` | ✅ | ✅（store:true + 30 天） | ✅ encrypted_content | ✅ 全家桶 | **完整 → 实现** |
-| **阿里 Qwen（百炼）** `/compatible-mode/v1/responses` | ✅ | ✅ previous_response_id（**7 天有效**，官方多轮示例） | ✅ reasoning.effort | ✅ 全家桶（联网/网页抓取/code_interpreter/文搜图/图搜图/知识库） | **完整 → 实现** |
-| **智谱 GLM Coding Plan** `open.bigmodel.cn/api/v1` | ✅（官方 Codex 接入姿势 wire_api="responses"） | 未文档化 | effort 支持（models.json 里 reasoning levels） | 未文档化 | **格式完整、状态未证实 → 按"有状态能力探测"接入**（见 §3.4） |
-| DeepSeek 官方 | ✅ | ❌ **恒 store:false、previous_response_id 不支持**（无状态，官方兼容性表） | ❌ summary/encrypted_content 不支持 | 仅 web_search + apply_patch（Codex 专用） | **残缺 → 不接**（chat completions 等价，无收益） |
-| Kimi/Moonshot | ❌ 平台 API 无 responses 端点（仅 Kimi Code CLI 内置 openai_responses provider 供 OpenAI 官方端点用） | — | — | — | **无 → 不接** |
-| 火山方舟（豆包） | ✅（迁移文档存在） | 未核实完整 | 未核实 | 联网插件 | **待核实 → 一期不接**，矩阵留位 |
+| **OpenAI 官方** `api.openai.com/v1` | ✅ | ✅（store:true + 30 天） | ✅ encrypted_content（**明文不可回传**） | ✅ 全家桶 | **完整 → 开链** |
+| **阿里 Qwen（百炼）** `/compatible-mode/v1/responses` | ✅ | ✅ previous_response_id（**7 天有效**，官方多轮示例；传顶层 response id） | ✅ summary 明文 | ✅ 全家桶（联网/网页抓取/code_interpreter/文搜图/图搜图/知识库） | **完整 → 开链** |
+| **智谱 GLM Coding Plan** `open.bigmodel.cn/api/v1` | ✅（官方 Codex 接入姿势 wire_api="responses"） | 未文档化 | ✅ effort 支持 | 未文档化 | **未证实 → 全量模式（灰名单）** |
+| **DeepSeek 官方** `api.deepseek.com` | ✅（官方指南，事件流完整：response.reasoning_text.delta 等） | ❌ **不支持 previous_response_id**（官方兼容性表；不支持参数**静默忽略** = 无声丢上下文） | ✅ 明文 content 归并相邻消息 | 仅 web_search + apply_patch（Codex 专用） | **格式完整、无链 → 全量模式，链禁用** |
+| Kimi/Moonshot | ❌ 平台 API 无 responses 端点 | — | — | — | **不接**（同 8-15） |
+| 火山方舟（豆包） | ✅（迁移文档存在） | 未核实完整 | 未核实 | 联网插件 | **留位 → 一期不接** |
 
-**结论**：一期实现 **OpenAI 官方 + 阿里 Qwen（百炼）**；GLM coding-plan 按"能力探测"策略接入（探测失败自动降级 chat completions）；DeepSeek/Kimi 不接。
+**2026-08-31 重启理由**（对 8-15 会诊的修正）：
+1. 矩阵过期：DeepSeek 官方已发布 responses 格式（2026-08 当月）；阿里云 help 文档明确 7 天链 + 完整事件流。
+2. 用户在意的**长会话请求体体积**痛点（9.5MB 会话案例）被 `previous_response_id` 结构性解决——8-15 会诊"收益约等于零"的前提（服务端状态/内置工具/reasoning 三项都是我们不用的）已失效：**链是今天拍板的主要收益点**。
+3. 8-15 会诊成本项（续跑循环 format 耦合、双仓库同步债）已确认可控：agent 层零改动（transport 返回既有 shape），turn 内链 + 每 turn 重置把正确性交给了"本地事实源不变"。
+
+## 2. thincoder 要什么（能力映射，2026-08-31 更新）
+
+（原 §2 表格保留可读性…… 实施契约见 CLI PROVIDER.md §13.2——本地事实源不变、链仅发送层、store:false、单 turn 链、内置工具一期不用。）
 
 ## 2. thincoder 要什么（能力映射）
 
@@ -88,23 +92,24 @@ GLM 的 responses 端点（`open.bigmodel.cn/api/v1`）格式完整但 store/内
 
 CLI 的 webview 无面板改动（CLI 配置走 config.json 手编，无表单）。
 
-## 3.6 会诊结论与触发信号（2026-08-15，三家一致）
+## 3.6 会诊结论与触发信号（2026-08-15，三家一致 → **2026-08-31 触发重启**）
 
-**不做的理由**：
+**2026-08-15 不做的理由**（存档）：
 - 收益侧空：设计 §2 映射表自己写死了三项差异化能力全被放弃/已有；"Codex 生态接入"是伪需求（thincoder 不是 Codex CLI，不消费 wire_api）；对自管状态和工具的客户端，chat completions 才是跨厂商最大公约数
 - 成本侧实：续跑循环的 format 耦合（isOpenAI 分支会向 responses transport 发 partial/prefix 消息，Qwen partialMode 模型必踩）、CLI 端内联分派、双仓库同步债
 
-**触发信号（任一出现即重启实施）**：
-1. 主力厂商发布 responses-only 的用户可感知能力（盯 Qwen 百炼 Responses 文档的"独有限制"节）
-2. OpenAI 或目标厂商公布 chat completions 弃用时间表
-3. 真实用户 issue ≥3 点名要求 format:"responses"
-4. thincoder 决定透传服务端内置工具（web_search 是唯一真实功能增益，届时 transport 与它一起做）
+**2026-08-31 触发信号命中**（§3.6 原信号的等价物）：
+- 信号 1（主力厂商 responses-only 能力）：未命中（无厂商弃 chat）
+- **信号 3（真实需求）**：用户明确"长会话请求体体积"是真实痛点 + "国产已大量支持"——两项合并为实施决策；DeepSeek/百炼官方文档 2026-08 已更新（8-15 矩阵过期）
+- 信号 4（内置工具）：**未命中**——一期仍不用内置工具（工具集是产品本体）
+
+**实施契约**：见 CLI 权威源 `PROVIDER.md §13`（2026-08-31，同规格）。
 
 ## 4. 关键决策记录
 
 - **只接完整支持者**（用户拍板）：OpenAI 官方 + Qwen 百炼；DeepSeek（无状态残缺）/ Kimi（无端点）明确不接，理由记录在 §1 矩阵
-- **不做（2026-08-15 会诊后用户终裁）**：收益为零成本为实的预案存档，触发信号见 §3.6
-- **放弃服务端状态**：本地双行历史是核心资产（压缩/落档/CLI↔插件共享/会话恢复），服务端状态 7 天过期且锁厂商——transport 保持无状态全量回传
+- **不做（2026-08-15 会诊后用户终裁）**：收益为零成本为实的预案存档 → **2026-08-31 推翻**（矩阵过期 + 长会话体积痛点 + 用户拍板），现按 CLI PROVIDER.md §13 契约实施
+- **放弃服务端状态 → 保留为"双轨"**：本地双行历史是核心资产不变；`previous_response_id` 链仅作 turn 内发送层优化（store:false 不托管），跨 turn 重置——8-15 的担忧（依赖服务端 7 天过期）以"链非正确性依赖 + 404 自动回退全量"消解
 - **不放弃 reasoning 回传**：明文 reasoning content 进 input（Qwen/GLM 支持），与 DeepSeek chat completions 的 reasoning_content 回传同款语义
 - **preset 不动**：默认稳态 chat completions；responses 是显式 opt-in（format 字段）
 - **不探测不降级**：显式配置显式失败，隐藏降级违背产品原则

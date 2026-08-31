@@ -14,6 +14,7 @@ import {
 import * as openaiTransport from "./provider/transports/openai.mjs"
 import * as anthropicTransport from "./provider/transports/anthropic.mjs"
 import * as googleTransport from "./provider/transports/google.mjs"
+import * as responsesTransport from "./provider/transports/responses.mjs"
 
 // Hard per-request ceiling (CLI parity: core.mjs / anthropic.mjs / google.mjs all use
 // 600_000). Reasoning models on long contexts legitimately think for minutes before
@@ -115,6 +116,7 @@ const TRANSPORTS = {
   openai: openaiTransport,
   anthropic: anthropicTransport,
   google: googleTransport,
+  responses: responsesTransport,
 }
 
 function getTransport(provider) {
@@ -154,7 +156,8 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
   const normalizedTools = transport.normalizeTools(tools)
   // 2026-08-31：tool_choice/parallel_tool_calls 能力层（OpenAI 直传；anthropic/google 各自映射）
   const req = transport.buildRequest(provider, messages, normalizedTools, { toolChoice, parallelToolCalls })
-  const estimated = estimateRequestTokens(JSON.parse(req.body))
+  // 2026-08-31 Responses 链：本地全量 messages 估算（responses body 无 messages 键，估算器不认 input items）
+  const estimated = estimateRequestTokens(provider.format === "responses" ? { messages } : JSON.parse(req.body))
   traceStop(`chat: awaiting rate gate (est ${estimated} tokens)`)
   await rateGate(provider, estimated, onWait, signal)
   traceStop("chat: rate gate passed — issuing request")
@@ -164,6 +167,14 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
   const result = await transport.parseStream(response, { onToken, onReasoning, signal })
   traceStop("chat: stream parsed — returning to agent loop")
   recordRate(provider, estimated, result.usage)
+  // 2026-08-31 Responses 链推进：completed 的 responseId 供同一 turn 后续增量；截断/失败作废
+  if (transport === responsesTransport) {
+    if (req._chainMeta && result.finishReason !== "length" && result.responseId) {
+      provider._responsesChain = { ...req._chainMeta, id: result.responseId }
+    } else {
+      provider._responsesChain = null
+    }
+  }
 
   // Continuation handling (OpenAI-format only — Claude/Gemini handle truncation differently)
   const isOpenAI = provider.format === "openai" || !provider.format
