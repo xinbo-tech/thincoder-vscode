@@ -234,7 +234,8 @@ export async function parseStream(response, { onToken, onReasoning, signal } = {
     while ((idx = buffer.indexOf("\n\n")) >= 0) {
       const frame = buffer.slice(0, idx)
       buffer = buffer.slice(idx + 2)
-      const data = frame.split("\n").filter((l) => l.startsWith("data: ")).map((l) => l.slice(6)).join("\n")
+      // 2026-08-31 真机冒烟：百炼 SSE 帧为 `data:{...}` 无空格（OpenAI/DeepSeek 带空格）——兼容两种
+      const data = frame.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("\n")
       if (!data) continue
       let ev
       try { ev = JSON.parse(data) } catch { continue }

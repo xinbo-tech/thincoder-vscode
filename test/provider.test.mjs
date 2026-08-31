@@ -534,6 +534,17 @@ describe("2026-08-31 会诊：Retry-After / rateGate 超预算 / listModels 兜�
     assert.equal(result.builtinToolResults[0].query, "天气")
   })
 
+  it("parseStream: 百炼帧 data:{…} 无空格（真机冒烟 2026-08-31，与 CLI 同修）", async () => {
+    const { parseStream } = await import("../src/provider/transports/responses.mjs")
+    const frames = [
+      "id:1\nevent:response.output_text.delta\n:HTTP_STATUS/200\ndata:{\"type\":\"response.output_text.delta\",\"delta\":\"你好\"}",
+      "id:2\nevent:response.completed\n:HTTP_STATUS/200\ndata:{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_q\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7}}}",
+    ]
+    const result = await parseStream({ body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(frames.join("\n\n") + "\n\n")); c.close() } }) }, { onToken: () => {}, onReasoning: () => {} })
+    assert.equal(result.content, "你好", "无空格 data: 帧必须解析（百炼形态）")
+    assert.equal(result.responseId, "resp_q")
+  })
+
 
   it("parseRetryAfter：秒数/HTTP-date + 300s 上限（会诊 #5）", async () => {
     const { parseRetryAfter } = await import("../src/provider.mjs")
