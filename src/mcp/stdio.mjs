@@ -43,6 +43,16 @@ export function stdioTransport(command, args, env) {
   let stderrTail = ""
   let spawnError = null
   let closed = false
+  let deadFired = false
+  let deadListeners = new Set()
+
+  /** 2026-08-31 MCP 会诊 P5：意外死亡通知（进程自杀/崩溃，非主动 close——CLI parity）。 */
+  const fireDead = (msg) => {
+    if (deadFired) return
+    deadFired = true
+    for (const cb of deadListeners) { try { cb(msg) } catch { /* listener error */ } }
+  }
+  const onDead = (cb) => { deadListeners.add(cb); return () => deadListeners.delete(cb) }
 
   const failAll = (message) => {
     for (const [, resolve] of pending) resolve({ id: null, error: { code: -32000, message } })
@@ -77,9 +87,11 @@ export function stdioTransport(command, args, env) {
     failAll(`spawn failed: ${error.message}`)
   })
   child.on("close", () => {
+    const wasClosed = closed
     closed = true
     const lastLine = stderrTail.trim().split("\n").pop()
     failAll(`Connection closed${lastLine ? ` | stderr: ${lastLine}` : ""}`)
+    if (!wasClosed) fireDead(`MCP server process exited${lastLine ? ` | stderr: ${lastLine}` : ""}`)
   })
 
   const send = (method, params, signal) => {
@@ -123,5 +135,6 @@ export function stdioTransport(command, args, env) {
       if (child.exitCode === null) killTree(child)
     },
     isAlive: () => !closed && !spawnError && child.exitCode === null,
+    onDead,
   }
 }

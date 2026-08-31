@@ -25,8 +25,19 @@ export function httpTransport(baseURL, extraHeaders = {}) {
   const url = baseURL.replace(/\/+$/, "")
   let sessionId = null
   let closed = false
+  let eventSource = null
   let postUrl = url
   let legacySSE = false
+  let deadFired = false
+  let deadListeners = new Set()
+
+  /** 2026-08-31 MCP 会诊 P5：意外死亡通知（SSE 流断/error，非主动 close——CLI parity）。 */
+  const fireDead = (msg) => {
+    if (deadFired) return
+    deadFired = true
+    for (const cb of deadListeners) { try { cb(msg) } catch { /* listener error */ } }
+  }
+  const onDead = (cb) => { deadListeners.add(cb); return () => deadListeners.delete(cb) }
   let abortController = null
 
   const headers = () => {
@@ -80,7 +91,7 @@ export function httpTransport(baseURL, extraHeaders = {}) {
       signal: anySignal([abortController.signal, AbortSignal.timeout(INIT_TIMEOUT_MS)]),
     })
     if (!resp.ok) throw new Error(`SSE connect failed: HTTP ${resp.status}`)
-    const eventSource = parseSSE(resp)
+    eventSource = parseSSE(resp)
     let endpointReady
     const gotEndpoint = new Promise((resolve) => { endpointReady = resolve })
 
@@ -103,10 +114,14 @@ export function httpTransport(baseURL, extraHeaders = {}) {
             }
           } catch { /* not JSON, ignore */ }
         }
+        // 正常走完 = server 关闭了流（网络/对端退出）→ 非主动关闭视为死亡
+        if (!closed) fireDead("SSE stream ended")
       } catch (error) {
-        if (!closed) {
+        const wasClosed = closed
+        if (!wasClosed) {
           for (const [, resolve] of pending) resolve({ id: null, error: { code: -32000, message: `SSE error: ${error.message}` } })
           pending.clear()
+          fireDead(`SSE error: ${error.message}`)
         }
       }
     })()
@@ -213,5 +228,5 @@ export function httpTransport(baseURL, extraHeaders = {}) {
     pending.clear()
   }
 
-  return { send, notify, close, openSSE, url, headers: extraHeaders }
+  return { send, notify, close, openSSE, url, headers: extraHeaders, isAlive: () => !closed && eventSource != null, onDead }
 }

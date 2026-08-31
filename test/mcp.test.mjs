@@ -7,6 +7,8 @@ import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { fileURLToPath } from "node:url"
 import { join, dirname } from "node:path"
+import { tmpdir } from "node:os"
+import { rmSync } from "node:fs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FAKE_SERVER = join(__dirname, "fixtures", "fake-mcp-server.mjs")
@@ -160,4 +162,42 @@ describe("2026-08-31 MCP 会诊：transport 鲁棒性", () => {
   })
 })
 
+// ─── 2026-08-31 MCP 会诊 P5：registry 自愈（onDead → 退避重连 → client id 稳定）───
+
+describe("2026-08-31 MCP 会诊 P5：registry self-heal", () => {
+  it("crashed server reconnects; the SAME client id calls tools on the new instance", async () => {
+    const { mcpConnect, mcpCallTool, mcpConnectedToolCounts, mcpConnectedNames, mcpDisconnectByName, _mcpHooks } = await import("../src/mcp/index.mjs")
+    const countFile = join(tmpdir(), `vscode-mcp-count-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    // 首个实例 150ms 自毁（n=0），后续实例永活（n>=1 回 ok-1）
+    const script = `const fs=require('fs');const f=process.env.MCP_COUNT_FILE;const n=fs.existsSync(f)?Number(fs.readFileSync(f,'utf8')):0;fs.writeFileSync(f,String(n+1));
+let buf='';process.stdin.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);if(!line.trim())continue;const m=JSON.parse(line);const r={jsonrpc:'2.0',id:m.id,result:m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{},serverInfo:{name:'t',version:'1'}}:m.method==='tools/list'?{tools:[{name:'t1',description:'d1'}]}:m.method==='tools/call'?{content:[{type:'text',text:'ok-'+n}]}:{}};process.stdout.write(JSON.stringify(r)+'\\n')}});
+if(n===0)setTimeout(()=>process.exit(1),150)`
+    const origDelays = _mcpHooks.reconnectDelays
+    const origDelay = _mcpHooks.delay
+    _mcpHooks.reconnectDelays = [1, 1, 1, 1]
+    _mcpHooks.delay = () => new Promise((r) => setTimeout(r, 0))
+    try {
+      const client = await mcpConnect({ name: "selfheal", command: process.execPath, args: ["-e", script], env: { MCP_COUNT_FILE: countFile } })
+      assert.equal(client.tools.length, 1, "handshake ok")
+      const clientId = client.id // 重连后必须仍有效（registry 原位替换）
+      const deadline = Date.now() + 8000
+      let out = null
+      while (Date.now() < deadline) {
+        try {
+          out = await mcpCallTool(client, "t1", {})
+          if (out === "ok-1") break // 重连后的第 2 实例
+        } catch { /* still reconnecting */ }
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      assert.equal(out, "ok-1", "registry rebuilt under the SAME client id; new instance answers")
+      assert.equal(mcpConnectedToolCounts().selfheal, 1, "registry tool count restored")
+      assert.ok(mcpConnectedNames().includes("selfheal"), "server still listed as connected")
+    } finally {
+      _mcpHooks.reconnectDelays = origDelays
+      _mcpHooks.delay = origDelay
+      try { mcpDisconnectByName("selfheal") } catch { /* ignore */ }
+      try { rmSync(countFile, { force: true }) } catch { /* ignore */ }
+    }
+  })
+})
 })

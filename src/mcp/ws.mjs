@@ -15,6 +15,16 @@ export function wsTransport(wsUrl, extraHeaders = {}) {
   const pending = new Map()
   let closed = false
   let ws = null
+  let deadFired = false
+  let deadListeners = new Set()
+
+  /** 2026-08-31 MCP 会诊 P5：意外死亡通知（非主动 close 的连接断开——CLI parity）。 */
+  const fireDead = (msg) => {
+    if (deadFired) return
+    deadFired = true
+    for (const cb of deadListeners) { try { cb(msg) } catch { /* listener error */ } }
+  }
+  const onDead = (cb) => { deadListeners.add(cb); return () => deadListeners.delete(cb) }
 
   const failAll = (message) => {
     for (const [, resolve] of pending) resolve({ id: null, error: { code: -32000, message } })
@@ -55,20 +65,24 @@ export function wsTransport(wsUrl, extraHeaders = {}) {
       })
 
       ws.addEventListener("error", (event) => {
+        const wasClosed = closed
         clearTimeout(timeout)
         closed = true
         const errMsg = event.message || event.error?.message || "WebSocket error"
         settleErr(new Error(errMsg))
         failAll(errMsg)
+        if (!wasClosed) fireDead(errMsg)
       })
 
       ws.addEventListener("close", () => {
+        const wasClosed = closed
         clearTimeout(timeout)
         closed = true
         // 2026-08-31 MCP 会诊 P1：握手期间 disconnect（close 先于 open 且无 error）
         // 原实现 close 只 clearTimeout + failAll，connect promise 永不 settle（turn 挂死）。
         settleErr(new Error("WebSocket closed before connection established"))
         failAll("WebSocket closed")
+        if (!wasClosed) fireDead("WebSocket closed")
       })
     })
   }
@@ -110,5 +124,5 @@ export function wsTransport(wsUrl, extraHeaders = {}) {
     try { ws?.close() } catch { /* ignore */ }
   }
 
-  return { send, notify, close, connect, isAlive: () => !closed && ws?.readyState === WebSocket.OPEN }
+  return { send, notify, close, connect, isAlive: () => !closed && ws?.readyState === WebSocket.OPEN, onDead }
 }

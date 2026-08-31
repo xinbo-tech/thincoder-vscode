@@ -73,6 +73,68 @@ async function doInitialize(transport, _name) {
 const _servers = new Map()
 let _serverSeq = 0
 
+/** 2026-08-31 MCP 会诊 P5：重连退避表在 _mcpHooks（测试可注入）；进行中重连（serverName → promise）。
+ *  transport 意外死亡（透明自愈不在下次 turn）时后台退避重建，成功后 registry
+ *  entry 原位替换（client id 不变→panel 引用稳定）；失败静默（下次 mcpConnect 全新连）。 */
+const _reconnecting = new Map()
+
+/** 2026-08-31 MCP 会诊 P5：测试钩子（退避延迟可替换，惯例同 rate.mjs _rateHooks）。
+ *  scheduleReconnect 读这里的 delay/reconnectDelays——测试可注入微秒级延迟。 */
+export const _mcpHooks = {
+  delay: (ms) => new Promise((r) => setTimeout(r, ms)),
+  reconnectDelays: [1000, 2000, 4000, 8000],
+}
+
+/** 按 config 创建并完成握手的 transport（与 mcpConnect 的建连逻辑共享）。 */
+async function createConnectedTransport(config, serverName) {
+  let transport
+  if (config.wsUrl) {
+    transport = wsTransport(config.wsUrl, config.headers ?? {})
+    await transport.connect()
+  } else if (config.url) {
+    transport = httpTransport(config.url, config.headers ?? {})
+    try {
+      await transport.openSSE()
+    } catch {
+      // Server doesn't support GET SSE — degrade to pure Streamable HTTP POST mode
+    }
+  } else {
+    transport = stdioTransport(config.command, config.args ?? [], config.env)
+  }
+  const mcpTools = await doInitialize(transport, serverName)
+  return { transport, mcpTools }
+}
+
+/** 后台退避重连（onDead 触发 & execute 前置检查共用）。 */
+function scheduleReconnect(id, serverName, config, configFingerprint) {
+  if (_reconnecting.has(serverName)) return _reconnecting.get(serverName)
+  const p = (async () => {
+    let lastErr
+    for (const delayMs of _mcpHooks.reconnectDelays) {
+      await _mcpHooks.delay(delayMs)
+      try {
+        const { transport, mcpTools } = await createConnectedTransport(config, serverName)
+        // 原位替换：client id 不变，panel/session 引用稳定
+        const entry = { transport, tools: mcpTools, config, configFingerprint, serverName }
+        entry.onDead = () => {
+          if (entry.transport !== transport) return // 已再次替换，旧 onDead 作废
+          if (_servers.get(id) === entry) _servers.delete(id)
+          scheduleReconnect(id, serverName, config, configFingerprint)
+        }
+        transport.onDead?.(entry.onDead)
+        _servers.set(id, entry)
+        return true
+      } catch (error) {
+        lastErr = error
+      }
+    }
+    console.error(`[mcp] ${serverName} reconnect failed after ${_mcpHooks.reconnectDelays.length} attempts: ${lastErr?.message ?? lastErr}`)
+    return false
+  })().finally(() => _reconnecting.delete(serverName))
+  _reconnecting.set(serverName, p)
+  return p
+}
+
 /**
  * Connect to an MCP server. Supports stdio, HTTP and WS transports.
  * IDEMPOTENT per server name: an already-connected server with the same name
@@ -106,6 +168,23 @@ export async function mcpConnect(config) {
           })),
         }
       }
+      // 2026-08-31 MCP 会诊 P5：重连进行中（onDead 已触发）→ 等它完成，避免双重建连
+      if (_reconnecting.has(serverName)) {
+        const ok = await _reconnecting.get(serverName)
+        if (ok) {
+          const re = _servers.get(id)
+          return {
+            id,
+            serverName,
+            tools: re.tools.map((t) => ({
+              name: t.name,
+              description: t.description ?? `MCP tool: ${t.name}`,
+              inputSchema: t.inputSchema ?? { type: "object", properties: {} },
+            })),
+          }
+        }
+        // 重连失败 → 落入下方全新连接（旧 entry 已死）
+      }
       // 死连接或配置变更：断开旧连接，走全新连（下方新建 transport）
       try { s.transport.close() } catch { /* ignore */ }
       _servers.delete(id)
@@ -113,25 +192,19 @@ export async function mcpConnect(config) {
   }
 
   let transport
-  if (config.wsUrl) {
-    transport = wsTransport(config.wsUrl, config.headers ?? {})
-    await transport.connect()
-  } else if (config.url) {
-    transport = httpTransport(config.url, config.headers ?? {})
-    try {
-      await transport.openSSE()
-    } catch {
-      // Server doesn't support GET SSE — degrade to pure Streamable HTTP POST mode
-    }
-  } else {
-    // 2026-08-31 MCP 会诊 P3：配置 env 此前被静默丢弃（stdioTransport 签名无 env 参数）
-    transport = stdioTransport(config.command, config.args ?? [], config.env)
-  }
-
+  let mcpTools
   try {
-    const mcpTools = await doInitialize(transport, serverName)
+    ({ transport, mcpTools } = await createConnectedTransport(config, serverName))
     const id = `mcp-${++_serverSeq}`
-    _servers.set(id, { transport, tools: mcpTools, config, configFingerprint, serverName })
+    const entry = { transport, tools: mcpTools, config, configFingerprint, serverName }
+    // 2026-08-31 MCP 会诊 P5：注册 onDead → 退避重连自愈（server 崩溃后不等到下个 turn）
+    entry.onDead = () => {
+      if (entry.transport !== transport) return // 已重连替换，旧 onDead 作废
+      if (_servers.get(id) === entry) _servers.delete(id)
+      scheduleReconnect(id, serverName, config, configFingerprint)
+    }
+    transport.onDead?.(entry.onDead)
+    _servers.set(id, entry)
     return {
       id,
       serverName,
@@ -142,7 +215,7 @@ export async function mcpConnect(config) {
       })),
     }
   } catch (error) {
-    transport.close()
+    transport?.close()
     throw error
   }
 }
