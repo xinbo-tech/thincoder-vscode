@@ -2,6 +2,20 @@
 
 All notable changes to ThinCoder VS Code are documented here.
 
+## [0.8.8] — 2026-08-31
+
+### Added
+
+- **edit 数组形态**（CLI parity）：`edits: [{path, old_string, new_string, replace_all?}, ...]` 一次多文件原子替换（先全量检查所有替换可执行，任一失败全不写）；与单文件参数互斥
+
+### Changed
+
+- **历史懒加载单页 50→20 条**（CLI parity）：向上滚到会话顶加载更早一页的粒度更平顺，两端同节拍
+- **RELEASE.md**：发布后轮询确认残留清理（2026-08-31 用户裁定废止——Marketplace/Open VSX 审核队列天然滞后，publish 正确返回即发布完成）
+
+### Tests
+
+- 804/804 全绿（edit 数组原子性/互斥 +3）
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.8.7] — 2026-08-31

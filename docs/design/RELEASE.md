@@ -88,7 +88,7 @@ npx @vscode/vsce publish major   # 0.2.0 → 1.0.0
 首次发布会经过市场验证扫描(通常几分钟),通过后即可搜索 "ThinCoder",安装 ID 为 `xinbo-tech.thincoder-vscode`。
 **发完这里只是完成了一半**——必须继续 §5b 的 `ovsx publish`(同一 vsix),两个 registry 都成功才算发布完成(2026-08-29 0.8.4 漏发 Open VSX,Cursor 用户滞留旧版)。
 
-**推荐方式(2026-08-29 机械化,1be4bcf)**:`npm run publish:all` —— 一条命令完成双源发布 + 双源 LIVE 轮询确认(marketplace gallery query + open-vsx API 各自轮询到 version 翻转),任一源未确认即非零退出;`--skip-marketplace` / `--skip-openvsx` 可显式跳过单源(两个都跳则中止)。凭据走 env:`VSCE_PAT` + `OVSX_PAT`。
+**推荐方式(2026-08-29 机械化,1be4bcf)**:`npm run publish:all` —— 一条命令完成双源发布（不含轮询确认——完成判定见下裁定）；`--skip-marketplace` / `--skip-openvsx` 可显式跳过单源(两个都跳则中止)。凭据走 env:`VSCE_PAT` + `OVSX_PAT`。
 
 > **2026-08-31 用户裁定——轮询确认已废止**：Marketplace 与 Open VSX 的新版本都要经审核/病毒扫描队列，上线天然滞后数分钟到更久，**不值得在线等**。发布完成的判定 = **publish 命令本身正确返回**（exit 0、`DONE Published`）；审核队列是平台侧事务，随时间自然消化，无需当场确认。`publish:all` 的 LIVE 轮询随之退役——直接分别跑 `vsce publish` 与 `ovsx publish` 即可，两个都正确返回 = 发布完成。历史教训保留价值：open-vsx 报 "already published" 时先查 API——上一条命令可能**已成功**（本版 0.8.7 实例：60s 超时的 publish 实际已把包发上去，重复 publish 报 already published，API 查询确认 0.8.7 已生效）。
 
