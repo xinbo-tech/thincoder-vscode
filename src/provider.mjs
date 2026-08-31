@@ -162,7 +162,21 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
   await rateGate(provider, estimated, onWait, signal)
   traceStop("chat: rate gate passed — issuing request")
 
-  const response = await requestWithRetry(provider, req.url, req.headers, req.body, signal, onWait)
+  let response
+  try {
+    response = await requestWithRetry(provider, req.url, req.headers, req.body, signal, onWait)
+  } catch (err) {
+    // 2026-08-31 评审 #1（CLI parity D6）：responses 链失效（400/404）回退——先清残留链再重建，
+    // 真·全量重发；不清链则 buildRequest 增量分支输出裸工具结果且 previous_response_id
+    // 不随 header 带走 → 服务端 call_id 无归属二次 400
+    if (transport === responsesTransport && typeof err?.status === "number" && (err.status === 400 || err.status === 404)) {
+      provider._responsesChain = null
+      const freshReq = transport.buildRequest(provider, messages, normalizedTools, { toolChoice, parallelToolCalls })
+      response = await requestWithRetry(provider, freshReq.url, freshReq.headers, freshReq.body, signal, onWait)
+    } else {
+      throw err
+    }
+  }
   traceStop("chat: response ok — parsing stream")
   const result = await transport.parseStream(response, { onToken, onReasoning, signal })
   traceStop("chat: stream parsed — returning to agent loop")
@@ -302,7 +316,9 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
         message += " — tip: Kimi has two separate platforms with NON-interchangeable API keys: Moonshot (api.moonshot.cn/v1, sk-...) and Kimi For Coding (api.kimi.com/coding/v1, sk-kimi-...). Your key or baseURL looks mismatched — check which platform issued it."
       }
     }
-    if (isNonRetryableError(response.status, text)) throw new Error(message)
+    if (isNonRetryableError(response.status, text)) {
+      const e = new Error(message); e.status = response.status; throw e // status 供 responses D6 回退识别（2026-08-31 评审 #1）
+    }
     if (response.status === 429) {
       // 2026-08-31 会诊 #5（与 CLI 465b9c3 #11 对齐）：Retry-After 支持秒数/HTTP-date，
       // 上限 300s——服务端异常头（1 小时级）不得让 CLI 干等。
@@ -320,7 +336,7 @@ async function requestWithRetry(provider, url, headers, body, signal, onWait) {
       lastError = new Error(message)
       continue
     }
-    throw new Error(message)
+    const e = new Error(message); e.status = response.status; throw e
   }
   throw lastError
 }

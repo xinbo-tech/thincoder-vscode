@@ -219,7 +219,7 @@ function normalizeUsage(usage) {
     completion_tokens: usage.output_tokens ?? 0,
     total_tokens: usage.total_tokens ?? (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0),
     prompt_cache_hit_tokens: usage.input_tokens_details?.cached_tokens ?? 0,
-    prompt_cache_miss_tokens: usage.input_tokens ?? 0,
+    prompt_cache_miss_tokens: Math.max(0, (usage.input_tokens ?? 0) - (usage.input_tokens_details?.cached_tokens ?? 0)),
   }
 }
 
@@ -245,10 +245,11 @@ export async function parseStream(response, { onToken, onReasoning, signal } = {
   let buffer = ""
   let sealed = false
   const reader = response.body.getReader()
-  while (true) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
-    const { done, value } = await reader.read()
-    if (done) break
+  try {
+    while (true) {
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+      const { done, value } = await reader.read()
+      if (done) break
     buffer += decoder.decode(value, { stream: true })
     let idx
     while ((idx = buffer.indexOf("\n\n")) >= 0) {
@@ -323,7 +324,8 @@ export async function parseStream(response, { onToken, onReasoning, signal } = {
           break
         case "response.incomplete":
           seal(ev.response); sealed = true
-          result.finishReason = "length"
+          // 非长度原因（content_filter 等）不能报成 length（与 CLI 同修，评审 #5）
+          result.finishReason = ev.response?.incomplete_details?.reason === "content_filter" ? "content_filter" : "length"
           break
         case "response.failed": {
           const err = ev.response?.error
@@ -334,6 +336,42 @@ export async function parseStream(response, { onToken, onReasoning, signal } = {
         default:
           break
       }
+    }
+  }
+  } catch (e) {
+    // 用户 Ctrl+I 中断：与 CLI/core 同构——提交已生成部分（agent 层 interrupted 分支消费），
+    // 不丢已流出的 token；超时/网络错误仍照常抛（评审 #3）
+    if (e?.name === "AbortError" && signal?.reason?.interrupt) {
+      if (!sealed) seal(null)
+      return { ...result, interrupted: true, interruptMessage: signal.reason.message }
+    }
+    throw e
+  }
+  // 尾部分帧（无 \n\n 定界）：与 CLI 同义——error/failed 帧的错误必须传播，静默吞 = 空内容当回复（评审 #6）
+  buffer += decoder.decode()
+  const tail = buffer.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("\n")
+  if (tail) {
+    try {
+      const evTail = JSON.parse(tail)
+      if (evTail.type === "response.failed") {
+        const errE = evTail.response?.error
+        const e2 = new Error(`responses API failed: ${errE?.message ?? JSON.stringify(errE ?? {}).slice(0, 500)}`)
+        e2.status = errE?.code
+        throw e2
+      }
+      switch (evTail.type) {
+        case "response.completed":
+        case "response.done":
+          if (!sealed) { seal(evTail.response ?? evTail); sealed = true }
+          break
+        case "response.incomplete":
+          if (!sealed) { seal(evTail.response ?? evTail); sealed = true }
+          result.finishReason = evTail.response?.incomplete_details?.reason === "content_filter" ? "content_filter" : "length"
+          break
+      }
+    } catch (err) {
+      if (err?.name === "SyntaxError") { /* 非 JSON 尾碎，忽略 */ }
+      else throw err
     }
   }
   if (!sealed) seal(null)
