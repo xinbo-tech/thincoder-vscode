@@ -283,6 +283,16 @@ export async function parseStream(response, { onToken, onReasoning, signal } = {
           onToken?.(ev.delta ?? "")
           result.content += ev.delta ?? ""
           break
+        case "response.content_part.delta": {
+          // OpenRouter 变体（2026-08-31）：content_part.delta + part.type 区分 + response.done 收尾
+          const part = ev.part ?? {}
+          if (part.type === "reasoning_text") { onReasoning?.(ev.delta ?? ""); result.reasoning += ev.delta ?? "" }
+          else { onToken?.(ev.delta ?? ""); result.content += ev.delta ?? "" }
+          break
+        }
+        case "response.done":
+          seal(ev.response); sealed = true
+          break
         case "response.reasoning_text.delta":
           onReasoning?.(ev.delta ?? "")
           result.reasoning += ev.delta ?? ""
