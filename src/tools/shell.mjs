@@ -2,13 +2,14 @@
  * shell.mjs — Shell command execution tool: bash
  * Includes the CLI git-destruction protection (parity with thincoder src/tools/system.mjs):
  *   1. Layer 1 — WIDE auto-snapshot before destructive git commands (covers variants
- *      the exact matcher misses, e.g. `git checkout HEAD -- .`). Snapshot = git stash
- *      (includes untracked), so uncommitted work survives the command.
- *   2. Layer 2 — exact segment match rejects the command when uncommitted changes
- *      exist (the snapshot id is surfaced so recovery is one step away).
+ *      the exact matcher misses, e.g. `git checkout HEAD -- .`). Snapshot = FULL-COPY
+ *      checkpoint（mirror of CLI src/git/checkpoint.mjs，CHECKPOINT.md F5 存储统一——
+ *      不再是 git stash），未提交工作（含 untracked）在执行前落入
+ *      ~/.thincoder/checkpoints/{cwdHash12}/，恢复入口：checkpointAction=rewind。
+ *   2. Layer 2 — 命令永不拦截（与 CLI 一致：文本拦截是安全剧场，真实防线 = 审批层 + 快照）。
  */
 
-import { exec, execSync, execFileSync } from "node:child_process"
+import { exec, execFileSync } from "node:child_process"
 import * as vscode from "vscode"
 import { BASH_TIMEOUT_MS, MAX_STREAM_BUF, makeDecoder, sanitizeOutput, truncate } from "./shared.mjs"
 
@@ -133,48 +134,33 @@ if (process.platform === "win32") SAFE_ENV.PYTHONIOENCODING = "utf-8"
  * WIDE matcher: snapshot before ANY destructive git command. False positives are
  * harmless (one extra snapshot); a missed match is a data-loss disaster.
  * Git commands are NEVER rejected — the model would just find a way around the
- * rejection. Snapshot-then-proceed: every uncommitted file is copied (stash,
- * includes untracked) and the command is allowed to run.
+ * rejection. Snapshot-then-proceed: every uncommitted file is copied as a FULL-COPY
+ * checkpoint（含 untracked）and the command is allowed to run.
  */
 const GIT_DESTRUCTIVE_RE = /\bgit\s+(?:checkout\s+(?:[\w./-]+\s+)?--(?!\w)|checkout\s+\.|restore\s+(?!--help\b)(?!--staged\b(?!.*--worktree))|reset\s+--hard|clean\s+-(?=\S*f)(?!\S*n))/i
 
-/** Whether cwd is inside a git repository */
-function insideGitRepo(cwd) {
-  try {
-    execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd, stdio: "ignore" })
-    return true
-  } catch { return false }
-}
-
 /**
- * Auto-snapshot current uncommitted work via git stash (includes untracked).
- * The stash preserves everything `git checkout -- .` / `restore` / `reset --hard`
- * / `clean -f` would destroy; recovery is `git stash apply "stash@{0}"`.
+ * Auto-snapshot current uncommitted work as a FULL-COPY checkpoint — mirror of the CLI
+ * gitGuardSnapshot (thincoder src/tools/system.mjs:128，CHECKPOINT.md D4 两端 guard 对齐：
+ * 不再是 git stash)。快照覆盖 `git checkout -- .` / `restore` / `reset --hard` / `clean -f`
+ * 会毁掉的一切（含 untracked）；恢复入口 = checkpoint 工具 checkpointAction=rewind。
  * Returns { id, notice } or null. Never throws.
  */
-function gitGuardSnapshot(command, cwd) {
+async function gitGuardSnapshot(command, cwd) {
   if (!GIT_DESTRUCTIVE_RE.test(command)) return null
   try {
-    if (!insideGitRepo(cwd)) return null
-    const id = `thincoder-auto-${Date.now()}`
-    execSync(`git stash push --include-untracked -m "${id}"`, { cwd, encoding: "utf8", timeout: 10000 })
-    // Bound the stash list (20 max) — guard snapshots must not accumulate on disk
-    try {
-      const list = execSync("git stash list", { cwd, encoding: "utf8", timeout: 5000 })
-      const count = list.trim() ? list.trim().split("\n").length : 0
-      for (let i = count; i > 20; i--) {
-        execSync(`git stash drop "stash@{${i - 1}}"`, { cwd, encoding: "utf8", stdio: "ignore", timeout: 5000 })
-      }
-    } catch { /* pruning is best-effort */ }
+    const { isGitRepo, createCheckpoint } = await import("./checkpoint.mjs")
+    if (!isGitRepo(cwd)) return null
+    const cp = await createCheckpoint(cwd)
+    if (!cp) return null
     return {
-      id,
-      notice: `[auto-protection] Destructive git command detected — snapshot ${id} created BEFORE execution (git stash, includes untracked). If this command destroyed uncommitted work, restore it: git stash apply "stash@{0}"`,
+      id: cp.id,
+      notice: `[auto-protection] Destructive git command detected — snapshot ${cp.id} created BEFORE execution (${cp.files} file(s): ${cp.tracked.length} tracked, ${cp.untracked.length} untracked). If this command destroyed uncommitted work, restore it: checkpoint action=checkpoint checkpointAction=rewind checkpointId=${cp.id}`,
     }
   } catch {
     return null // protection is best-effort — never block the command
   }
 }
-
 // ─── bash tool ───────────────────────────────────────────────────
 
 // Description is platform-aware: the isolated child runs cmd.exe on Windows and /bin/sh
@@ -214,11 +200,9 @@ export const bashTool = {
 
     // Git destructive commands are NEVER rejected (the model would just find a
     // way around the rejection). Snapshot-then-proceed (CLI parity): every
-    // uncommitted file is stashed before the command runs — rollback becomes
-    // reversible instead of a data-loss event.
-    const guard = GIT_DESTRUCTIVE_RE.test(command)
-      ? gitGuardSnapshot(command, ctx.cwd)
-      : null
+    // uncommitted file is checkpointed (full-copy mirror) before the command runs
+    // — rollback becomes reversible instead of a data-loss event.
+    const guard = await gitGuardSnapshot(command, ctx.cwd)
 
     // visible: run in the user's own terminal via shell integration (inherits
     // the user's shell state). Falls back to the isolated child process when

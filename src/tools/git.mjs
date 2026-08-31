@@ -1,43 +1,25 @@
 /**
  * git.mjs — Git tool (CLI parity: single `git` tool with action subcommands).
  * diff / status / log follow the CLI implementation byte-for-byte;
- * checkpoint uses the stash-based snapshot mechanism here — the CLI uses v2 full-copy
- * snapshots (thincoder src/git/checkpoint.mjs). Mechanisms are behaviorally equivalent
- * for the model (list/create/rewind/cat); aligning VS Code to the CLI v2 implementation
- * is a tracked follow-up.
+ * checkpoint uses the full-copy snapshot mechanism MIRRORED from the CLI
+ * (thincoder src/git/checkpoint.mjs → 本仓库 src/tools/checkpoint.mjs，CHECKPOINT.md F5
+ * 存储统一：同一目录同一格式，快照跨端互通)。F7 扩展 action 与 checkpoint 子系统分别拆在
+ * git-ext.mjs / git-checkpoint.mjs（500 行硬限）。
  */
 import { runGit, truncate } from "./shared.mjs"
-import { execSync, execFileSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
 import { resolve, relative, isAbsolute, sep } from "node:path"
+import { runGitStrict, validateRef, gitConfigArgs, snapshotBefore, executeExtAction } from "./git-ext.mjs"
+import { executeCheckpointAction } from "./git-checkpoint.mjs"
 
-/** Run git and report failure (stderr + exit code) instead of swallowing it.
- *  Used by write ops (commit/push/rm) where runGit's silent "" would masquerade
- *  as success (CLI parity: runGitStrict). config = `-c` overrides (proxy). */
-function runGitStrict(cwd, cmdArgs, config = []) {
+/** Run git PRESERVING per-line leading whitespace — porcelain " M"/"M " staged/unstaged markers
+ *  are significant (runGit trims the whole output's leading space, corrupting an unstaged-first-line). */
+function runGitRaw(cwd, cmdArgs, config = []) {
   try {
-    const out = execFileSync("git", [...config, ...cmdArgs], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim().replace(/\r/g, "")
-    return { ok: true, out }
+    return execFileSync("git", [...config, ...cmdArgs], { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }).replace(/\r/g, "").replace(/\n$/, "")
   } catch (e) {
-    return { ok: false, out: String(e.stdout || "").trim(), err: String(e.stderr || e.message || "").trim() }
+    return String(e.stdout || "").replace(/\r/g, "")
   }
-}
-
-/** Validate a git ref / branch / tag / remote name (no option injection, no whitespace). */
-function validateRef(ref, what = "git ref") {
-  if (!/^[A-Za-z0-9._/~^@][A-Za-z0-9._/~^@{}-]*$/.test(ref)) throw new Error(`Invalid ${what}: ${ref}`)
-  return ref
-}
-
-/** Normalize args.config into `-c key=value` pairs (git -c overrides, e.g. a proxy). */
-function gitConfigArgs(config) {
-  if (config == null) return []
-  if (!Array.isArray(config)) throw new Error("config must be an array of \"key=value\" strings")
-  const out = []
-  for (const c of config) {
-    if (typeof c !== "string" || !c.trim() || c.includes("\n")) throw new Error(`invalid git -c config entry: ${String(c).slice(0, 60)}`)
-    out.push("-c", c)
-  }
-  return out
 }
 
 /** True when `abs` is inside `root` (handles `..` and cross-drive, which relative()
@@ -56,36 +38,6 @@ function resolveBaseDir(cwd, workdir) {
   return abs
 }
 
-/** Snapshot the working tree before a destructive op — NON-destructive: `git stash create`
- *  builds a stash commit of the tracked changes WITHOUT cleaning the working tree (unlike
- *  `git stash push`, which would wipe the very changes the op is about to touch), then
- *  `git stash store` records it as a recoverable stash entry. Best-effort — a snapshot
- *  failure must not block the op (the approval layer is the real gate).
- *  Note: `git stash create` covers TRACKED changes only (CLI createCheckpoint also copies
- *  untracked files) — the destructive ops this guards (reset --hard / restore / checkout)
- *  don't touch untracked files, so the gap is acceptable. The `thincoder-guard-` prefix
- *  keeps these entries distinguishable from task checkpoints in `git stash list`. */
-async function snapshotBefore(ctx, label) {
-  try {
-    const sha = execFileSync("git", ["stash", "create"], { cwd: ctx.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
-    if (!sha) return "" // no tracked changes to snapshot
-    execFileSync("git", ["stash", "store", "-m", `thincoder-guard-${Date.now()}`, sha], { cwd: ctx.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
-    return `[snapshot created before ${label}]\n`
-  } catch {
-    return ""
-  }
-}
-
-/** Run git PRESERVING per-line leading whitespace — porcelain " M"/"M " staged/unstaged markers
- *  are significant (runGit trims the whole output's leading space, corrupting an unstaged-first-line). */
-function runGitRaw(cwd, cmdArgs, config = []) {
-  try {
-    return execFileSync("git", [...config, ...cmdArgs], { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }).replace(/\r/g, "").replace(/\n$/, "")
-  } catch (e) {
-    return String(e.stdout || "").replace(/\r/g, "")
-  }
-}
-
 export const gitTool = {
   name: "git",
   readonly: false,
@@ -96,41 +48,53 @@ export const gitTool = {
     "- 'push'/'fetch'/'pull': sync with remote (remote, ref=branch/tag, tags=true for --tags).\n" +
     "- 'tag'/'branch'/'stash': manage them (tagAction/branchAction/stashAction: list/create/delete/switch, push/pop/list).\n" +
     "- 'checkout'/'restore': switch to ref, or restore a file (path). - 'reset': soft/mixed/hard (hard snapshots first). - 'revert'/'merge'/'cherry-pick': ref.\n" +
-    "- 'checkpoint': snapshots (checkpointAction: list/create/rewind/cat).\n" +
-    "- 'ls-remote': light remote-ref check — which refs a remote has (read-only, network). remote=<origin>, ref=<branch/tag> optional; config for a proxy.\n\n" +
-    "**Route to git instead of bash:** `git status`→status, `git log`→log, `git diff`→diff, `git show`→show, `git add`→add, `git rm`→rm, `git commit -m`→commit, `git push <remote> <branch> <tag>`→push, `git tag`→tag, `git branch`→branch, `git checkout`→checkout, `git restore`→restore, `git stash`→stash, `git fetch/pull`→fetch/pull, `git reset`→reset, `git revert`→revert, `git merge`→merge, `git cherry-pick`→cherry-pick, `git ls-remote`→ls-remote.\n\n" +
+    "- 'checkpoint': snapshots (checkpointAction: list/create/rewind/cat/versions).\n" +
+    "- 'ls-remote': light remote-ref check — which refs a remote has (read-only, network). remote=<origin>, ref=<branch/tag> optional; config for a proxy.\n" +
+    "- 'clone': clone a repo (remote, path optional). - 'init': init a repo. - 'rebase': rebase onto ref (rebaseAction: start/abort/continue). - 'remote': manage remotes (remoteAction: list/add/remove/set-url, remoteUrl).\n" +
+    "- 'clean': remove untracked files (dryRun for -n preview). - 'switch': switch branch (create for -c). - 'apply': apply a patch (path). - 'worktree': manage worktrees (worktreeAction: list/add/remove). - 'archive': write a tar (path, ref). - 'blame': file blame (path). - 'mv': rename (path, dest).\n" +
+    "- Destructive ops (checkout -- path / restore / reset --hard / stash pop / branch|tag delete / clean / rebase) auto-snapshot first — restore via checkpointAction=rewind.\n\n" +
+    "**Route to git instead of bash:** `git status`→status, `git log`→log, `git diff`→diff, `git show`→show, `git add`→add, `git rm`→rm, `git commit -m`→commit, `git push <remote> <branch> <tag>`→push, `git tag`→tag, `git branch`→branch, `git checkout`→checkout, `git restore`→restore, `git stash`→stash, `git fetch/pull`→fetch/pull, `git reset`→reset, `git revert`→revert, `git merge`→merge, `git cherry-pick`→cherry-pick, `git ls-remote`→ls-remote, `git clone`→clone, `git rebase`→rebase, `git remote`→remote, `git clean`→clean, `git switch`→switch, `git apply`→apply, `git worktree`→worktree, `git archive`→archive, `git blame`→blame, `git mv`→mv.\n\n" +
     "Parameters:\n" +
-    "- action (required): diff / status / log / show / checkpoint / add / rm / commit / push / tag / branch / checkout / restore / stash / fetch / pull / reset / revert / merge / cherry-pick / ls-remote\n" +
-    "- path: (diff/log/add/commit/checkout/restore/rm) file/dir to scope/stage/restore\n" +
-    "- ref: (show/diff/checkout/reset/revert/merge/cherry-pick) commit/branch/ref; (push/pull/fetch) branch or tag (space-separated for multiple)\n" +
-    "- name: (branch/tag) the branch or tag name — remote: (push/fetch/pull) remote name — tags: (push) push all tags\n" +
+    "- action (required): diff / status / log / show / checkpoint / add / rm / commit / push / tag / branch / checkout / restore / stash / fetch / pull / reset / revert / merge / cherry-pick / ls-remote / clone / init / rebase / remote / clean / switch / apply / worktree / archive / blame / mv\n" +
+    "- path: (diff/log/add/commit/checkout/restore/rm/apply/archive/blame/mv/worktree) file/dir to scope/stage/restore\n" +
+    "- ref: (show/diff/checkout/reset/revert/merge/cherry-pick/rebase/worktree:add/archive) commit/branch/ref; (push/pull/fetch) branch or tag (space-separated for multiple)\n" +
+    "- name: (branch/tag/switch) the branch or tag name — remote: (push/fetch/pull/remote) remote name — tags: (push) push all tags\n" +
     "- workdir: run git in this workspace subdirectory (monorepo / multi-repo). Confined to the workspace. Default: cwd\n" +
-    "- config: (network actions push/fetch/pull/ls-remote) git -c overrides, e.g. [\"http.proxy=http://10.2.2.112:3128\"] for blocked remotes\n" +
+    "- config: (network actions push/fetch/pull/ls-remote/clone) git -c overrides, e.g. [\"http.proxy=http://10.2.2.112:3128\"] for blocked remotes\n" +
     "- staged: (diff/restore) staged copy — count/oneline: (log) — message: (commit/stash) — filter: (read-only) output-line regex\n" +
     "- mode: (reset) soft/mixed/hard — tagAction/branchAction/stashAction: the sub-action\n" +
+    "- remoteAction/remoteUrl: (remote) sub-action / URL — rebaseAction: start/abort/continue — dryRun: (clean) -n preview — create: (switch) -c — dest: (mv) destination — worktreeAction: list/add/remove\n" +
     "- checkpointAction / checkpointId: (checkpoint) sub-action / snapshot id",
   parameters: {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["diff", "status", "log", "show", "checkpoint", "add", "rm", "commit", "push", "tag", "branch", "checkout", "restore", "stash", "fetch", "pull", "reset", "revert", "merge", "cherry-pick", "ls-remote"], description: "diff / status / log / show / checkpoint / add / rm / commit / push / tag / branch / checkout / restore / stash / fetch / pull / reset / revert / merge / cherry-pick / ls-remote" },
+      action: { type: "string", enum: ["diff", "status", "log", "show", "checkpoint", "add", "rm", "commit", "push", "tag", "branch", "checkout", "restore", "stash", "fetch", "pull", "reset", "revert", "merge", "cherry-pick", "ls-remote", "clone", "init", "rebase", "remote", "clean", "switch", "apply", "worktree", "archive", "blame", "mv"], description: "diff / status / log / show / checkpoint / add / rm / commit / push / tag / branch / checkout / restore / stash / fetch / pull / reset / revert / merge / cherry-pick / ls-remote / clone / init / rebase / remote / clean / switch / apply / worktree / archive / blame / mv — clean/rebase 操作前自动快照，checkpointAction=rewind 恢复" },
       staged: { type: "boolean", description: "(diff) Show staged changes instead of working tree; (restore) restore the staged copy" },
-      path: { type: "string", description: "(diff/log/add/commit/checkout/restore/checkpoint:cat/rewind/rm) File or directory to scope to / stage / restore" },
-      ref: { type: "string", description: "(diff/show/checkout/reset/revert/merge/cherry-pick/tag:create/branch:create) Commit/branch/ref; (push/pull/fetch) the branch or tag (space-separated for multiple)" },
+      path: { type: "string", description: "(diff/log/add/commit/checkout/restore/checkpoint:cat/versions/rewind/rm/apply/archive/blame/mv) File or directory to scope to / stage / restore（checkout/restore 操作前自动快照，checkpointAction=rewind 恢复）" },
+      ref: { type: "string", description: "(diff/show/checkout/reset/revert/merge/cherry-pick/tag:create/branch:create/rebase/worktree:add/archive) Commit/branch/ref; (push/pull/fetch) the branch or tag (space-separated for multiple)" },
       count: { type: "number", description: "(log) Number of commits (default 10)" },
       oneline: { type: "boolean", description: "(log) One-line-per-commit format" },
       message: { type: "string", description: "(commit) Commit message — required for commit; (stash:push) stash message" },
       filter: { type: "string", description: "(read-only actions) Regex to filter output lines by (case-insensitive)" },
-      name: { type: "string", description: "(branch/tag) The branch or tag name (create/delete/switch)" },
-      remote: { type: "string", description: "(push/fetch/pull) Remote name (e.g. origin). Default: current upstream" },
+      name: { type: "string", description: "(branch/tag/switch) The branch or tag name (create/delete/switch)" },
+      remote: { type: "string", description: "(push/fetch/pull/remote/clone) Remote name (e.g. origin) or URL. Default: current upstream" },
       workdir: { type: "string", description: "Run git in this workspace subdirectory (monorepo / multi-repo). Confined to the workspace. Default: cwd" },
-      config: { type: "array", items: { type: "string" }, description: "(network actions: push/fetch/pull/ls-remote) git -c overrides, e.g. [\"http.proxy=http://10.2.2.112:3128\"] for blocked remotes" },
+      config: { type: "array", items: { type: "string" }, description: "(network actions: push/fetch/pull/ls-remote/clone) git -c overrides, e.g. [\"http.proxy=http://10.2.2.112:3128\"] for blocked remotes" },
       tags: { type: "boolean", description: "(push) Also push all tags (--tags)" },
-      mode: { type: "string", enum: ["soft", "mixed", "hard"], description: "(reset) reset mode — hard snapshots the tree first + needs confirmation" },
-      tagAction: { type: "string", enum: ["list", "create", "delete"], description: "(tag) list tags / create one / delete one" },
-      branchAction: { type: "string", enum: ["list", "create", "delete", "switch"], description: "(branch) list branches / create / delete / switch to one" },
-      stashAction: { type: "string", enum: ["push", "pop", "list"], description: "(stash) push (stash now) / pop (apply+drop) / list" },
-      checkpointAction: { type: "string", enum: ["list", "create", "rewind", "cat"], description: "(checkpoint) list snapshots / create one / restore by id / read file from snapshot" },
+      mode: { type: "string", enum: ["soft", "mixed", "hard"], description: "(reset) reset mode — hard snapshots the tree first + needs confirmation（操作前自动快照，checkpointAction=rewind 恢复）" },
+      tagAction: { type: "string", enum: ["list", "create", "delete"], description: "(tag) list tags / create one / delete one（delete 操作前自动快照，checkpointAction=rewind 恢复）" },
+      branchAction: { type: "string", enum: ["list", "create", "delete", "switch"], description: "(branch) list branches / create / delete / switch to one（delete 操作前自动快照，checkpointAction=rewind 恢复）" },
+      stashAction: { type: "string", enum: ["push", "pop", "list"], description: "(stash) push (stash now) / pop (apply+drop) / list（pop 操作前自动快照，checkpointAction=rewind 恢复）" },
+      checkpointAction: { type: "string", enum: ["list", "create", "rewind", "cat", "versions"], description: "(checkpoint) list snapshots / create one / restore by id / read file from snapshot / list a file's historical versions（rewind 可恢复操作前状态，恢复前自动快照可逆）" },
       checkpointId: { type: "string", description: "(checkpoint) Snapshot id — required for rewind and cat; optional for list (shows file tree)" },
+      // F7 new-action params
+      remoteAction: { type: "string", enum: ["list", "add", "remove", "set-url"], description: "(remote) list remotes / add / remove / set-url" },
+      remoteUrl: { type: "string", description: "(remote add/set-url) Remote URL (https/git/ssh or local path)" },
+      rebaseAction: { type: "string", enum: ["start", "abort", "continue"], description: "(rebase) start (ref required) / abort / continue（操作前自动快照，checkpointAction=rewind 恢复）" },
+      dryRun: { type: "boolean", description: "(clean) preview only (-n) — no deletion, no snapshot; real clean 操作前自动快照，checkpointAction=rewind 恢复" },
+      create: { type: "boolean", description: "(switch) create the branch then switch (-c)" },
+      dest: { type: "string", description: "(mv) destination path (file or directory)" },
+      worktreeAction: { type: "string", enum: ["list", "add", "remove"], description: "(worktree) list / add (path, ref) / remove (path)" },
     },
     required: ["action"],
   },
@@ -144,15 +108,19 @@ export const gitTool = {
 
   /**
    * 判断某次 git 调用是否只读（供 execute-tools 审批过滤用）。
-   * 只读 action 不弹审批：diff/status/log/show + checkpoint 的 list/cat。
+   * 只读 action 不弹审批：diff/status/log/show + checkpoint 的 list/cat + 只读子动作。
    */
   isReadonlyAction(args) {
     if (!args || typeof args.action !== "string") return false
-    if (["diff", "status", "log", "show", "ls-remote"].includes(args.action)) return true
+    if (["diff", "status", "log", "show", "ls-remote", "blame"].includes(args.action)) return true
+    // checkpoint list 有 F6 清理副作用（lazyClearIfCommitted 可能删除整个 checkpoint 目录），
+    // 但清的是 commit 后已失去意义的过期快照——保留只读分类免审批（CHECKPOINT.md F6/D3 设计意图）
     if (args.action === "checkpoint") return ["list", "cat"].includes(args.checkpointAction)
     if (args.action === "tag") return args.tagAction === "list"
     if (args.action === "branch") return args.branchAction === "list"
     if (args.action === "stash") return args.stashAction === "list"
+    if (args.action === "remote") return args.remoteAction === "list"
+    if (args.action === "worktree") return args.worktreeAction === "list"
     return false // add/rm/commit/push/fetch/pull/reset/revert/merge/cherry-pick/checkout/restore + tag/branch/stash 写操作
   },
 
@@ -244,7 +212,17 @@ export const gitTool = {
         if (!add.ok) return `git add failed: ${add.err || add.out || "(no output)"}`
         const commit = runGitStrict(ctx.cwd, ["commit", "-m", args.message])
         if (!commit.ok) return `git commit failed: ${commit.err || "(no output)"}`
-        return commit.out || "(commit done)"
+        let out = commit.out || "(commit done)"
+        // F6: commit = new safety baseline — clear this project's checkpoints
+        // (best-effort per NF7: a failed cleanup never blocks the commit result).
+        try {
+          const { deleteCheckpointsForCwd } = await import("./checkpoint.mjs")
+          await deleteCheckpointsForCwd(ctx.cwd)
+          out += "\n(checkpoints cleared — commit is a new safety baseline)"
+        } catch (e) {
+          out += `\n(checkpoint cleanup skipped: ${e.message})`
+        }
+        return out
       }
       case "push": {
         const cmdArgs = ["push"]
@@ -357,14 +335,14 @@ export const gitTool = {
       case "fetch": {
         const cmdArgs = ["fetch"]
         if (args.remote) cmdArgs.push(validateRef(args.remote, "remote"))
-        if (args.ref) cmdArgs.push(validateRef(args.ref, "ref"))
+        if (args.ref) cmdArgs.push(validateRef(args.ref))
         const r = runGitStrict(ctx.cwd, cmdArgs, cfgArgs)
         return r.ok ? (r.out || "(fetch complete — no output)") : `git fetch failed: ${r.err || r.out}`
       }
       case "pull": {
         const cmdArgs = ["pull"]
         if (args.remote) cmdArgs.push(validateRef(args.remote, "remote"))
-        if (args.ref) cmdArgs.push(validateRef(args.ref, "ref"))
+        if (args.ref) cmdArgs.push(validateRef(args.ref))
         const r = runGitStrict(ctx.cwd, cmdArgs, cfgArgs)
         return r.ok ? (r.out || "(pull complete — no output)") : `git pull failed: ${r.err || r.out}`
       }
@@ -395,64 +373,23 @@ export const gitTool = {
         const r = runGitStrict(ctx.cwd, ["cherry-pick", args.ref])
         return r.ok ? (r.out || `Cherry-picked ${args.ref}`) : `git cherry-pick failed: ${r.err || r.out}`
       }
-      case "checkpoint": {
-        return await checkpointExecute(args, ctx)
-      }
+      // F7 扩展 action + checkpoint：实现拆在 git-ext.mjs / git-checkpoint.mjs（500 行硬限）
+      case "clone":
+      case "init":
+      case "rebase":
+      case "remote":
+      case "clean":
+      case "switch":
+      case "apply":
+      case "worktree":
+      case "archive":
+      case "blame":
+      case "mv":
+        return executeExtAction(args, ctx)
+      case "checkpoint":
+        return executeCheckpointAction(args, ctx)
       default:
-        return `Unknown action '${args.action}'. Use: diff | status | log | show | checkpoint | add | rm | commit | push | tag | branch | checkout | restore | stash | fetch | pull | reset | revert | merge | cherry-pick`
+        return `Unknown action '${args.action}'. Use: diff | status | log | show | checkpoint | add | rm | commit | push | tag | branch | checkout | restore | stash | fetch | pull | reset | revert | merge | cherry-pick | ls-remote | clone | init | rebase | remote | clean | switch | apply | worktree | archive | blame | mv`
     }
   },
-}
-
-/** Stash-based checkpoint sub-actions (parameter names aligned to CLI: checkpointAction/checkpointId). */
-async function checkpointExecute({ checkpointAction: sub, checkpointId: id, path }, ctx) {
-  const exec = (cmd) => {
-    try {
-      return execSync(cmd, { cwd: ctx.cwd, encoding: "utf8", timeout: 10000 })
-    } catch (e) {
-      throw new Error((e.stderr || e.message || "").trim(), { cause: e })
-    }
-  }
-  if (!sub) return "checkpoint: missing checkpointAction — use: list | create | rewind | cat"
-
-  if (sub === "create") {
-    const msg = `thincoder-${Date.now()}`
-    exec(`git stash push --include-untracked -m "${msg}"`)
-    return `Checkpoint ${msg} created`
-  }
-  if (sub === "rewind") {
-    if (id === undefined) throw new Error("checkpointId is required for rewind — use checkpointAction=list to see snapshot ids")
-    // Full restore is disabled (CLI parity): as dangerous as `git checkout -- .`.
-    if (!path) throw new Error("path is required for rewind — full restore is disabled (as dangerous as `git checkout -- .`). Restore files individually.")
-    // Auto-snapshot current state first so rewind is reversible
-    const autoMsg = `thincoder-auto-${Date.now()}`
-    exec(`git stash push --include-untracked -m "${autoMsg}"`)
-    const stashRef = `stash@{${id}}`
-    const files = exec(`git stash show --name-only "${stashRef}"`).trim()
-    if (!files) return `Checkpoint ${id} has no tracked file changes.`
-    const match = files.split("\n").find((f) => f === path || f.endsWith(`/${path}`))
-    if (!match) return `File "${path}" not found in checkpoint ${id}. Available: ${files}`
-    exec(`git checkout "${stashRef}" -- "${match}"`)
-    return `Restored "${match}" from checkpoint ${id}. Auto-snapshot created: ${autoMsg}`
-  }
-  if (sub === "cat") {
-    if (id === undefined) throw new Error("checkpointId is required for cat — use checkpointAction=list to see snapshot ids")
-    if (!path) throw new Error("path is required for cat — specify which file to read")
-    const stashRef = `stash@{${id}}`
-    const files = exec(`git stash show --name-only "${stashRef}"`).trim()
-    if (!files) return `Checkpoint ${id} has no tracked file changes.`
-    const match = files.split("\n").find((f) => f === path || f.endsWith(`/${path}`))
-    if (!match) return `File "${path}" not found in checkpoint ${id}.`
-    return exec(`git show "${stashRef}:${match}"`)
-  }
-  if (sub === "list") {
-    const out = exec("git stash list").trim()
-    if (!out) return "(no checkpoints yet — one is auto-created before each user task)"
-    if (id !== undefined) {
-      const files = exec(`git stash show --name-only "stash@{${id}}"`).trim()
-      return files || "(empty checkpoint)"
-    }
-    return out
-  }
-  throw new Error(`Unknown checkpoint action: ${sub}. Use: list | create | rewind | cat`)
 }

@@ -128,7 +128,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
   // both lines via its internal pushReal — chat-panel only supplies the lines and persists them.
   const loadedLines = panel._activeLines(turnSlot)
   fullHistory = loadedLines.fullHistory
-  history = Array.isArray(loadedLines.contextHistory) ? loadedLines.contextHistory : [...fullHistory]
+  history = loadedLines.contextHistory // activeLines 已处理机读线判定（length>0 + strip 截断 args）
   // Slot snapshot comment: turnSlot/distillSlot are captured at function entry (above, before
   // any await) — see the 交付评审 🔴#1 note at the top of this function.
   const isFirstMessageNow = fullHistory.filter((m) => (m.type ?? m.role) === "user").length === 0

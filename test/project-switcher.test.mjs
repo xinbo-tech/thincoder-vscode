@@ -12,7 +12,7 @@ import { tmpdir } from "node:os"
 import * as vscode from "vscode"
 
 import { _cwd, setProjectFolder, clearProjectOverride } from "../src/extension/panel-messages.mjs"
-import { newSlot, activeSlot } from "../src/extension/session-io.mjs"
+import { newSlot, activeSlot, _setSessionsDirForTest, _resetSessionsDirForTest } from "../src/extension/session-io.mjs"
 
 let dirA
 let dirB
@@ -20,6 +20,7 @@ let dirB
 beforeEach(() => {
   dirA = mkdtempSync(join(tmpdir(), "tc-proj-a-"))
   dirB = mkdtempSync(join(tmpdir(), "tc-proj-b-"))
+  _setSessionsDirForTest(join(dirA, "sessions")) // 注入 tmp——hash 按 cwd 隔离，两项目互不影响
   clearProjectOverride()
   vscode.workspace.workspaceFolders = [
     { name: "A", uri: { fsPath: dirA } },
@@ -28,6 +29,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  _resetSessionsDirForTest()
   clearProjectOverride()
   vscode.workspace.workspaceFolders = []
   rmSync(dirA, { recursive: true, force: true })

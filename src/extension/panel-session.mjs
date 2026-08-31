@@ -3,7 +3,7 @@
  * chat-panel.mjs). Every function takes the ChatPanel instance as `panel` and
  * mutates panel._slot / panel._autoApprove exactly like the former methods did.
  */
-import { loadSlot, saveSessionToSlot, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs as loadStoredModelPrefs, historyWindow, listSlots, slimForDisplay } from "./session-io.mjs"
+import { loadSlot, saveSessionToSlot, newSlot, deleteSlotAndUpdate, setSlotTitle, activeSlot, loadModelPrefs as loadStoredModelPrefs, historyWindow, listSlots, slimForDisplay, isLegacyTransient, stripTruncatedToolArgs } from "./session-io.mjs"
 import { fullStatus } from "./settings.mjs"
 import { migrateLegacySettings } from "./migrate-settings.mjs"
 import { stripEditorInjection } from "./editor-context.mjs"
@@ -37,8 +37,13 @@ export function activeHistory(panel) {
 export function activeLines(panel, slotOverride) {
     const data = activeData(panel, slotOverride)
     const history = data?.history ?? []
-    const contextHistory = Array.isArray(data?.contextHistory) ? data.contextHistory : [...history]
-    return { fullHistory: history, contextHistory }
+    // 2026-09-01 会诊 deepseek/kimi/qwen 🟡：机读线判定与 CLI 对齐——`length > 0` 才当
+    // 机读线（`contextHistory: []` 是"无机读线"而非空机器线——空机器线会静默丢全部
+    // 上下文）；回退播种剥离截断 tool args（CLI F6 镜像）——旧文件恢复后把 `…` 半截
+    // arguments 原样发向网关会 400（unexpected end of hex escape）。
+    const ch = data?.contextHistory
+    const contextHistory = (Array.isArray(ch) && ch.length > 0) ? ch : history.map(stripTruncatedToolArgs)
+    return { fullHistory: history, contextHistory, sessionStart: data?.sessionStart ?? null }
   }
 
   /** Persist both lines to the active slot + update manifest metadata.
@@ -56,8 +61,8 @@ export function saveLines(panel, fullHistory, contextHistory, extra = {}, slotOv
     // Human line drops transient machine-only injections (editor context, time reminder);
     // the MACHINE line keeps them — reloading the slot must rebuild a byte-identical
     // machine line or provider prefix caches miss (CLI parity, 2026-08-16 cache-hit fix).
-    const keepReal = (m) => !m.transient
-    const keepMachine = () => true
+    const keepReal = (m) => !m.transient && !isLegacyTransient(m)
+    const keepMachine = (m) => !isLegacyTransient(m)
     // advisor.guard is session-level (2026-08-29): agentState carries the LIVE guard off the
     // run's agent config, merged over the existing advisor object (provider/model/thinking are
     // config-scoped but round-trip through the slot untouched; a legacy null upgrades to an
@@ -94,7 +99,13 @@ export function saveLines(panel, fullHistory, contextHistory, extra = {}, slotOv
       // token) as "missing" and revived the stale slot value on the next save — a revived token
       // re-opened the parent write gate. An explicit key always wins; absent key keeps the slot.
       engDesignToken: "engDesignToken" in extra ? extra.engDesignToken : (existing.engDesignToken ?? null),
-      pendingReminders: existing.pendingReminders ?? [], sessionStart: existing.sessionStart ?? null,
+      pendingReminders: existing.pendingReminders ?? [], sessionStart: existing.sessionStart ?? new Date().toISOString(),
+      // 2026-09-01 会诊 kimi/qwen 🔴：sessionStart 是 F2 覆盖防护的会话身份——VS Code
+      // 此前从不赋值（恒 null）→ diskStart 恒 null → F2 轮转条件永不触发（纯 VS Code
+      // 会话无覆盖防护）；更糟：CLI 加载 VS Code 槽时 setup 的 `??=` 打上 CLI 自己的
+      // start → 跨端保存必轮转对方现场（F2 自伤，"先占者赢"）。现在 null 时赋一次
+      // （与 CLI agent/setup.mjs `_sessionStart ??=` 同语义——同会话两端打点一致，F2 放行）。
+      activeModel: extra.activeModel ?? existing.activeModel ?? null,
     })
   }
 
@@ -166,6 +177,8 @@ export async function deleteSession(panel, slot) {
     if (slots.length <= 1) return  // Keep at least one session
     const newActive = deleteSlotAndUpdate(_cwd(), slot)
     // If we deleted the slot this panel was bound to, rebind to the survivor.
+    // 2026-09-01 CLI 同步：deleteSlotAndUpdate 置空 active（不替面板选"最小剩余号"——
+    // 可能指向另一活进程的槽）；_slot = null → 下次保存经 ensureSlot 重新认领。
     if (slot === panel._slot) panel._slot = newActive
     loadSession(panel)
   }

@@ -6,6 +6,8 @@
 import { specForModel } from "./specs.mjs"
 import { proxyFetch } from "./proxy.mjs"
 import { traceStop } from "./extension/stop-trace.mjs"
+import { escapeMessages } from "./escape.mjs"
+export { stripLocalMessageFields } from "./escape.mjs"
 import {
   RETRYABLE_STATUS, MAX_RETRIES, MAX_CONTINUATIONS,
   RATE_LIMIT_BACKOFF_MS, _rateHooks,
@@ -123,25 +125,17 @@ function getTransport(provider) {
   return TRANSPORTS[provider.format] || TRANSPORTS.openai
 }
 
-/** IKBGX4 (CLI escape.mjs parity)：剥离整消息本地标记字段（transient）——严格 OpenAI 兼容
- * 服务端（opencode/LiteLLM 等）拒绝消息级未知 key（"Extra inputs are not permitted"）。 */
-export function stripLocalMessageFields(messages) {
-  return messages.map((m) => {
-    if (m && typeof m === "object" && "transient" in m) {
-      const { transient, ...rest } = m
-      return rest
-    }
-    return m
-  })
-}
-
 /** Send a streaming chat completion request with automatic continuation on truncation */
 export async function chat(provider, { messages, tools, onToken, onReasoning, onWait, signal, toolChoice, parallelToolCalls }) {
   const spec = specForModel(provider.model)
   const transport = getTransport(provider)
   messages = stripImagesForTextModel(messages, spec)
   messages = normalizeToolPairing(messages) // strict providers 400 on orphan tool_calls (kimi hit this live 2026-08-16)
-  messages = stripLocalMessageFields(messages) // IKBGX4: transient 等本地标记不得进入载荷
+  // IKBGX4 + hex-escape 中和（CLI core.mjs parity，2026-08-31 deepseek-v4-flash 真机 400）：
+  // 剥离 transient 等本地标记 + 把字面 "\x"/"\u" 不足位序列 double 掉——严格服务端
+  // （Kimi/DeepSeek 等）会把 content 里的 "\u" 后不足 4 hex 当转义解析 → "unexpected
+  // end of hex escape" 400（历史 tool 输出含 "\x/\u" 字面量时会稳定复现）。
+  messages = escapeMessages(messages)
 
   // Validate reasoning effort for models that use it
   if (provider.reasoningEffort && provider.format !== "anthropic" && provider.format !== "google") {

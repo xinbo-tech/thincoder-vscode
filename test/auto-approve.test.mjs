@@ -12,14 +12,14 @@ import { tmpdir } from "node:os"
 
 import { reinjectAfterCompaction } from "../src/agent/run-helpers.mjs"
 import { executeToolBatches } from "../src/agent/execute-tools.mjs"
-import { setSlotAutoApprove, newSlot, loadSlot } from "../src/extension/session-io.mjs"
+import { setSlotAutoApprove, newSlot, loadSlot, _setSessionsDirForTest, _resetSessionsDirForTest } from "../src/extension/session-io.mjs"
 
 // ─── Session-level persistence ─────────────────────────────────
 
 describe("session-io — autoApprove slot field (CLI parity, no VS Code setting)", () => {
   let tmp, cwd
-  beforeEach(() => { tmp = mkdtempSync(join(tmpdir(), "thincoder-auto-test-")); cwd = tmp })
-  afterEach(() => rmSync(tmp, { recursive: true, force: true }))
+  beforeEach(() => { tmp = mkdtempSync(join(tmpdir(), "thincoder-auto-test-")); cwd = tmp; _setSessionsDirForTest(join(tmp, "sessions")) })
+  afterEach(() => { _resetSessionsDirForTest(); rmSync(tmp, { recursive: true, force: true }) })
 
   it("newSlot defaults autoApprove to false", () => {
     const slot = newSlot(cwd)

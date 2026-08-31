@@ -17,6 +17,20 @@ function setup() {
 }
 function cleanup() { rmSync(tmp, { recursive: true, force: true }) }
 
+/** cwdHash12 契约（CHECKPOINT.md F5/验收 12，与 src/tools/checkpoint.mjs 相同）：
+ *  sha1(normalizeCwd(cwd)).slice(0,12)——Windows 盘符大写归一化，跨端互通前提。 */
+async function vsCheckpointRoot(cwdPath) {
+  const { createHash } = await import("node:crypto")
+  const { configDir } = await import("../src/config-io.mjs")
+  const norm = cwdPath.replace(/^([a-z]):/, (_, d) => d.toUpperCase() + ":")
+  return join(configDir, "checkpoints", createHash("sha1").update(norm).digest("hex").slice(0, 12))
+}
+
+/** 测试自清理：删除该 cwd 的快照目录（测试 repo 是唯一 mkdtemp 目录，hash 不与他人冲突） */
+async function cleanupCheckpoints(cwdPath) {
+  const { rm } = await import("node:fs/promises")
+  await rm(await vsCheckpointRoot(cwdPath), { recursive: true, force: true })
+}
 describe("checklist — persistent tree checklist (ported from CLI)", () => {
   beforeEach(setup)
   afterEach(cleanup)
@@ -577,31 +591,42 @@ describe("git — unified tool (CLI parity: action subcommands)", () => {
 
 describe("bash — git destructive-command protection (CLI parity)", () => {
   beforeEach(setup)
-  afterEach(cleanup)
+  afterEach(async () => { await cleanupCheckpoints(cwd); cleanup() })
 
-  it("snapshots then ALLOWS checkout -- . (uncommitted work recoverable from stash)", async () => {
+  it("T7d guard 对齐：checkout -- . 触发全量副本快照 + rewind 指引，无 stash（CHECKPOINT.md D4）", async () => {
     const { bashTool } = await import("../src/tools/shell.mjs")
     const { execSync } = await import("node:child_process")
+    const { rm } = await import("node:fs/promises")
     execSync("git init -q", { cwd })
     execSync("git config user.email t@t && git config user.name t", { cwd })
     writeFileSync(join(cwd, "app.js"), "const v = 1\n")
     execSync("git add app.js && git commit -qm init", { cwd })
     writeFileSync(join(cwd, "app.js"), "const v = 2 // uncommitted\n")
 
-    // 不拦截：快照（stash）后放行，命令正常执行
+    // 不拦截：全量副本快照后放行，命令正常执行
     const r = await bashTool.execute({ command: "git checkout -- ." }, { cwd })
     assert.match(r, /\[auto-protection\]/, "应提示自动快照: " + r.slice(0, 120))
+    assert.match(r, /snapshot \S+ created BEFORE execution/, "输出含快照 id（CLI gitGuardSnapshot 同构）")
+    assert.match(r, /checkpointAction=rewind checkpointId=\S+/, "通知含 rewind 恢复指引")
     assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 1\n", "命令已执行（未被拦截）")
-    // stash 已保存 → 可恢复
+
+    // 无 stash 产生（guard 路径已从 stash 迁到全量副本）
     const stash = execSync("git stash list", { cwd, encoding: "utf8" })
-    assert.match(stash, /thincoder-auto-/)
-    execSync("git stash apply", { cwd, encoding: "utf8" })
-    assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 2 // uncommitted\n", "stash 恢复未提交工作")
+    assert.ok(!stash.includes("thincoder-auto-"), "guard 不再产生 stash")
+
+    // 从全量副本快照恢复未提交工作（rewind，与 CLI 同存储同格式）
+    const { rewind } = await import("../src/tools/checkpoint.mjs")
+    const id = r.match(/snapshot (\S+) created BEFORE execution/)[1]
+    const s = await rewind(cwd, id, { path: "app.js" })
+    assert.equal(s.restored, true)
+    assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 2 // uncommitted\n", "快照恢复未提交工作")
+    await rm(join(await vsCheckpointRoot(cwd), id), { recursive: true, force: true })
   })
 
-  it("variant `git checkout HEAD -- .` is snapshot-guarded and the work is recoverable", async () => {
+  it("T7d 变体 `git checkout HEAD -- .` 同样触发全量副本快照，untracked 可恢复", async () => {
     const { bashTool } = await import("../src/tools/shell.mjs")
     const { execSync } = await import("node:child_process")
+    const { rm } = await import("node:fs/promises")
     execSync("git init -q", { cwd })
     execSync("git config user.email t@t && git config user.name t", { cwd })
     writeFileSync(join(cwd, "app.js"), "const v = 1\n")
@@ -609,15 +634,20 @@ describe("bash — git destructive-command protection (CLI parity)", () => {
     writeFileSync(join(cwd, "app.js"), "const v = 2 // uncommitted\n")
     writeFileSync(join(cwd, "new.js"), "export const fresh = 42\n")
 
-    // 变体：宽匹配覆盖 → stash 快照 → 放行
+    // 变体：宽匹配覆盖 → 全量副本快照 → 放行
     const r = await bashTool.execute({ command: "git checkout HEAD -- ." }, { cwd })
     assert.match(r, /\[auto-protection\]/, "变体命令触发自动快照: " + r.slice(0, 120))
+    assert.match(r, /checkpointAction=rewind checkpointId=\S+/, "含 rewind 指引")
     assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 1\n", "tracked 修改被回滚抹掉")
 
-    // 从 stash 恢复未提交工作（untracked 经 stash 有 CRLF 转换，比较时归一化）
-    execSync("git stash apply", { cwd, encoding: "utf8" })
-    assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 2 // uncommitted\n", "stash 恢复 tracked 修改")
-    assert.equal(readFileSync(join(cwd, "new.js"), "utf8").replace(/\r\n/g, "\n"), "export const fresh = 42\n", "stash 恢复 untracked 新文件")
+    // 从全量副本快照恢复 tracked + untracked（CLI parity）
+    const { rewind } = await import("../src/tools/checkpoint.mjs")
+    const id = r.match(/snapshot (\S+) created BEFORE execution/)[1]
+    await rewind(cwd, id, { path: "app.js" })
+    await rewind(cwd, id, { path: "new.js" })
+    assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 2 // uncommitted\n", "快照恢复 tracked 修改")
+    assert.equal(readFileSync(join(cwd, "new.js"), "utf8").replace(/\r\n/g, "\n"), "export const fresh = 42\n", "快照恢复 untracked 新文件")
+    await rm(join(await vsCheckpointRoot(cwd), id), { recursive: true, force: true })
   })
 
   it("non-destructive git commands are untouched; non-repo is silent", async () => {
@@ -638,6 +668,223 @@ describe("bash — git destructive-command protection (CLI parity)", () => {
     const r4 = await bashTool.execute({ command: "git restore ." }, { cwd: plain })
     assert.ok(!r4.includes("[auto-protection]"), "非 git 仓库保护静默")
     rmSync(plain, { recursive: true, force: true })
+  })
+})
+
+describe("checkpoint — 全量副本镜像（CHECKPOINT.md F5 存储统一，CLI parity）", () => {
+  beforeEach(setup)
+  afterEach(async () => { await cleanupCheckpoints(cwd); cleanup() })
+
+  it("git 工具 checkpoint：create/list/rewind/cat/versions 走镜像（同存储同格式）", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const { execSync, execFileSync } = await import("node:child_process")
+    execSync("git init -q", { cwd })
+    execSync("git config user.email t@t && git config user.name t", { cwd })
+    writeFileSync(join(cwd, "app.js"), "const v = 1\n")
+    execSync("git add app.js && git commit -qm init", { cwd })
+
+    // create → list（含 D7 提示行）
+    writeFileSync(join(cwd, "app.js"), "const v = 2\n")
+    const created = await gitTool.execute({ action: "checkpoint", checkpointAction: "create" }, ctx())
+    const id = created.match(/Checkpoint (\S+) created/)[1]
+    assert.ok(id, `create 返回 id: ${created}`)
+    const listed = await gitTool.execute({ action: "checkpoint", checkpointAction: "list" }, ctx())
+    assert.ok(listed.includes(id), "list 含快照 id")
+    assert.ok(listed.endsWith("(意外丢弃改动？checkpointAction=rewind 可恢复操作前状态)"), "D7 提示行在尾部")
+    assert.equal((listed.match(/意外丢弃改动/g) || []).length, 1, "提示行只出现一次")
+
+    // versions
+    const versions = await gitTool.execute({ action: "checkpoint", checkpointAction: "versions", path: "app.js" }, ctx())
+    assert.ok(versions.includes(id), `versions 含快照 id: ${versions}`)
+
+    // cat
+    const cat = await gitTool.execute({ action: "checkpoint", checkpointAction: "cat", checkpointId: id, path: "app.js" }, ctx())
+    assert.equal(cat.replace(/\r\n/g, "\n"), "const v = 2\n", "cat 读取快照内容")
+
+    // rewind 恢复（改坏后单文件恢复）
+    writeFileSync(join(cwd, "app.js"), "const v = 999\n")
+    const rew = await gitTool.execute({ action: "checkpoint", checkpointAction: "rewind", checkpointId: id, path: "app.js" }, ctx())
+    assert.match(rew, /Restored "app\.js"/)
+    assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 2\n", "rewind 恢复快照状态")
+
+    // 空 list 输出不变
+    const g2 = mkdtempSync(join(tmpdir(), "thincoder-vscode-cp-empty-"))
+    execFileSync("git", ["init", "-q"], { cwd: g2 })
+    const empty = await gitTool.execute({ action: "checkpoint", checkpointAction: "list" }, { cwd: g2 })
+    assert.equal(empty, "(no checkpoints yet)")
+    rmSync(g2, { recursive: true, force: true })
+  })
+
+  it("T7b F6：commit 成功后 checkpointRoot(cwd) 目录删除（返回附清理行）", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const { execSync } = await import("node:child_process")
+    execSync("git init -q", { cwd })
+    execSync("git config user.email t@t && git config user.name t", { cwd })
+    writeFileSync(join(cwd, "app.js"), "const v = 1\n")
+    execSync("git add app.js && git commit -qm init", { cwd })
+    await gitTool.execute({ action: "checkpoint", checkpointAction: "create" }, ctx())
+    const root = await vsCheckpointRoot(cwd)
+    assert.ok(existsSync(root), "快照目录存在")
+
+    writeFileSync(join(cwd, "app.js"), "const v = 2\n")
+    const out = await gitTool.execute({ action: "commit", message: "second" }, ctx())
+    assert.match(out, /\(checkpoints cleared — commit is a new safety baseline\)/, "返回附清理行")
+    assert.ok(!existsSync(root), "checkpointRoot(cwd) 目录已删除")
+  })
+
+  it("T7c F5：存量 stash 快照隔离——工具操作只涉及全量副本，stash 不动", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const { execSync } = await import("node:child_process")
+    execSync("git init -q", { cwd })
+    execSync("git config user.email t@t && git config user.name t", { cwd })
+    writeFileSync(join(cwd, "app.js"), "const v = 1\n")
+    execSync("git add app.js && git commit -qm init", { cwd })
+
+    // 旧 stash 快照（存量用户数据）
+    writeFileSync(join(cwd, "app.js"), "const v = 2 // old stash\n")
+    execSync("git stash push -m thincoder-guard-legacy -q", { cwd })
+    const stashBefore = execSync("git stash list", { cwd, encoding: "utf8" })
+    assert.match(stashBefore, /thincoder-guard-legacy/)
+
+    // 新全量副本快照 + list/rewind —— 只动 checkpoint 目录
+    writeFileSync(join(cwd, "app.js"), "const v = 3\n")
+    const created = await gitTool.execute({ action: "checkpoint", checkpointAction: "create" }, ctx())
+    const id = created.match(/Checkpoint (\S+) created/)[1]
+    const listed = await gitTool.execute({ action: "checkpoint", checkpointAction: "list" }, ctx())
+    assert.ok(listed.includes(id), "全量副本快照可见")
+
+    const stashAfter = execSync("git stash list", { cwd, encoding: "utf8" })
+    assert.equal(stashAfter, stashBefore, "stash 不动（存量隔离，用户可手动 git stash drop）")
+
+    // rewind 从全量副本恢复（不触碰 stash）
+    writeFileSync(join(cwd, "app.js"), "const v = 999\n")
+    await gitTool.execute({ action: "checkpoint", checkpointAction: "rewind", checkpointId: id, path: "app.js" }, ctx())
+    assert.equal(readFileSync(join(cwd, "app.js"), "utf8").replace(/\r\n/g, "\n"), "const v = 3\n")
+    const stashFinal = execSync("git stash list", { cwd, encoding: "utf8" })
+    assert.equal(stashFinal, stashBefore, "rewind 后 stash 仍不动")
+  })
+
+  it("T4b NF1 + T8 F1：schema 描述追加段 ≤60 字符且含自动快照/rewind 字样", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const props = gitTool.parameters.properties
+    const appends = [
+      "（checkout/restore 操作前自动快照，checkpointAction=rewind 恢复）",
+      "（操作前自动快照，checkpointAction=rewind 恢复）",
+      "（delete 操作前自动快照，checkpointAction=rewind 恢复）",
+      "（pop 操作前自动快照，checkpointAction=rewind 恢复）",
+      "（rewind 可恢复操作前状态，恢复前自动快照可逆）",
+    ]
+    const allDesc = [
+      props.path.description, props.mode.description, props.tagAction.description,
+      props.branchAction.description, props.stashAction.description,
+      props.checkpointAction.description, props.action.description,
+      props.rebaseAction.description, props.dryRun.description,
+    ]
+    for (const a of appends) {
+      assert.ok(allDesc.some((d) => d.includes(a)), `schema 描述含追加段: ${a}`)
+      assert.ok(a.length <= 60, `增量 ≤60 字符（实际 ${a.length}）: ${a}`)
+    }
+    for (const d of allDesc) {
+      assert.match(d, /自动快照/, "描述含自动快照")
+      assert.match(d, /rewind/, "描述含 rewind")
+    }
+  })
+
+  it("T5b F7：action 集精确（32 个，不含 P2）；两端 action 集一致（CLI parity）", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const enums = gitTool.parameters.properties.action.enum
+    const EXPECTED = [
+      "diff", "status", "log", "show", "checkpoint", "add", "rm", "commit", "push",
+      "tag", "branch", "checkout", "restore", "stash", "fetch", "pull", "reset",
+      "revert", "merge", "cherry-pick", "ls-remote",
+      "clone", "init", "rebase", "remote", "clean", "switch", "apply", "worktree",
+      "archive", "blame", "mv",
+    ]
+    assert.deepEqual(enums, EXPECTED, "action 集精确（21 既有 + 11 新增）")
+    for (const p of ["gc", "config", "fsck", "bisect", "grep", "ls-files", "merge-base", "am", "submodule"]) {
+      assert.ok(!enums.includes(p), `不含 P2 action: ${p}`)
+    }
+    // 两端 action 集一致（standalone vscode clone 时跳过——CLI 侧跑 T7 跨端测试）
+    const cliGit = join(import.meta.dirname, "..", "..", "thincoder", "src", "tools", "git.mjs")
+    if (existsSync(cliGit)) {
+      const { pathToFileURL } = await import("node:url")
+      const cli = await import(pathToFileURL(cliGit).href)
+      assert.deepEqual(cli.gitTool.parameters.properties.action.enum, enums, "两端 action 集一致")
+    }
+  })
+
+  it("T8b F7：新增 11 个 action 可用；clean/rebase 执行前输出 snapshot 行", async () => {
+    const { gitTool } = await import("../src/tools/git.mjs")
+    const { execSync, execFileSync } = await import("node:child_process")
+    const g = (...a) => execFileSync("git", a, { cwd, encoding: "utf8" })
+    execSync("git init -q", { cwd })
+    execSync("git config user.email t@t && git config user.name t", { cwd })
+    writeFileSync(join(cwd, "a.js"), "const v = 1\n")
+    execSync("git add a.js && git commit -qm init", { cwd })
+
+    // rebase（快照行）+ remote + clean（快照行/dryRun）+ switch -c
+    const reb = await gitTool.execute({ action: "rebase", ref: "HEAD" }, ctx())
+    assert.match(reb, /\[snapshot \S+ created before rebase\]/, "rebase 先行快照")
+    assert.match(await gitTool.execute({ action: "remote", remoteAction: "add", remote: "origin", remoteUrl: "https://example.com/x.git" }, ctx()), /added/)
+    assert.match(await gitTool.execute({ action: "remote" }, ctx()), /origin/)
+    writeFileSync(join(cwd, "junk.tmp"), "x\n")
+    const clean = await gitTool.execute({ action: "clean" }, ctx())
+    assert.match(clean, /\[snapshot \S+ created before clean\]/, "clean 先行快照")
+    assert.ok(!existsSync(join(cwd, "junk.tmp")), "untracked 文件被清")
+    writeFileSync(join(cwd, "junk2.tmp"), "x\n")
+    const dry = await gitTool.execute({ action: "clean", dryRun: true }, ctx())
+    assert.ok(existsSync(join(cwd, "junk2.tmp")), "dryRun 不删除")
+    assert.ok(!dry.includes("[snapshot"), "dryRun 不产生快照")
+    assert.match(await gitTool.execute({ action: "switch", create: true, name: "feat" }, ctx()), /Switched/)
+    assert.match(await gitTool.execute({ action: "switch", name: "master" }, ctx()), /Switched/)
+
+    // init（非 git 子目录）+ clone（本地 bare）+ apply + worktree + archive + blame + mv
+    const plain = join(cwd, "plain")
+    mkdirSync(plain, { recursive: true })
+    assert.match(await gitTool.execute({ action: "init" }, { cwd: plain }), /Initialized|Reinitialized/)
+    const bare = join(cwd, "bare.git")
+    execFileSync("git", ["init", "-q", "--bare", bare], { cwd })
+    assert.ok(!/failed/i.test(await gitTool.execute({ action: "clone", remote: bare, path: "cl" }, ctx())))
+    writeFileSync(join(cwd, "a.js"), "const v = 2\n")
+    await gitTool.execute({ action: "commit", message: "mod", path: "a.js" }, ctx())
+    const patch = g("format-patch", "-1", "--stdout")
+    writeFileSync(join(cwd, "p.patch"), patch)
+    g("reset", "-q", "--hard", "HEAD~1")
+    assert.ok(!/failed/i.test(await gitTool.execute({ action: "apply", path: "p.patch" }, ctx())))
+    const head = g("rev-parse", "HEAD").trim()
+    assert.ok(!/failed/i.test(await gitTool.execute({ action: "worktree", worktreeAction: "add", path: "wt", ref: head }, ctx())))
+    assert.match(await gitTool.execute({ action: "worktree" }, ctx()), /wt/)
+    assert.ok(!/failed/i.test(await gitTool.execute({ action: "archive", path: "out.tar" }, ctx())))
+    assert.ok(existsSync(join(cwd, "out.tar")))
+    assert.match(await gitTool.execute({ action: "blame", path: "a.js" }, ctx()), /^[\^]?[0-9a-f]{7,}\s+\(/)
+    assert.match(await gitTool.execute({ action: "mv", path: "a.js", dest: "a2.js" }, ctx()), /Moved/)
+  })
+
+  it("T6b NF6：创建 101 个快照 → 最旧被淘汰（上限 100，镜像 CLI T6）", async () => {
+    const { execFileSync } = await import("node:child_process")
+    const { createCheckpoint, listCheckpoints } = await import("../src/tools/checkpoint.mjs")
+    const dir = mkdtempSync(join(tmpdir(), "thincoder-vscode-cp-t6-"))
+    const git = (...args) => execFileSync("git", args, { cwd: dir, encoding: "utf8" })
+    try {
+      git("init", "-q")
+      git("config", "user.name", "t")
+      git("config", "user.email", "t@t.dev")
+      writeFileSync(join(dir, "a.js"), "const v = 1\n")
+      git("add", ".")
+      git("commit", "-qm", "init")
+      const ids = []
+      for (let i = 0; i < 101; i++) {
+        const cp = await createCheckpoint(dir)
+        ids.push(cp.id)
+      }
+      const cps = await listCheckpoints(dir)
+      assert.equal(cps.length, 100, "总数 100")
+      assert.ok(!cps.some((c) => c.id === ids[0]), "最旧的 1 个被删")
+      assert.equal(cps[cps.length - 1].id, ids[1], "倒数第二旧的保留（新→旧排列尾部）")
+    } finally {
+      await cleanupCheckpoints(dir)
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

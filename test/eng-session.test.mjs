@@ -11,17 +11,19 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import * as vscode from "vscode"
-import { newSlot, loadSlot, saveSessionToSlot, setSlotEngineering, setSlotAdvisorGuard } from "../src/extension/session-io.mjs"
+import { newSlot, loadSlot, saveSessionToSlot, setSlotEngineering, setSlotAdvisorGuard, _setSessionsDirForTest, _resetSessionsDirForTest } from "../src/extension/session-io.mjs"
 
 let tmp
 let cfgPath
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "tc-eng-session-"))
   cfgPath = join(tmp, "config.json")
+  // 2026-09-01 advisor 🔵：sessions 目录注入 tmp——测试不再向真实 ~/.thincoder/sessions 写文件
+  _setSessionsDirForTest(join(tmp, "sessions"))
   // _cwd() reads vscode.workspace.workspaceFolders[0].uri.fsPath — point it at tmp
   vscode.workspace.workspaceFolders = [{ uri: { fsPath: tmp } }]
 })
-afterEach(() => rmSync(tmp, { recursive: true, force: true }))
+afterEach(() => { _resetSessionsDirForTest(); rmSync(tmp, { recursive: true, force: true }) })
 
 // ─── session-io slot setters ────────────────────────────────────
 
@@ -171,7 +173,9 @@ describe("agentState → ChatPanel._saveLines — slot persistence", () => {
     const lines = [{ role: "user", content: "hi", type: "user" }]
     saveSessionToSlot(tmp, 1, { version: 2, cwd: tmp, title: "", updatedAt: Date.now(), history: lines, advisor: { provider: "deepseek", model: "m" } })
     const fakeAgent = { config: { agent: { engineering: true }, advisor: { guard: true, provider: "deepseek" } }, _engDesignToken: null }
-    panel._saveLines(lines, lines, { activeProvider: "deepseek", ...agentState(fakeAgent) })
+    // slotOverride=1：种子是"无 manifest 属主/active"的文件（模拟 CLI 写入）——新版
+    // ensureActive 分支 2 不认领有文件的陌生槽（F4 语义），面板保存必须显式钉槽。
+    panel._saveLines(lines, lines, { activeProvider: "deepseek", ...agentState(fakeAgent) }, 1)
     const data = loadSlot(tmp, 1)
     assert.equal(data.engineering, true, "engineering persisted from agentState")
     assert.equal(data.advisor.guard, true, "guard persisted from agentState")

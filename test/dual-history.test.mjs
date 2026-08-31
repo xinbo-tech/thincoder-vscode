@@ -9,6 +9,7 @@ import {
   loadSlot, saveSlot, deleteSlot, extractSlotMeta,
   listSlots, switchToSlot, newSlot, saveSessionToSlot,
   deleteSlotAndUpdate, setSlotTitle, activeSlot,
+  _setSessionsDirForTest, _resetSessionsDirForTest, sessionsDir,
 } from "../src/extension/session-io.mjs"
 
 let tmp, cwd
@@ -16,9 +17,13 @@ let tmp, cwd
 function setup() {
   tmp = mkdtempSync(join(tmpdir(), "thincoder-vscode-test-"))
   cwd = tmp // Use the tmp dir as cwd so sessions land in a test-specific hash
+  // 2026-09-01 advisor 🔵：sessions 目录注入 tmp（迁移测试此前直接写真实
+  // ~/.thincoder/sessions——断言失败时 legacy 文件残留真实用户目录）
+  _setSessionsDirForTest(join(tmp, "sessions"))
 }
 
 function cleanup() {
+  _resetSessionsDirForTest()
   rmSync(tmp, { recursive: true, force: true })
 }
 
@@ -103,14 +108,15 @@ describe("session-io — shared slot format (CLI-compatible)", () => {
     assert.equal(switchToSlot(cwd, 99), null)
   })
 
-  it("deleteSlotAndUpdate removes slot and picks new active", () => {
+  it("deleteSlotAndUpdate removes slot and clears the active pointer (2026-09-01 CLI 对齐：不替面板选'最小剩余号'——可能指向另一活进程的槽)", () => {
     newSlot(cwd)
     newSlot(cwd)
     const newActive = deleteSlotAndUpdate(cwd, 2)
-    assert.equal(newActive, 1)
+    assert.equal(newActive, null, "active pointer cleared (next ensureSlot re-claims)")
     assert.equal(existsSync(slotPath(cwd, 2)), false)
     const m = loadManifest(cwd)
     assert.equal(m.slots[2], undefined)
+    assert.equal(m.active, undefined)
   })
 
   it("setSlotTitle updates both slot file and manifest", () => {
@@ -128,8 +134,9 @@ describe("session-io — shared slot format (CLI-compatible)", () => {
     const m = loadManifest(cwd)
     assert.equal(m.active, 1)
     assert.ok(m.slotSessions[1], "ownership recorded in slotSessions")
-    // newSlot sets active but does NOT claim ownership (same as CLI).
-    // Slot 1 is still free (ensureActive only set m.active, not m.slots[1]), so it allocates slot 1.
+    // 2026-09-01 CLI F3 同步：newSlot 立即记录所有权（防并发方认领）——slot 1 的属主
+    // 是更早 activeSlot 的认领（ensureActive 只写 slotSessions 不写 m.slots 条目），
+    // newSlot 复用它并保持属主不变。
     const n = newSlot(cwd)
     assert.equal(n, 1)
     const m2 = loadManifest(cwd)
@@ -138,16 +145,16 @@ describe("session-io — shared slot format (CLI-compatible)", () => {
     assert.ok(m2.slotSessions[1], "ownership was claimed by the earlier activeSlot call")
   })
 
-  it("activeSlot claims the existing active slot when it is unowned (avoid-collision semantics)", () => {
+  it("newSlot records ownership immediately (CLI F3 parity) — activeSlot reuses the active slot", () => {
     newSlot(cwd)
-    newSlot(cwd) // active=2, but no ownership claimed (newSlot doesn't claim, same as CLI)
+    newSlot(cwd) // active=2, both slots claimed by us at creation
     const before = loadManifest(cwd)
-    assert.equal(before.slotSessions, undefined)
-    // active=2 is unowned → activeSlot reuses it AND records our claim in slotSessions
+    assert.ok(before.slotSessions[1] && before.slotSessions[2], "newSlot claims ownership immediately (防并发方认领, CLI 会诊 F3)")
+    // active=2 is ours → activeSlot reuses it (no re-claim needed)
     assert.equal(activeSlot(cwd), 2)
     const m = loadManifest(cwd)
     assert.equal(m.active, 2)
-    assert.ok(m.slotSessions[2], "claim written for the reused active slot")
+    assert.ok(m.slotSessions[2], "claim present for the active slot")
   })
 
   it("activeSlot avoids a slot owned by another LIVE process and allocates a new one", () => {
@@ -198,8 +205,8 @@ describe("session-io — shared slot format (CLI-compatible)", () => {
     const mp = manifestPath("/some/dir")
     assert.ok(sp.endsWith(".3"))
     assert.ok(mp.endsWith(".manifest"))
-    assert.ok(sp.includes(".thincoder"))
-    assert.ok(mp.includes(".thincoder"))
+    assert.ok(sp.includes("sessions"), `path sits under the sessions dir (got ${sp})`)
+    assert.ok(mp.includes("sessions"))
   })
 
   it("deleteSlot removes the file without touching manifest", () => {
@@ -275,14 +282,13 @@ describe("legacy short-hash migration (regression: 12→40 hash change stranded 
   it("migrates VS Code's historical 16-char hash (LOWERCASE drive letter)", async () => {
     const { createHash } = await import("node:crypto")
     const { writeFileSync, mkdirSync, existsSync, rmSync: rm } = await import("node:fs")
-    const { homedir } = await import("node:os")
     const { slotPath } = await import("../src/extension/session-io.mjs")
 
     // uri.fsPath on Windows lowercases the drive letter → the legacy 16-char hash
     // was computed over the lowercase path. The migration must find it.
     const lower = cwd.replace(/^([A-Z]):/, (_, d) => d.toLowerCase() + ":")
     const legacy16 = createHash("sha1").update(lower).digest("hex").slice(0, 16)
-    const dir = join(homedir(), ".thincoder", "sessions")
+    const dir = sessionsDir()
     mkdirSync(dir, { recursive: true })
     const legacyBase = join(dir, `${legacy16}.json`)
     writeFileSync(legacyBase, JSON.stringify({ version: 2, cwd, title: "", history: [{ role: "user", content: "legacy16" }] }))
@@ -301,11 +307,10 @@ describe("legacy short-hash migration (regression: 12→40 hash change stranded 
   it("migrates the CLI's historical 12-char hash (uppercase drive letter)", async () => {
     const { createHash } = await import("node:crypto")
     const { writeFileSync, mkdirSync, existsSync, rmSync: rm } = await import("node:fs")
-    const { homedir } = await import("node:os")
     const { slotPath } = await import("../src/extension/session-io.mjs")
 
     const legacy12 = createHash("sha1").update(cwd).digest("hex").slice(0, 12)
-    const dir = join(homedir(), ".thincoder", "sessions")
+    const dir = sessionsDir()
     mkdirSync(dir, { recursive: true })
     const legacyBase = join(dir, `${legacy12}.json`)
     writeFileSync(legacyBase, JSON.stringify({ version: 2, cwd, title: "", history: [{ role: "user", content: "legacy12" }] }))

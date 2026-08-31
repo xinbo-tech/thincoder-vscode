@@ -48,6 +48,9 @@ import { fileURLToPath } from "node:url"
 import { extractAgentResponseTable } from "./history.mjs"
 import { buildAdvisorUserMessage, resolveScopeFiles } from "./messages.mjs"
 import { buildConvergenceBody } from "./convergence.mjs"
+import { escapeLiteralEscapes } from "../escape.mjs"
+// re-export：历史调用方（advisor.test.mjs 等）从本模块 import escapeLiteralEscapes
+export { escapeLiteralEscapes }
 // Re-exported for callers that import from this module (tests, run.mjs).
 export { ADVISOR_MD_PATH, extractAgentResponseTable, extractConversationBackground } from "./history.mjs"
 export { buildAdvisorUserMessage } from "./messages.mjs"
@@ -174,27 +177,15 @@ export function buildAdvisorFollowUp(agent, prior, scopeFiles = null) {
  */
 
 /**
- * Neutralize literal backslash escape sequences ("\x", "\u") that some
+ * Neutralize literal backslash escape sequences ("\\x", "\\u") that some
  * OpenAI-compatible servers interpret inside message content ("unexpected end
  * of hex escape" → 400 — observed 2026-08-06 when the conversation background
- * quoted "\x" literals). Only sequences that would be INVALID when expanded
- * are doubled ("\\x" → literal "\x" after server expansion); well-formed
- * "\xNN" / "\uNNNN" pass through untouched (they expand to a byte/codepoint).
+ * quoted "\\x" literals). Only sequences that would be INVALID when expanded
+ * are doubled ("\\x" → literal "\\x" after server expansion); well-formed
+ * "\\xNN" / "\\uNNNN" pass through untouched (they expand to a byte/codepoint).
+ * Implementation lives in ../escape.mjs (CLI parity — the main-agent send path
+ * src/provider.mjs applies it via escapeMessages since 2026-08-31).
  */
-export function escapeLiteralEscapes(text) {
-  // (?<!\\) — only a SINGLE backslash counts ("\\x" already doubles the
-  // escape and must pass through untouched); lookbehind is fine on Node 24.
-  // Known limitation (documented, accepted): an ODD backslash run of 3+ (e.g.
-  // "\\\x") leaves the trailing "\x" un-doubled — vanishingly rare in real
-  // conversation text, and the sequence is still valid JSON either way.
-  // The lookahead treats "\x" followed by AT LEAST 2 hex as valid (servers
-  // expand only the first two: "\x1b3" → ESC + "3"); only truncated runs
-  // ("\x" + <2 hex) are doubled.
-  text = String(text ?? "")
-  return text
-    .replace(/(?<!\\)\\(x)(?![0-9a-fA-F]{2})/g, "\\\\$1")
-    .replace(/(?<!\\)\\(u)(?![0-9a-fA-F]{4})/g, "\\\\$1")
-}
 
 
 /**

@@ -2,125 +2,113 @@
  * session-io.mjs — session file I/O, shared format with the CLI.
  * Reads/writes ~/.thincoder/sessions/<sha1(cwd)>.json.{N,manifest} — same files the CLI uses,
  * so sessions are interoperable between the CLI and the VS Code extension.
+ *
+ * 2026-09-01: manifest / slot-claiming / slot-number management split into
+ * session-slots.mjs (this file was 606 lines > 500 hard limit; CLI did the same split).
+ * Everything from there is re-exported below so callers' import paths are unchanged.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync, existsSync } from "node:fs"
-import { createHash } from "node:crypto"
-import { homedir } from "node:os"
-import { join, dirname } from "node:path"
-import { execSync } from "node:child_process"
+import { readFileSync, unlinkSync, renameSync, existsSync, statSync } from "node:fs"
 
-let currentSessionId = null
+import {
+  slotPath, manifestPath, loadManifest, saveManifest, writeFile,
+  isProcessAlive, getSessionId, activeSlot, slotOccupancy, sessionsDir,
+} from "./session-slots.mjs"
 
-/** Unique session ID for this extension-host process (same format as CLI: pid-ts-rand). */
-export function getSessionId() {
-  if (!currentSessionId) {
-    currentSessionId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  }
-  return currentSessionId
-}
-
-function sessionsDir() {
-  return join(homedir(), ".thincoder", "sessions")
-}
-
-/** Normalize cwd for hashing: uppercase Windows drive letter so the extension's
- *  uri.fsPath (lowercased) matches the CLI's process.cwd() hash. */
-export function normalizeCwd(cwd) {
-  return cwd.replace(/^([a-z]):/, (_, d) => d.toUpperCase() + ":")
-}
-
-/** Full sha1 hex (40 chars), not truncated. Shared contract with the CLI. */
-function cwdHash(cwd) {
-  return createHash("sha1").update(normalizeCwd(cwd)).digest("hex")
-}
-
-/** One-time migration: rename legacy short-hash session files to the full 40-char hash.
- *  Idempotent; runs on first access per cwd.
- *  Historical hash algorithms (all sha1, none normalized the drive letter):
- *    - CLI:      sha1(cwd).slice(0, 12)      — cwd comes from process.cwd() (uppercase drive on Windows)
- *    - VS Code:  sha1(cwd).slice(0, 16)      — cwd comes from uri.fsPath (LOWERCASE drive on Windows)
- *  Plus the previous migration attempt's assumption (normalized 12 = first 12 of the full hash).
- *  Every combination is tried — a migration that only checks one candidate misses real
- *  legacy files (drive-letter case differs between CLI and VS Code historical paths). */
-function migrateHashLength(cwd, fullHash) {
-  const dir = sessionsDir()
-  const lower = cwd.replace(/^([A-Z]):/, (_, d) => d.toLowerCase() + ":")
-  const candidates = [
-    createHash("sha1").update(cwd).digest("hex").slice(0, 12),
-    createHash("sha1").update(cwd).digest("hex").slice(0, 16),
-    createHash("sha1").update(lower).digest("hex").slice(0, 12),
-    createHash("sha1").update(lower).digest("hex").slice(0, 16),
-    fullHash.slice(0, 12),
-  ]
-  const newBase = join(dir, `${fullHash}.json`)
-  let migrated = false
-  for (const short of new Set(candidates)) {
-    const legacyBase = join(dir, `${short}.json`)
-    if (!existsSync(legacyBase) && !existsSync(`${legacyBase}.manifest`) && !existsSync(`${legacyBase}.1`)) continue
-    migrated = true
-    try {
-      for (const suffix of ["", ".manifest", ...Array.from({ length: 64 }, (_, i) => `.${i + 1}`)]) {
-        const from = legacyBase + suffix
-        if (existsSync(from) && !existsSync(newBase + suffix)) renameSync(from, newBase + suffix)
-      }
-    } catch { /* best-effort */ }
-  }
-  return migrated
-}
-
-function basePath(cwd) {
-  const hash = cwdHash(cwd)
-  migrateHashLength(cwd, hash)
-  return join(sessionsDir(), `${hash}.json`)
-}
-
-export function slotPath(cwd, n) { return `${basePath(cwd)}.${n}` }
-export function manifestPath(cwd) { return `${basePath(cwd)}.manifest` }
-
-/** Atomic write: write to temp file then rename (same as CLI writeSessionFile). */
-function writeFile(p, data) {
-  mkdirSync(dirname(p), { recursive: true })
-  const tmp = `${p}.tmp`
-  writeFileSync(tmp, JSON.stringify(data), "utf8")
-  try {
-    renameSync(tmp, p)
-  } catch {
-    try { unlinkSync(p) } catch {}
-    try { renameSync(tmp, p) } catch { writeFileSync(p, readFileSync(tmp, "utf8"), "utf8") }
-  }
-}
-
-// ─── Manifest ───────────────────────────────────────────────
-
-export function loadManifest(cwd) {
-  try {
-    const p = manifestPath(cwd)
-    if (!existsSync(p)) return { slots: {}, active: null, sessionId: null }
-    const m = JSON.parse(readFileSync(p, "utf8"))
-    if (!m.slots) m.slots = {}
-    if (!m.sessionId) m.sessionId = null
-    return m
-  } catch { return { slots: {}, active: null, sessionId: null } }
-}
-
-export function saveManifest(cwd, m) {
-  m.sessionId = getSessionId()
-  writeFile(manifestPath(cwd), m)
-}
+export {
+  getSessionId, normalizeCwd, slotPath, manifestPath, loadManifest, saveManifest,
+  activeSlot, slotOccupancy, sessionsDir, _setSessionsDirForTest, _resetSessionsDirForTest,
+} from "./session-slots.mjs"
 
 // ─── Slot read/write ────────────────────────────────────────
 
-/** Read a slot file. Returns parsed session data or null. */
+/** Read a slot file. Returns parsed session data or null.
+ *  2026-09-01 CLI 同步（会诊 F2）：结构校验失败不再静默 null——改名 .unreadable 保留
+ *  现场（否则面板绑槽后下次保存直接覆写）；解析失败 .tmp 回退成功后提升为正主（损坏
+ *  主文件改名 .corrupted 保留）；主文件缺失时恢复孤儿 .tmp（rename 前崩溃现场）。
+ *  cwd 不匹配是别人的文件也不动（与 CLI loadSlotFile 一致，advisor 🔵）。 */
+
+// ─── Legacy transient prefix cleanup (CLI parity, 2026-09-01 会诊 glm/kimi 🔴) ──
+
+/** 老 CLI 写入的机器注入前缀消息（人工线残留）——CLI loadSlotFile/saveSession 双点过滤
+ *  （session.mjs:95/102/205），VS Code 此前不过滤 → 旧注入在 VS Code 端进 UI、进播种
+ *  机器线、且保存时永久回写（CLI 的清污被 VS Code 重新污染）。 */
+const LEGACY_TRANSIENT_PREFIXES = [
+  "[System reminder: working directory snapshot:",
+  "[Relevant memories from previous sessions",
+]
+
+export function isLegacyTransient(m) {
+  return (
+    m.role === "user" &&
+    typeof m.content === "string" &&
+    LEGACY_TRANSIENT_PREFIXES.some((p) => m.content.startsWith(p))
+  )
+}
+
+/** slimForDisplay 截断的 arguments 以 U+2026（…）结尾——不是合法 JSON 的完整值。
+ *  v1 老文件回退播种机器线时置为 {}（合法空参数），防止半截 \\uXXXX 毒化发送载荷
+ *  （CLI 会诊 F6 镜像，2026-09-01 会诊 deepseek/kimi/qwen）。 */
+export function stripTruncatedToolArgs(m) {
+  if (m?.role !== "assistant" || !Array.isArray(m.tool_calls)) return m
+  let changed = false
+  const tool_calls = m.tool_calls.map((tc) => {
+    const args = tc?.function?.arguments
+    if (typeof args === "string" && args.endsWith("…")) {
+      changed = true
+      return { ...tc, function: { ...tc.function, arguments: "{}" } }
+    }
+    return tc
+  })
+  return changed ? { ...m, tool_calls } : m
+}
+
 export function loadSlot(cwd, n) {
-  try {
-    const p = slotPath(cwd, n)
-    if (!existsSync(p)) return null
-    const data = JSON.parse(readFileSync(p, "utf8"))
-    if (data?.version !== 1 && data?.version !== 2) return null
-    if (!Array.isArray(data.history)) return null
-    return data
-  } catch { return null }
+  const p = slotPath(cwd, n)
+  const tryLoad = (path) => {
+    try {
+      if (!existsSync(path)) return null
+      const data = JSON.parse(readFileSync(path, "utf8"))
+      if (data.cwd && data.cwd.toLowerCase() !== cwd.toLowerCase()) return null // 别人的文件，不动
+      if (data?.version !== 1 && data?.version !== 2) {
+        if (typeof data?.version === "number" && data.version > 2) return null // 新版 CLI 的文件，不动
+        try { renameSync(path, `${path}.unreadable`) } catch {}
+        return null
+      }
+      if (!Array.isArray(data.history)) {
+        try { renameSync(path, `${path}.unreadable`) } catch {}
+        return null
+      }
+      // 2026-09-01 会诊 glm/kimi 🔴：读时过滤 legacy transient 注入（CLI loadSlotFile
+      // session.mjs:205 同款）——旧 CLI 写入的机器注入残留不得进面板/播种机器线。
+      if (data.history.some(isLegacyTransient)) {
+        data.history = data.history.filter((m) => !isLegacyTransient(m))
+      }
+      return data
+    } catch (e) {
+      return { _error: e }
+    }
+  }
+  let result = tryLoad(p)
+  if (result && !result._error) return result
+  if (result?._error) {
+    const tmpResult = tryLoad(`${p}.tmp`)
+    if (tmpResult && !tmpResult._error) {
+      try {
+        renameSync(p, `${p}.corrupted`)
+        renameSync(`${p}.tmp`, p)
+      } catch {}
+      return tmpResult
+    }
+    try { renameSync(p, `${p}.corrupted`) } catch {}
+  } else if (!result) {
+    const orphan = tryLoad(`${p}.tmp`)
+    if (orphan && !orphan._error) {
+      try { renameSync(`${p}.tmp`, p) } catch {}
+      return orphan
+    }
+  }
+  return null
 }
 
 /** Write a slot file (session data). */
@@ -189,16 +177,31 @@ export function extractSlotMeta(history, activeProvider, updatedAt, title = "") 
 
 // ─── High-level operations (mirror CLI session.mjs) ────────
 
-/** List all slots, newest first (updatedAt desc). Same shape as CLI listSlots. */
+/** List all slots, newest first (updatedAt desc). Same shape as CLI listSlots.
+ *  Read-only — no claiming side effect (2026-09-01 CLI 同步 会诊 🟢). */
+/** Lazy-load slot metadata from slot file (CLI loadSlotMeta parity, 2026-09-01 advisor 🔵——
+ *  旧格式 manifest 条目（裸数字 ts）在面板会话列表显示空 title/count；懒读槽文件补全）。 */
+function loadSlotMeta(cwd, slot, v) {
+  if (typeof v === "object" && v !== null && "ts" in v) return v
+  const ts = typeof v === "number" ? v : 0
+  try {
+    const p = slotPath(cwd, slot)
+    if (!existsSync(p)) return { ts }
+    const data = JSON.parse(readFileSync(p, "utf8"))
+    const history = data.history ?? []
+    return { ts, ...extractSlotMeta(history, data.activeProvider, data.updatedAt ?? ts, data.title ?? "") }
+  } catch {
+    return { ts }
+  }
+}
+
 export function listSlots(cwd) {
   const m = loadManifest(cwd)
   const active = m.active ?? null
   return Object.entries(m.slots)
     .filter(([n]) => /^\d+$/.test(n))
     .map(([n, v]) => {
-      const meta = typeof v === "object" && v !== null && "ts" in v
-        ? v
-        : { ts: typeof v === "number" ? v : 0 }
+      const meta = loadSlotMeta(cwd, Number(n), v)
       return {
         slot: Number(n),
         isActive: Number(n) === active,
@@ -216,41 +219,130 @@ export function listSlots(cwd) {
     .sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
-/** Switch active slot. Returns the loaded session data (null if slot doesn't exist). Same as CLI switchToSlot. */
+/** Switch active slot. Returns the loaded session data (null if slot doesn't exist). Same as CLI switchToSlot.
+ *  2026-09-01 CLI 同步：
+ *   - 目标槽被另一活进程占用时不认领（防双属主）——占用方 _slot 粘性（面板绑槽固定）不受影响；
+ *   - 先 loadSlot 成功才翻 active 指针（advisor round2 🟡——文件缺失/损坏时返回 null 且
+ *     不产生幻影 active，与 CLI"切换不得有认领副作用"对齐）。 */
 export function switchToSlot(cwd, slot) {
   const m = loadManifest(cwd)
   if (!m.slots[slot]) return null
+  const data = loadSlot(cwd, slot)
+  if (!data) return null
+  const owner = m.slotSessions?.[slot]
+  const occupied = !!(owner && owner !== getSessionId() && isProcessAlive(parseInt(owner.split("-")[0])))
   m.active = slot
-  saveManifest(cwd, m)
-  return loadSlot(cwd, slot)
+  if (!occupied) {
+    m.slotSessions ??= {}
+    m.slotSessions[slot] = getSessionId()
+  }
+  saveManifest(cwd, m, null, { setActive: true })
+  return data
 }
 
-/** Create a new session slot: allocate next free number, write empty session, mark active. */
+/** Create a new session slot: allocate next free number, write empty session, mark active.
+ *  2026-09-01 CLI 同步：选号跳过 manifest 条目 / 现存文件 / 活认领号（丢失更新可能让
+ *  条目消失而文件仍在——复用该号会直接覆写真实会话）；开头清理死主条目（死主且文件
+ *  缺失的槽号回收复用，与 ensureActive 语义对齐）；立即记录所有权（F3——否则并发方
+ *  会把新 active 槽当空闲认领）。 */
 export function newSlot(cwd) {
   const m = loadManifest(cwd)
+  // 2026-09-01 advisor round2 🟡：死主清理必须经 deletions 显式落盘——saveManifest 条目级
+  // 合并会把磁盘死条目从 fresh 复活回写，仅传 m 等于没删（与 ensureActive deadParam 同型）。
+  const mySessionId = getSessionId()
+  const deadSlots = []
+  for (const [s, owner] of Object.entries(m.slotSessions ?? {})) {
+    if (owner && owner !== mySessionId) {
+      const pid = parseInt(owner.split("-")[0])
+      if (!pid || !isProcessAlive(pid)) {
+        delete m.slotSessions[s]
+        if (!existsSync(slotPath(cwd, Number(s)))) delete m.slots[s]
+        deadSlots.push(s)
+      }
+    }
+  }
+  const liveClaimed = (n) => {
+    const owner = m.slotSessions?.[n]
+    return !!(owner && owner !== mySessionId && isProcessAlive(parseInt(owner.split("-")[0])))
+  }
   let slot = 1
-  while (m.slots[slot]) slot++
+  while (m.slots[slot] || existsSync(slotPath(cwd, slot)) || liveClaimed(slot)) slot++
   const data = {
     version: 2, cwd, title: "", updatedAt: Date.now(),
-    history: [], contextHistory: [], display: [], tasks: [],
+    history: [], contextHistory: [], tasks: [],
     planMode: false, goal: null, autoApprove: false, advisor: null, pendingReminders: [], sessionStart: null,
   }
   saveSlot(cwd, slot, data)
+  m.slotSessions ??= {}
+  m.slotSessions[slot] = mySessionId
   m.slots[slot] = { ts: Date.now(), ...extractSlotMeta([], "", data.updatedAt, "") }
   m.active = slot
-  saveManifest(cwd, m)
+  // deletions 过滤掉本调用刚重新认领的槽（防删掉自己的新属主）——与 ensureActive deadParam 同型
+  const deletions = deadSlots.length
+    ? {
+        slotSessions: deadSlots.filter((s) => m.slotSessions[s] !== mySessionId),
+        slots: deadSlots.filter((s) => !m.slots[s]),
+      }
+    : null
+  saveManifest(cwd, m, deletions, { setActive: true })
   return slot
 }
 
-/** Save session data to a slot + update manifest metadata. */
+// mtime cache for the F2 rotation check (CLI _slotMtime parity, 2026-09-01 advisor 🟡):
+// the panel saves at turn end and on every setSlot* — re-reading + JSON.parsing a
+// multi-MB slot file on EVERY save is O(n²). Gate on the file's mtime: unchanged
+// since our last check/write → skip the parse.
+const slotMtimeCache = new Map() // key: slot file path → last seen mtimeMs
+
+/** Save session data to a slot + update manifest metadata.
+ *  2026-09-01 CLI 同步（会诊 F2 🔴）：写前校验磁盘文件的 sessionStart——与本进程会话
+ *  不符（另一进程/会话的现场）→ 先轮转 .bak 保留再写（CLI 11311 条历史被覆盖的实锤
+ *  场景；扩展端此前直接覆盖，双进程并发时会话静默丢失）。**version > 2 的文件无论
+ *  sessionStart 一律轮转**（loadSlot 对 v3 返回 null 不动，若其 sessionStart 为 null
+ *  首次保存会静默覆盖——CLI 2026-08-31 会诊 deepseek 🟡 同款）。**返回轮转的 .bak
+ *  路径或 null**（对齐 CLI saveSession 返回值透出）。 */
 export function saveSessionToSlot(cwd, slot, data) {
   data.updatedAt = Date.now()
+  let rotated = null
+  const p = slotPath(cwd, slot)
+  try {
+    if (existsSync(p)) {
+      const st = statSync(p)
+      const cached = slotMtimeCache.get(p)
+      let disk = null
+      if (st.mtimeMs !== cached) {
+        disk = JSON.parse(readFileSync(p, "utf8"))
+        slotMtimeCache.set(p, st.mtimeMs)
+      }
+      if (disk) {
+        const diskStart = disk?.sessionStart ?? null
+        const myStart = data.sessionStart ?? null
+        const diskIsNewer = typeof disk?.version === "number" && disk.version > 2
+        // 2026-09-01 会诊 qwen 🔴：同会话"旧快照回滚"检测——turn 启动读槽快照、回合末
+        // 写回，期间另一进程（CLI）追加了消息：sessionStart 相同 → F2 放行 → 旧快照
+        // 整体覆盖对方最新消息（静默丢失）。磁盘 history 比待写快照长 = 外部写入 →
+        // 轮转 .bak 保留对方现场，不静默覆盖。
+        const diskLonger = Array.isArray(disk?.history) && Array.isArray(data?.history) && disk.history.length > data.history.length
+        if (diskIsNewer || (diskStart && diskStart !== myStart) || diskLonger) {
+          const bak = `${p}.bak-${Date.now()}`
+          renameSync(p, bak)
+          rotated = bak
+          console.error(`[session] slot ${slot} ${diskIsNewer ? `holds a newer-version file (v${disk.version})` : diskLonger ? `grew on disk (${disk.history.length} > ${data.history.length} msgs — concurrent append)` : `holds another session (start ${diskStart}, ours ${myStart})`} — preserved as ${bak}`)
+        }
+      }
+    }
+  } catch {
+    // 解析失败也轮转（损坏现场不覆盖）
+    try { renameSync(p, `${p}.corrupted`) } catch {}
+  }
   saveSlot(cwd, slot, data)
   try {
     const m = loadManifest(cwd)
     m.slots[slot] = { ts: Date.now(), ...extractSlotMeta(data.history ?? [], data.activeProvider, data.updatedAt, data.title ?? "") }
     saveManifest(cwd, m)
   } catch { /* non-fatal */ }
+  slotMtimeCache.set(p, statSync(p).mtimeMs)
+  return rotated
 }
 
 /**
@@ -297,8 +389,7 @@ export function setSlotAdvisorGuard(cwd, slot, value) {
   return true
 }
 
-
-/** Page size for lazy history loading (initial paint + scroll-back pages). */
+/** Page size for lazy history loading (initial paint + scroll-back pages). CLI parity. */
 export const HISTORY_PAGE_SIZE = 20
 
 /**
@@ -339,27 +430,37 @@ export function historyWindow(history, before, pageSize = HISTORY_PAGE_SIZE) {
   }
   return { messages, hasOlder: start > 0 }
 }
-/** Delete a slot + remove from manifest. Returns the new active slot (or null if none left). */
+
+/** Delete a slot + remove from manifest. Returns the new active slot (or null if none left).
+ *  2026-09-01 CLI 同步：deletions 显式删除（防 saveManifest 合并复活）+ 删到 active 时
+ *  置空指针（对齐 CLI deleteSlot——active 指向"最小剩余号"可能是另一活进程的槽，
+ *  面板随后会经 ensureSlot 重新认领，不必在删除时替它决定）。 */
 export function deleteSlotAndUpdate(cwd, slot) {
   deleteSlot(cwd, slot)
   const m = loadManifest(cwd)
   delete m.slots[slot]
   if (m.slotSessions) delete m.slotSessions[slot]
-  if (m.active === slot) {
-    const remaining = Object.keys(m.slots).filter((n) => /^\d+$/.test(n)).map(Number).sort((a, b) => a - b)
-    m.active = remaining[0] ?? null
-  }
-  saveManifest(cwd, m)
-  return m.active
+  if (m.active === slot) delete m.active
+  saveManifest(cwd, m, { slots: [slot], slotSessions: [slot] }, { setActive: true })
+  return m.active ?? null
 }
 
-/** Update the title of a slot (in both the slot file and the manifest). */
+/** Update the title of a slot (in both the slot file and the manifest).
+ *  2026-09-01 CLI 同步（advisor 🟡）：写回前按 mtime 门控——读→改→整文件写回窗口内
+ *  并发方的最新保存会被旧数据覆盖（丢消息）；mtime 变了即放弃本次重命名（下次重试）。 */
 export function setSlotTitle(cwd, slot, title) {
-  const data = loadSlot(cwd, slot)
-  if (data) {
-    data.title = title
-    saveSlot(cwd, slot, data)
+  const p = slotPath(cwd, slot)
+  if (!existsSync(p)) return
+  let data
+  try {
+    data = JSON.parse(readFileSync(p, "utf8"))
+  } catch {
+    return
   }
+  const t0 = statSync(p).mtimeMs
+  data.title = title
+  if (statSync(p).mtimeMs !== t0) return // 读与写之间被并发方改过 → 放弃
+  saveSlot(cwd, slot, data)
   const m = loadManifest(cwd)
   if (m.slots[slot]) {
     const meta = typeof m.slots[slot] === "object" ? m.slots[slot] : { ts: 0 }
@@ -367,76 +468,6 @@ export function setSlotTitle(cwd, slot, title) {
     m.slots[slot] = meta
     saveManifest(cwd, m)
   }
-}
-
-/**
- * Check if a process with given PID is still alive (same as CLI session.mjs).
- * Returns false if process doesn't exist or we can't determine.
- */
-function isProcessAlive(pid) {
-  if (!pid || isNaN(pid)) return false
-  try {
-    if (process.platform === "win32") {
-      const output = execSync(`tasklist /FI "PID eq ${pid}" /NH`, { encoding: "utf8", stdio: "pipe" })
-      return output.includes(String(pid))
-    }
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * Claim a slot for this process and set it as active. Idempotent. Mirrors CLI ensureActive.
- * Preference order:
- *  1. The current active slot, if it is unowned / ours / its owner is dead — reuse it.
- *  2. Any slot that is unowned or owned by a dead process (reclaim).
- *  3. A brand-new slot when all are owned by live processes.
- * The owner is recorded in m.slotSessions so other processes (CLI ↔ VS Code) can
- * see which slots are taken and avoid them.
- */
-function ensureActive(cwd, m) {
-  const mySessionId = getSessionId()
-  if (!m.slotSessions) m.slotSessions = {}
-  if (m.active && m.slotSessions[m.active] === mySessionId) return
-
-  const isFree = (slot) => {
-    const owner = m.slotSessions[slot]
-    if (!owner || owner === mySessionId) return true
-    return !isProcessAlive(parseInt(owner.split("-")[0]))
-  }
-
-  // 1. Prefer the current active slot if we can take it (preserves "resume where you left off").
-  if (m.active && m.slots[m.active] && isFree(m.active)) {
-    m.slotSessions[m.active] = mySessionId
-    saveManifest(cwd, m)
-    return
-  }
-
-  // 2. Otherwise claim the first slot that is free.
-  const allSlots = Object.keys(m.slots).filter((n) => /^\d+$/.test(n)).map(Number).sort((a, b) => a - b)
-  for (const slot of allSlots) {
-    if (isFree(slot)) {
-      m.active = slot
-      m.slotSessions[slot] = mySessionId
-      saveManifest(cwd, m)
-      return
-    }
-  }
-
-  // 3. All slots owned by live processes — allocate a new one (no limit).
-  const newSlot = allSlots.length > 0 ? Math.max(...allSlots) + 1 : 1
-  m.active = newSlot
-  m.slotSessions[newSlot] = mySessionId
-  saveManifest(cwd, m)
-}
-
-/** Get this process's active slot number, claiming one if needed (same as CLI activeSlot). */
-export function activeSlot(cwd) {
-  const m = loadManifest(cwd)
-  ensureActive(cwd, m)
-  return m.active
 }
 
 // ─── Model prefs (workspaceState, unrelated to session files) ──

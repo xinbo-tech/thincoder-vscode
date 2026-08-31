@@ -4,7 +4,7 @@
  */
 import * as vscode from "vscode"
 import { t, loadLocaleStrings } from "../i18n.mjs"
-import { saveModelPrefs, switchToSlot, setSlotTitle, setSlotAdvisorGuard, setSlotEngineering } from "./session-io.mjs"
+import { saveModelPrefs, switchToSlot, setSlotTitle, setSlotAdvisorGuard, setSlotEngineering, slotOccupancy } from "./session-io.mjs"
 import { handleAddProvider, handleRemoveProvider, handleSetProviderProxy, agentSettings, saveAgentSettingsFromPanel, saveProxySettingsFromPanel, testProxyConnection, shellCandidates, saveShellSettingsFromPanel, saveWebsearchKeyFromPanel, deleteWebsearchKeyFromPanel, testProviderConnection } from "./settings.mjs"
 import { PRESETS } from "./presets.mjs"
 import { addProviderFlow, removeProviderFlow, setKeyFlow } from "./provider-flows.mjs"
@@ -87,7 +87,17 @@ export async function handlePanelMessage(panel, msg) {
       // 此时不得把面板绑到幻影槽（否则渲染出空会话）。
       const target = switchToSlot(_cwd(), msg.slot)  // persists the shared active pointer for CLI interop
       if (target == null) break
-      panel._slot = msg.slot          // bind this panel to the chosen slot
+      // 2026-09-01 advisor round2 🟡：目标槽被另一活进程（CLI/另一实例）占用时不得钉槽——
+      // 面板 _slot 粘性会绕过 activeSlot 的认领决策，双方写同一槽静默互覆盖。占用 →
+      // 不钉（_slot 保持 null）+ 提示。注意：loadSession 会在 load 时立即经 ensureSlot
+      // 认领新槽（不是"下次保存才 fork"）——文案与实际行为对齐。
+      const occ = slotOccupancy(_cwd(), msg.slot)
+      if (occ.occupied) {
+        vscode.window.showWarningMessage(`ThinCoder: session ${msg.slot} is being used by another live process — a new empty session has been created for you here.`)
+        panel._slot = null
+      } else {
+        panel._slot = msg.slot          // bind this panel to the chosen slot
+      }
       await panel._loadSession()
       break
     }

@@ -21,7 +21,7 @@
 - [ ] §2 runAgent 签名参数名对齐实际实现（input → text，advisor #8）
 - [ ] §4 模型能力表补 thinkEnabledValue / noUsageStream（advisor #10）
 - [ ] advisor 子代理工具集补 lsp（原文档 T19 遗留）
-- [ ] 跨端文档漂移（2026-08-21 评审 advisory）：checkpoint 机制两端语义差异待明确（CLI v2 全量副本快照 vs VS Code git stash）、preset 计数 16/17、TUI 模块数 ~24/45、12 位旧 hash 改名侧未标注
+- [x] ~~跨端文档漂移（2026-08-21 评审 advisory）：checkpoint 机制两端语义差异待明确（CLI v2 全量副本快照 vs VS Code git stash）、preset 计数 16/17、TUI 模块数 ~24/45、12 位旧 hash 改名侧未标注~~——**2026-09-01 销账**：checkpoint 差异已随 CHECKPOINT.md F5 落地统一（VS Code 镜像全量副本 `src/tools/checkpoint.mjs`，同存储同格式，stash 从工具与 guard 路径移除；guard 对齐 CLI 宽匹配 + rewind 指引）；preset 计数已同步（两端 6 个一致）；TUI 模块地图已重写（2026-08-30）；12 位旧 hash 改名已在 AGENTS.md 标注（2026-08-25）
 - [ ] 模块图补录（2026-08-26 模型显示交付评审 🔵4）：`src/extension/panel-chat.mjs` / `webview/streaming.js` / `webview/panels.js` / `webview/state.js` 未入 AGENTS.md 模块图与 ARCHITECTURE.md §6/§1——既有漂移，非本次引入
 - [ ] `src/agent/setup.mjs` 331 行超 300 建议线（2026-08-28 Qwen 交付评审 #6）——toolSchemas 构建或 context 注入段再抽一层；非本轮引入，低优先
 - [ ] vscode qwen 请求在 thinking 未设置时携带 `thinking:{type:"enabled"}`（智谱式参数，GLM 修复引入的通用 spec 默认注入，非 qwen 专属）——发往百炼的兼容性属 Qwen enable_thinking T7 冒烟/既有范畴，知悉（2026-08-28 Qwen 交付偏离 4）

@@ -11,15 +11,19 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import * as vscode from "vscode"
-import { loadSlot } from "../src/extension/session-io.mjs"
+import { loadSlot, _setSessionsDirForTest, _resetSessionsDirForTest } from "../src/extension/session-io.mjs"
 
 let tmp
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "tc-panel-"))
+  _setSessionsDirForTest(join(tmp, "sessions"))
   // _cwd() reads vscode.workspace.workspaceFolders[0].uri.fsPath — point it at tmp
   vscode.workspace.workspaceFolders = [{ uri: { fsPath: tmp } }]
 })
-afterEach(() => rmSync(tmp, { recursive: true, force: true }))
+afterEach(() => {
+  _resetSessionsDirForTest()
+  rmSync(tmp, { recursive: true, force: true })
+})
 
 describe("ChatPanel._saveLines — display cleared (CLI resume parity)", () => {
   it("persists history but clears display so the CLI rebuilds from history", async () => {
@@ -564,7 +568,6 @@ describe("session switch race guards (GitHub #2/#5 — 2026-08-28)", () => {
       const posted = []
       const panel = await makePanel(port, posted)
       const { _setConfigPathForTest } = await import("../src/config-io.mjs")
-      void _setConfigPathForTest
       // Tight turn budget via config.json agent.maxTurns
       _setConfigPathForTest(join(tmp, "config.json"))
       writeFileSync(join(tmp, "config.json"), JSON.stringify({
