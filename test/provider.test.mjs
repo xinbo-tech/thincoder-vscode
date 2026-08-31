@@ -512,6 +512,28 @@ describe("2026-08-31 会诊：Retry-After / rateGate 超预算 / listModels 兜�
     assert.equal(result.usage.prompt_cache_hit_tokens, 1)
   })
 
+  it("Responses 内置工具（web_search）：声明 + 捕获 + 回传（2026-08-31 用户拍板）", async () => {
+    const { buildRequest, parseStream } = await import("../src/provider/transports/responses.mjs")
+    // 百炼默认声明 web_search 与本地 function 共存
+    const p = { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", apiKey: "k", model: "qwen3.8-max", stateful: true }
+    const req = buildRequest(p, [{ role: "user", content: "搜" }], [{ type: "function", name: "read", description: "d", parameters: { type: "object", properties: {} } }], {})
+    const b = JSON.parse(req.body)
+    assert.equal(b.tools.length, 2)
+    assert.equal(b.tools[1].type, "web_search", "内置 web_search 声明")
+    // builtinTools:false 关闭
+    const reqOff = buildRequest({ ...p, builtinTools: false }, [{ role: "user", content: "搜" }], [], {})
+    assert.equal((JSON.parse(reqOff.body).tools ?? []).length, 0, "显式关闭内置工具")
+    // web_search_call 捕获
+    const events = [
+      { type: "response.output_item.done", item: { id: "ws_1", type: "web_search_call", status: "completed", action: { query: "天气", type: "search", sources: [] } } },
+      { type: "response.completed", response: { id: "resp_1", usage: { input_tokens: 1, output_tokens: 1 } } },
+    ]
+    const payload = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("")
+    const result = await parseStream({ body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(payload)); c.close() } }) }, { onToken: () => {}, onReasoning: () => {} })
+    assert.equal(result.builtinToolResults.length, 1)
+    assert.equal(result.builtinToolResults[0].query, "天气")
+  })
+
 
   it("parseRetryAfter：秒数/HTTP-date + 300s 上限（会诊 #5）", async () => {
     const { parseRetryAfter } = await import("../src/provider.mjs")

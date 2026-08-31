@@ -53,10 +53,36 @@ export function normalizeTools(tools) {
   }))
 }
 
+/** 内置工具声明（2026-08-31 用户拍板，一期 web_search；CLI 同规格）。
+ *  provider.builtinTools === false 关闭、数组显式覆盖；服务端执行（绕过本地权限门/审计）。 */
+function builtinToolsFor(baseURL, providerBuiltin) {
+  if (providerBuiltin === false) return []
+  if (Array.isArray(providerBuiltin)) return providerBuiltin
+  try {
+    const host = new URL(baseURL).hostname
+    if (/(^|\.)openai\.com$/.test(host) || host.includes("dashscope.aliyuncs.com") || host.includes(".maas.aliyuncs.com") || /(^|\.)deepseek\.com$/.test(host)) {
+      return [{ type: "web_search" }]
+    }
+  } catch { /* fallthrough */ }
+  return []
+}
+
 function toItems(messages) {
   const items = []
   for (const m of messages ?? []) {
     if (m.role === "system") continue
+    if (typeof m.tool_call_id === "string" && m.tool_call_id.startsWith("web_search_call_") && typeof m.content === "string") {
+      // 内置工具结果本地化消息 → 原样 web_search_call item 回传（服务端自动恢复搜索结果）
+      let query = ""
+      let srcs = []
+      try {
+        const parsed = JSON.parse(m.content)
+        query = parsed.query ?? ""
+        srcs = parsed.sources ?? []
+      } catch { /* 非 JSON 纯展示 → query 缺省 */ }
+      items.push({ type: "web_search_call", id: m.tool_call_id, status: "completed", action: { query, type: "search", sources: srcs } })
+      continue
+    }
     if (m.role === "user") {
       const content = m.content
       items.push(Array.isArray(content)
@@ -122,9 +148,11 @@ export function buildRequest(provider, messages, tools, { toolChoice, stateful }
     stream: true,
     store: false,
   }
+  // 内置工具声明追加（2026-08-31 用户拍板）：web_search 与本地 function 工具共存
+  const builtin = builtinToolsFor(provider.baseURL, provider.builtinTools)
+  if (builtin.length) body.tools = [...(tools ?? []), ...builtin]
   const instructions = (messages ?? []).find((m) => m.role === "system")?.content
   if (instructions) body.instructions = typeof instructions === "string" ? instructions : JSON.stringify(instructions)
-  if (tools?.length) body.tools = tools
   if (provider.maxTokens) body.max_output_tokens = provider.maxTokens
   else if (spec.maxOutput) body.max_output_tokens = spec.maxOutput
   if (provider.temperature != null) body.temperature = spec.tempRange
@@ -181,6 +209,7 @@ function normalizeUsage(usage) {
  */
 export async function parseStream(response, { onToken, onReasoning, signal } = {}) {
   const result = { content: "", reasoning: "", toolCalls: [], usage: null, finishReason: null }
+  result.builtinToolResults = [] // 内置工具（web_search_call）结果 —— agent 层本地化为 tool 消息
   const slots = new Map() // call_id → { id, name, arguments }
   const itemToCall = new Map() // item_id → call_id
   const order = []
@@ -238,6 +267,13 @@ export async function parseStream(response, { onToken, onReasoning, signal } = {
           if (item.type === "function_call") {
             const slot = slots.get(item.call_id ?? item.id ?? "")
             if (slot && item.arguments && item.arguments !== slot.arguments) slot.arguments = item.arguments
+          } else if (item.type === "web_search_call") {
+            result.builtinToolResults.push({
+              id: item.id ?? "",
+              query: item.action?.query ?? "",
+              status: item.status ?? "completed",
+              sources: item.action?.sources ?? [],
+            })
           }
           break
         }

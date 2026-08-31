@@ -179,6 +179,17 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     })
     traceStop(`turn ${turn}: LLM stream ended`)
 
+    // 内置工具（Responses web_search）结果本地化：服务端已执行——入历史为 tool 消息，
+    // 模型下一轮可见；全量回传时 transport 依 tool_call_id 前缀还原 web_search_call item。
+    for (const btr of response.builtinToolResults ?? []) {
+      if (!btr?.id) continue
+      pushReal(history, fullHistory, {
+        role: "tool",
+        tool_call_id: btr.id,
+        content: JSON.stringify({ query: btr.query ?? "", sources: btr.sources ?? [], status: btr.status ?? "completed" }),
+      })
+    }
+
     // Interrupt (Ctrl+I, CLI agent.mjs parity): the SSE stream returned the
     // partial result — commit the partial assistant output, inject the user's
     // message, and throw so the outer loop rebuilds the controller and resumes.
