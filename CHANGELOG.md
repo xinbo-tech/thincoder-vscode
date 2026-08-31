@@ -2,7 +2,19 @@
 
 All notable changes to ThinCoder VS Code are documented here.
 
-## [Unreleased]
+## [0.8.9] — 2026-09-01
+
+### Added
+
+- **Checkpoint 镜像（与 CLI 存储统一）**：VS Code checkpoint 从 git stash 改为全量副本（`~/.thincoder/checkpoints/{cwdHash12}/`，cwdHash 归一化——跨端快照互通）；git 工具补齐 11 个 action（clone/init/rebase/remote/clean/switch/apply/worktree/archive/blame/mv）；commit 后清空该项目 checkpoint；bash guard 对齐 CLI（宽匹配 + 全量副本 + rewind 指引）
+
+### Changed
+
+- **跨端会话共享一致性（会诊 4 模型收敛）**：sessionStart 打点（saveLines 只赋一次）；F2 写前磁盘校验（同会话并发追加 → 轮转 .bak 保留）；legacy transient 读+写双点过滤；contextHistory 机读线判定（length>0）；listSlots 懒加载元数据
+
+### Fixed
+
+- **发送前 hex-escape 中和缺失（deepseek-v4-flash 400 "unexpected end of hex escape"）**：主 agent 发送路径（provider.mjs chat()）此前只做 stripImages/normalizeToolPairing/stripLocalMessageFields，缺 CLI core.mjs 的 `escapeMessages` 防御——历史 tool 输出含字面 `\\x`/`\\u` 不足位序列（如 "neutralizes invalid literal \\x/\\u sequences"）时，严格网关（Kimi/DeepSeek v4-flash 实测）把 content 二次解码 → 整请求 400，会话不可用。修复：新建 `src/escape.mjs`（CLI parity，与 CLI `src/escape.mjs` 同构），`chat()` 发送前统一应用 `escapeMessages`（strip + double）；advisor 的 `escapeLiteralEscapes` 副本迁移至该模块（re-export 兼容）。真机会话数据验证：1184 条历史 48 处毒序列全部中和，请求体 JSON 合法。
 
 ### Fixed
 
