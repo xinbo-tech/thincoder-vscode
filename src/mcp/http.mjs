@@ -138,14 +138,25 @@ export function httpTransport(baseURL, extraHeaders = {}) {
     const body = JSON.stringify({ jsonrpc: "2.0", id, method, params })
 
     if (legacySSE) {
+      // 2026-08-31 MCP 会诊 #10：legacy 模式下 POST 若直接带回 JSON-RPC body（违规 server），
+      // 原实现对 resp.ok 什么都不做 → pending 挂满 120s。空 body = 规范行为（等 SSE 流）。
       return new Promise((resolve) => {
         pending.set(id, resolve)
         fetch(postUrl, { method: "POST", headers: headers(), body, signal: AbortSignal.timeout(CALL_TIMEOUT_MS) })
-          .then((resp) => {
+          .then(async (resp) => {
             if (!resp.ok) {
               pending.delete(id)
               resolve({ id, error: { code: -32000, message: `POST failed: HTTP ${resp.status}` } })
+              return
             }
+            const raw = await resp.text().catch(() => "")
+            if (raw.trim()) {
+              try {
+                const msg = JSON.parse(raw)
+                if (msg.id === id) { pending.delete(id); resolve(msg); return }
+              } catch { /* ignore — pending 交给 SSE 流 */ }
+            }
+            // 空体或非本次 id 的 JSON：保持 pending 等 GET SSE 流回包
           })
           .catch((e) => {
             pending.delete(id)

@@ -160,6 +160,18 @@ describe("2026-08-31 MCP 会诊：transport 鲁棒性", () => {
     const t = buildMcpTools(server)[0]
     await assert.rejects(() => t.execute({}, {}), /isError|boom/, "isError 必须 throw")
   })
+
+  it("withAuthToken: Bearer → subprotocol, no token in URL query (#10)", async () => {
+    const { withAuthToken } = await import("../src/mcp/utils.mjs")
+    const { url, protocols } = withAuthToken("ws://example.com/mcp", "Bearer sk-secret")
+    assert.equal(url, "ws://example.com/mcp", "URL must not gain a token query param")
+    assert.deepEqual(protocols, ["bearer.sk-secret"], "token rides the subprotocol")
+    const { url: u2, protocols: p2 } = withAuthToken("ws://example.com/mcp?token=user-supplied", "Bearer sk-secret")
+    assert.match(u2, /token=user-supplied/, "user-supplied query token untouched")
+    assert.deepEqual(p2, ["bearer.sk-secret"])
+    assert.deepEqual(withAuthToken("ws://example.com/mcp", undefined), { url: "ws://example.com/mcp", protocols: [] })
+    assert.throws(() => withAuthToken("not a url", "Bearer t"), /Invalid WebSocket URL/)
+  })
 })
 
 // ─── 2026-08-31 MCP 会诊 P5：registry 自愈（onDead → 退避重连 → client id 稳定）───
