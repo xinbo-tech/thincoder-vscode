@@ -118,7 +118,7 @@ user input
 |------|------|
 | 文件 | `read`, `write`, `edit`, `insert_after`, `delete`, `lint`（CLI 级联）, `checklist` |
 | 搜索 | `glob`, `grep`, `ls`, `code_search`, `doc_search` |
-| Git | `git_diff`, `git_status`, `git_log`, `checkpoint` |
+| Git | `git`（统一工具，action 子命令：diff/status/log/show/checkpoint/...） |
 | 系统 | `bash` |
 | 网络 | `websearch`, `fetch` |
 | 交互 | `question` |
@@ -231,7 +231,7 @@ user input
 |------|------|------|
 | Memory 三层体系 | ✅ 基础 | 文件式 markdown 条目 + frontmatter（CLI 条目格式兼容，put/search/list/remove）；配 embedding key 时走向量语义检索，否则关键词回退；不依赖 sqlite |
 | MCP 支持 | ✅ | stdio + HTTP/WS transport，工具**动态展开为原生工具**（`{server}_{tool}` 前缀，CLI parity——统一规范见 thincoder `docs/design/MCP.md`；旧 `mcpTool` 网关已废弃）。配置存 `~/.thincoder/config.json` 的 `mcp.servers[]`（面板 Settings 可管理；旧 `thincoder.mcpServers` 设置已随迁移删除） |
-| Checkpoint (git snapshot) | ✅ | git stash 快照 + list/create/rewind/cat，支持单文件恢复 |
+| Checkpoint | ✅ | 全量副本快照（~/.thincoder/checkpoints/，CLI 同存储）+ list/create/rewind/cat/versions，单文件恢复（详见 CLI docs/design/CHECKPOINT.md） |
 | Image input | ✅ | `read_image` 工具（多模态模型支持：Kimi K3、Qwen、GPT-4o、MiniMax M3、GLM-5.3-Flash；文本模型发送侧自动剥离图片部分）。**粘贴/拖拽/附加按钮**（GitHub thincoder#3 方案 B，2026-08-29）：webview 传 dataURL → 扩展端落盘 `<cwd>/.thincoder/tmp/paste-*.<ext>`（image-handler.mjs，随 offloadToolResult 的 mtime 清理回收）→ 用户消息追加 `[Attached images: …]` 指针（setup.mjs，非多模态模型直接 throw）→ 模型调 `read_image` 走工具通路带图进载荷 |
 | Skill 系统 | ✅ | 读取 `.thincoder/skills/` 目录下的 .md 文件，列表注入上下文 |
 | 权限审批 UI | ✅ | webview 逐工具弹窗（approve / deny / approve-all + diff 预览）；autoApprove 是**会话级槽位字段**（与 CLI 共享），AUTO 工具栏按钮或 approve-all 翻转它；agent 循环以 live getter 读取——轮次中途翻转立即停掉后续弹窗（2026-08-13 修复） |
@@ -379,3 +379,45 @@ GitHub thincoder-vscode#2 / thincoder#5 同根修复（CHANGELOG 0.8.3）。根�
 ### 子代理工具描述：角色能力矩阵 + 委派动机（2026-08-28 · 引用）
 
 需求与设计见 CLI `docs/design/AGENT-LOOP.md` §7.1（单一权威源，本文件不复制）。本仓库改动点：`src/agent-tools/subagent.mjs`（description 与 role 参数与 CLI 逐字对齐：Available roles 矩阵 + Mode filtering + Why delegate? 段 + 开发注释泄漏清理）、`test/subagent.test.mjs`（内容断言 probe 10 项 + 防泄漏负断言，与 CLI 同构）。
+
+### deepseek 400 三件套：escape v5 + UTF-16 安全截断 + 续写构造（2026-09-02 · 引用）
+
+需求与设计见 CLI `docs/design/PROVIDER.md` §14（14.7 对齐清单，单一权威源，本文件不复制）。本仓库改动点：
+
+- `src/escape.mjs`：**v5 升级**——`sanitizeLoneSurrogates`（孤立高/低代理 → U+FFFD）+ `sanitizeText` 总入口 + `escapeLiteralEscapes` odd-run 修复 + `escapeMessageContent` 覆盖 `tool_calls[].arguments` / `reasoning_content`
+- **UTF-16 安全截断 5 处**（截断点落高代理向前收一码元）：`src/context.mjs`（doc 注入预览 ×2）、`src/tools/code.mjs`（doc_search 预览）、`src/agent/run-helpers.mjs`（`offloadToolResult` 预览/兜底截断 ×2）、`src/compact.mjs`（摘要/蒸馏序列化 ×2）——`safeSliceUTF16` 定义于 run-helpers（CLI helpers.mjs/setup.mjs 同语义，两处独立实现）
+- `src/provider.mjs`：**续写构造对齐**——`buildContinuationMessages`（prefix 分支过滤 tool/assistant(tool_calls)、保留 system + ≤8 文本、末条 `prefix:true` + `reasoning_content` 回传；partial 分支全量历史不变）；删除"reasoning 时跳过续写"早退；续写调用 try/catch 注入 `_warnings`（失败不静默；AbortError 透传）
+
+测试：`test/escape.test.mjs`（v5 断言 5 项）、`test/run-helpers.test.mjs`（safeSliceUTF16 + offload/compact 序列化无孤立代理）、`test/provider.test.mjs`（T1-T4：prefix 精简 / reasoning 回传 / partial 不受影响 / 400 可见性）。
+
+### 压缩可见性回调 + webview 状态行（2026-09-02 · 引用）
+
+需求与设计见 CLI `docs/design/CONTEXT-COMPACTION.md` §7（D-C3 对齐形态，单一权威源，本文件不复制）。VS Code 无 TUI 面板——对齐形态 = onCompressStart/onCompressFail 回调 + webview 压缩状态行。本仓库改动点：
+
+- `src/compact.mjs`：`compactHistory` 增 `callbacks`/`agent` 参数——摘要 chat 调用**前**触发 `onCompressStart({ messages: N })`；成功落 `agent._lastCompressInfo = { mode:"summary", tokensFreed, elapsedMs }`
+- `src/agent.mjs`：压缩成功 → `onCompress`（完成信息）；catch 分支补 `console.error` + `onCompressFail(error)`（Q3 不再静默）；3 次连续失败降级截断 → `onCompress({ mode:"fallback", tailMessages })`（降级说明与 3 次失败绑定，§7 状态机语义）；回调缺省 no-op（headless 不崩）
+- `src/extension/panel-chat.mjs`：三回调 → webview `compress` 消息（start/done/failed/fallback 四态）；`webview/chat.js` + `webview/base.css`：`#compress-status` 状态行（Compressing context…（summarizing N messages）→ Compressed: N tokens freed (Xs) / failed: <错误> / fallback truncated to N messages）；`locales/{en,zh}.json` 新增 `compress.*` 键
+
+测试：`test/agent.test.mjs` V4 组（回调序、完成信息、失败可见性 + console.error、3 次失败降级、无回调不崩）。
+
+### subagent 异步化：async 分支 + 槽位队列 + subagent_check（2026-09-02 · 引用）
+
+需求与设计见 CLI `docs/design/AGENT-LOOP.md` §15（15.6 VS Code 对齐，单一权威源，本文件不复制；CLI 端同批落地，本端与设计同规格实现）。本仓库改动点：
+
+- `src/agent-tools/subagent.mjs`：subagent schema 加 `async` 布尔参数；execute 重构出 `runChild`（同步/异步共享同一子代理管线——relay/turn-cap/权限/mergeChildMutations 全不变）；async 分支：`parent._asyncSubagents` Map + **槽位队列**（running 数 < `ASYNC_SUBAGENT_LIMIT=4` 立即启动返回 `{id, role, status:"running"}`；≥4 入队返回 `{status:"queued", position}`；任一 running settle → 队列头部自动补位——settle 逻辑绑定 entry 自身，不同 execute 调用不串扰）；turn-cap 撞墙自动拒绝继续（不弹 continue 面板）；depth>0 传 async → 报错拒绝
+- 新增 `subagent_check` 工具（`readonly: true`）：n 必填 1-based 递增读数（`MAX_ASYNC_CHECKS=3` 防循环；乱序/重复 n 拒绝）；无 id = arrival order 取下一个完成（`Promise.race` on settled）；带 id = 等特定子代理（含 queued 先等启动）；未知/已消费 id → `unknown async subagent id`；全消费 → `{done:true}`
+- `src/agent.mjs`：**回合收尾**（finally）——正常退出 await 全部（queued 随腾槽级联启动）→ 报告/错误以 user 角色 reminder 注入双线（XML 转义 + 超长走 offloadToolResult 预览/落盘）→ 清空注册表；signal aborted → 立即清空不注入；ContinueError/其他错误 → 原样保留（resume 下轮收尾顺延）；depth-0 的 map 沿共享 `history` 数组跨 runAgent 调用存活（agent 对象本身 per-run）；`_asyncCheckN` 非 resume 重置
+- `src/agent/run-helpers.mjs`：`MAX_PARALLEL_SUBAGENTS` 3 → 4（提示词层上限随 CLI 端同步——两端 prompts 已同步 byte-identical：engineering.md 上限 3→4 / system.md 批量句 / main.md async 句）
+- `src/agent/setup.mjs` + `src/agent-tools/index.mjs`：subagent_check 注册（仅 depth-0）
+
+测试：`test/subagent.test.mjs`（T1-T14 VS Code 语义 + depth 门 + 收尾注入 + 中断清空；同步路径全量回归）。
+
+### approval 批确认：同批合并询问（2026-09-02 · 引用）
+
+需求与设计见 CLI `docs/design/AGENT-LOOP.md` §16（16.1 D-B1，单一权威源，本文件不复制）。本仓库改动点：
+
+- `src/agent/execute-tools.mjs`：前置门禁（planMode/工程设计闸）提取为 `preGateBlocked` 单点；新增 `collectBatchPermission`——执行前扫描同一 response.toolCalls 中所有**通过前置门禁、到达权限询问阶段**的非只读工具（depth-0 + 手动模式），≥2 个时一次 `onBatchPermissionRequest({tools, count})`：`approveAll` → 本批放行（按 tc.id 标记）；`deny` → 全批拒绝、无二次询问；`oneByOne`/无 handler → 回退既有逐项通道（`onPermissionRequired` 签名不变，ACP 桥/headless 零波及）；autoApprove 短路不变
+- `src/extension/permission-gate.mjs`：新增 `batchPermissionGate(panel)`（队列 + abort 释放语义与逐项门同款）；`src/extension/panel-chat.mjs` 接线 `onBatchPermissionRequest`；`src/extension/panel-messages.mjs` `batchPermissionResponse`（approveAll/oneByOne/deny）
+- `webview/permission.js`：`showBatchPermissionRequest` 合并行 UI（"N 个工具需要权限：A、B、C" + approve all / one by one / deny 三选项）；`webview/chat.js` 路由；`locales/{en,zh}.json` `perm.batch.*` 键
+
+测试：`test/permission.test.mjs`（T-B1 一次合并询问 / T-B2a deny 全批 / T-B2b oneByOne 回退 / T-B6 无 handler 缺省 / autoApprove 短路 / planMode 前置门禁不计入批）。
