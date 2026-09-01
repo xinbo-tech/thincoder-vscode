@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url"
 import * as os from "node:os"
 import { builtinTools, toOpenAISchema, readImageTool } from "../tools.mjs"
 import {
-  taskTool, recentChangesTool, subagentTool,
+  taskTool, recentChangesTool, subagentTool, subagentCheckTool,
   planTool, goalTool, skillTool, verifyTool, timerTool,
   advisorTool, engTool, consultStartTool, consultCheckTool, consultStopTool, escalateTool,
 } from "../agent-tools.mjs"
@@ -57,7 +57,7 @@ export async function setupAgentRun({ provider, cwd, input, opts, depth, role, g
   const { mcpServers, skills, engState, engDesignReviewed, resume = false, planMode = false } = opts
 
   const agentTools = depth === 0
-    ? [taskTool, recentChangesTool, subagentTool, planTool, goalTool, skillTool, verifyTool, timerTool, advisorTool, engTool,
+    ? [taskTool, recentChangesTool, subagentTool, subagentCheckTool, planTool, goalTool, skillTool, verifyTool, timerTool, advisorTool, engTool,
       // consult tools registered only when configured — an unconfigured model would otherwise
       // see the tool, call it, and eat an error turn (prompt-system review 2026-08-15).
       ...(loadRaw().agent?.consultModels?.length
