@@ -184,6 +184,11 @@ export async function setupAgentRun({ provider, cwd, input, opts, depth, role, g
     _advisorSession: null,
     _lastAdvisorOutput: null, // full review output from the most recent advisor call (convergence rounds inject it verbatim)
     _engDesignToken: engState?.engDesignToken ?? null,
+    // Multi-design slots restored from the slot's {designId: token} object (2026-09-01 audit #1);
+    // null/absent → no Map (fresh state — never resurrect slots the writer did not have).
+    _engDesignTokens: (engState?.engDesignTokens && typeof engState.engDesignTokens === "object")
+      ? new Map(Object.entries(engState.engDesignTokens))
+      : null,
     _engDesignReviewed: engDesignReviewed === true, // eng-coder children arrive pre-authorized
     _calledAdvisorThisRun: false, _mutatedThisRun: false,
     _lastEngState: false, // seeded false: a resumed engineering session re-notifies on turn 1 (CLI parity)

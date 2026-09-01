@@ -224,6 +224,109 @@ describe("agentState → ChatPanel._saveLines — slot persistence", () => {
   })
 })
 
+// ─── 多槽 token 序列化往返（2026-09-01 审计 #1 修复） ────────────
+
+describe("multi-slot token serialization — agentState → saveLines → setup restore (audit #1)", () => {
+  it("eng(exit) clears _engDesignTokens along with the single mirror (fix #2)", async () => {
+    const { engTool } = await import("../src/agent-tools/eng.mjs")
+    const agent = {
+      config: { agent: { engineering: true } },
+      _engDesignToken: "tok", _engDesignTokens: new Map([["id-a", "tok-a"], ["id-b", "tok-b"]]),
+      _pendingReminders: [],
+    }
+    const out = await engTool.execute({ action: "exit" }, { agent })
+    assert.match(out, /exited/i)
+    assert.equal(agent._engDesignToken, null)
+    assert.ok(agent._engDesignTokens instanceof Map && agent._engDesignTokens.size === 0,
+      "multi-design slots die with the mode — no stale slot set survives eng(exit)")
+  })
+
+  it("off→on enter clears the slots; idempotent enter keeps them (fix #2, AC6 parity)", async () => {
+    const { engTool } = await import("../src/agent-tools/eng.mjs")
+    const agent = {
+      config: { agent: { engineering: false } },
+      _engDesignToken: "stale", _engDesignTokens: new Map([["stale-id", "stale"]]),
+      _pendingReminders: [],
+    }
+    await engTool.execute({ action: "enter" }, { agent })
+    assert.ok(agent._engDesignTokens instanceof Map && agent._engDesignTokens.size === 0,
+      "off→on transition kills stale multi-design slots")
+    const standing = {
+      config: { agent: { engineering: true } },
+      _engDesignToken: "keepme", _engDesignTokens: new Map([["id-a", "tok-a"]]),
+      _pendingReminders: [],
+    }
+    const out = await engTool.execute({ action: "enter" }, { agent: standing })
+    assert.match(out, /already active/)
+    assert.equal(standing._engDesignTokens.size, 1, "redundant enter keeps the slots")
+  })
+
+  it("agentState → saveLines → loadSlot round-trips the {designId: token} object (fix #1 acceptance 1)", async () => {
+    const { ChatPanel } = await import("../src/extension/chat-panel.mjs")
+    const { agentState } = await import("../src/agent/run-helpers.mjs")
+    const { _setConfigPathForTest } = await import("../src/config-io.mjs")
+    _setConfigPathForTest(cfgPath)
+    writeFileSync(cfgPath, JSON.stringify({ agent: {} }), "utf8")
+    const panel = new ChatPanel({
+      globalStorageUri: { fsPath: tmp },
+      workspaceState: { get: () => undefined, update: async () => {} },
+      subscriptions: [],
+    })
+    const agent = {
+      config: { agent: { engineering: true }, advisor: { guard: false } },
+      _engDesignToken: "tok-b",
+      _engDesignTokens: new Map([["id-a", "tok-a"], ["id-b", "tok-b"]]),
+    }
+    const lines = [{ role: "user", content: "hi", type: "user" }]
+    panel._saveLines(lines, lines, { activeProvider: "deepseek", ...agentState(agent) }, 1)
+    const data = loadSlot(tmp, 1)
+    assert.deepEqual(data.engDesignTokens, { "id-a": "tok-a", "id-b": "tok-b" },
+      "slot file carries the JSON-safe slots object")
+    // setupAgentRun 恢复环：同一 slot 数据经 engState 重建 agent → Map 复原
+    const { setupAgentRun } = await import("../src/agent/setup.mjs")
+    const { agent: restored } = await setupAgentRun({
+      provider: { name: "t", model: "deepseek-v4-pro" },
+      cwd: tmp, input: "hi",
+      opts: { engState: { enabled: true, advisorGuard: false, engDesignToken: "tok-b", engDesignTokens: data.engDesignTokens } },
+      depth: 0, role: null, getAuto: () => true,
+    })
+    assert.ok(restored._engDesignTokens instanceof Map && restored._engDesignTokens.size === 2,
+      "restore rebuilds the Map")
+    assert.equal(restored._engDesignTokens.get("id-a"), "tok-a")
+    assert.equal(restored._engDesignTokens.get("id-b"), "tok-b")
+  })
+
+  it("save without slots pins engDesignTokens null → setup restore sets NO Map (legacy compat lock)", async () => {
+    const { ChatPanel } = await import("../src/extension/chat-panel.mjs")
+    const { agentState } = await import("../src/agent/run-helpers.mjs")
+    const { _setConfigPathForTest } = await import("../src/config-io.mjs")
+    _setConfigPathForTest(cfgPath)
+    writeFileSync(cfgPath, JSON.stringify({ agent: {} }), "utf8")
+    const panel = new ChatPanel({
+      globalStorageUri: { fsPath: tmp },
+      workspaceState: { get: () => undefined, update: async () => {} },
+      subscriptions: [],
+    })
+    // legacy agent without the Map at all — agentState must yield null, never undefined-in-object
+    const agent = { config: { agent: { engineering: true }, advisor: { guard: false } }, _engDesignToken: "tok" }
+    const st = agentState(agent)
+    assert.equal(st.engDesignTokens, null, "no Map → explicit null (key-presence write pins the field)")
+    const lines = [{ role: "user", content: "hi", type: "user" }]
+    panel._saveLines(lines, lines, { activeProvider: "deepseek", ...st }, 1)
+    const data = loadSlot(tmp, 1)
+    assert.equal(data.engDesignTokens, null, "slot field pinned null — no stale revival")
+    const { setupAgentRun } = await import("../src/agent/setup.mjs")
+    const { agent: restored } = await setupAgentRun({
+      provider: { name: "t", model: "deepseek-v4-pro" },
+      cwd: tmp, input: "hi",
+      opts: { engState: { enabled: true, advisorGuard: false, engDesignToken: "tok", engDesignTokens: data.engDesignTokens } },
+      depth: 0, role: null, getAuto: () => true,
+    })
+    assert.equal(restored._engDesignTokens, null, "no field/null → no Map, no error")
+    assert.equal(restored._engDesignToken, "tok", "single-value token restore unchanged")
+  })
+})
+
 // ─── settings snapshot merges the session slot values ───────────
 
 describe("agentSettings(session) — ENG/GUARD button echo follows the slot", () => {

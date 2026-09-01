@@ -135,6 +135,12 @@ export function agentState(agent) {
     engineering: agent.config?.agent?.engineering ?? false,
     advisorGuard: agent.config?.advisor?.guard === true,
     engDesignToken: agent._engDesignToken ?? null,
+    // Multi-design slots ride the same round-trip (2026-09-01 audit #1): Map → {designId: token}
+    // (JSON-safe). null = no slots / cleared — saveLines writes the key explicitly so the slot
+    // never resurrects Map entries from a previous save (engDesignToken v2 semantics).
+    engDesignTokens: agent._engDesignTokens instanceof Map && agent._engDesignTokens.size > 0
+      ? Object.fromEntries(agent._engDesignTokens)
+      : null,
   }
 }
 

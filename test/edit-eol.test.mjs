@@ -258,5 +258,97 @@ describe("edit 数组形态（2026-08-31 工具顺手度，CLI ebd70eb parity）
     }, { cwd })
     assert.match(r, /mutually exclusive/)
   })
+
+  it("同文件多条串行累积（编辑器路径）：第一条变长，第二条仍精确命中（2026-09-01 缺陷修复）", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    // 修复前：第二条的 range 基于原始 raw 计算，第一条变长后坐标漂移 → 剪错位置
+    const doc = makeDoc("const A = 1\nconst B = 2\nconst C = 3\n", "d:\\proj\\same-doc.txt")
+    vscode.workspace.textDocuments.push(doc)
+    const r = await editTool.execute({
+      edits: [
+        { path: "same-doc.txt", old_string: "const A = 1", new_string: "const A = 10 // lengthened" },
+        { path: "same-doc.txt", old_string: "const B = 2", new_string: "const B = 20" },
+      ],
+    }, { cwd: "d:\\proj" })
+    assert.equal((r.match(/Replaced 1 occurrence\(s\) in same-doc\.txt/g) || []).length, 2, "两条都回显")
+    assert.equal(doc.getText(), "const A = 10 // lengthened\nconst B = 20\nconst C = 3\n", "两条都生效，无漂移")
+  })
+
+  it("同文件多条串行累积（CRLF 编辑器路径）：raw 域快照随条目推进，第二条不漂移", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    const doc = makeDoc("const A = 1\r\nconst B = 2\r\nconst C = 3\r\n", "d:\\proj\\same-crlf.txt")
+    vscode.workspace.textDocuments.push(doc)
+    const r = await editTool.execute({
+      edits: [
+        { path: "same-crlf.txt", old_string: "const A = 1", new_string: "const A = 10 // lengthened" },
+        { path: "same-crlf.txt", old_string: "const C = 3", new_string: "const C = 30" },
+      ],
+    }, { cwd: "d:\\proj" })
+    assert.equal(doc.getText(), "const A = 10 // lengthened\r\nconst B = 2\r\nconst C = 30\r\n", "CRLF 保持原样，第二条精确命中")
+    assert.ok(!/(?<!\r)\n/.test(doc.getText()), "无裸 LF 混入")
+  })
+
+  it("同文件多条串行累积（磁盘路径）：第一条增行，第二条按累积内容生效", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    writeFileSync(join(cwd, "same-disk.txt"), "const A = 1\nconst B = 2\nconst C = 3\n", "utf8")
+    const r = await editTool.execute({
+      edits: [
+        { path: "same-disk.txt", old_string: "const A = 1", new_string: "const A = 10\nconst A2 = 12" },
+        { path: "same-disk.txt", old_string: "const B = 2", new_string: "const B = 20" },
+      ],
+    }, { cwd })
+    assert.equal((r.match(/Replaced 1 occurrence\(s\) in same-disk\.txt/g) || []).length, 2, "两条都回显")
+    assert.equal(
+      readFileSync(join(cwd, "same-disk.txt"), "utf8"),
+      "const A = 10\nconst A2 = 12\nconst B = 20\nconst C = 3\n",
+      "两条都生效（修复前只有第一条留存）"
+    )
+  })
+
+  it("同文件多条：第二条 old_string not found → 原子失败全不写（磁盘路径）", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    writeFileSync(join(cwd, "atom.txt"), "const A = 1\nconst B = 2\n", "utf8")
+    const r = await editTool.execute({
+      edits: [
+        { path: "atom.txt", old_string: "const A = 1", new_string: "const A = 100" },
+        { path: "atom.txt", old_string: "NOT FOUND", new_string: "x" },
+      ],
+    }, { cwd })
+    assert.match(r, /edit aborted \(atomic — no files written\)/)
+    assert.equal(readFileSync(join(cwd, "atom.txt"), "utf8"), "const A = 1\nconst B = 2\n", "文件保持原样")
+  })
+
+  it("同文件批次 [replace_all, 非 replace_all]（编辑器路径 CRLF）：第二条精确命中（#1 raw 镜像漂移回归）", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    // 修复前：replace_all 条目的 raw 镜像只拼接首处替换（其余 occurrence 残留旧文本），
+    // 第二条的 lfOffsetToRaw 在漂移的 rawText 上定位 → applyEditorRangeEdit 剪错位置。
+    // old→new 长度必须变化（等长替换不暴露漂移）且出现 ≥2 次。
+    const doc = makeDoc("alpha\r\nbeta\r\nalpha\r\ngamma\r\n", "d:\\proj\\ra-crlf.txt")
+    vscode.workspace.textDocuments.push(doc)
+    const r = await editTool.execute({
+      edits: [
+        { path: "ra-crlf.txt", old_string: "alpha", new_string: "A", replace_all: true },
+        { path: "ra-crlf.txt", old_string: "gamma", new_string: "GAMMA" },
+      ],
+    }, { cwd: "d:\\proj" })
+    assert.match(r, /Replaced 2 occurrence/)
+    assert.equal(doc.getText(), "A\r\nbeta\r\nA\r\nGAMMA\r\n", "replace_all 两处生效 + 第二条精确命中（修复前剪进 alpha 残骸）")
+    assert.ok(!/(?<!\r)\n/.test(doc.getText()), "无裸 LF 混入")
+  })
+
+  it("同文件批次 [replace_all, 非 replace_all]（编辑器路径 LF）：第二条精确命中（#1 回归）", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    const doc = makeDoc("alpha\nbeta\nalpha\ngamma\n", "d:\\proj\\ra-lf.txt")
+    vscode.workspace.textDocuments.push(doc)
+    const r = await editTool.execute({
+      edits: [
+        { path: "ra-lf.txt", old_string: "alpha", new_string: "A", replace_all: true },
+        { path: "ra-lf.txt", old_string: "gamma", new_string: "GAMMA" },
+      ],
+    }, { cwd: "d:\\proj" })
+    assert.match(r, /Replaced 2 occurrence/)
+    assert.equal(doc.getText(), "A\nbeta\nA\nGAMMA\n", "LF 路径第二条精确命中")
+  })
+
 })
 

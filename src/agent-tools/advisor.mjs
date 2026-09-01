@@ -86,7 +86,7 @@ export const advisorTool = {
       paths: {
         type: "array",
         items: { type: "string" },
-        description: "Code files or directories to review (for code review). Required unless documents is provided. The advisor reviews git diff filtered to these paths.",
+        description: "Code files or directories to review (for code review). Required unless documents is provided. The advisor reads the files/directories listed here — it has no git tool and never inspects diffs.",
       },
       documents: {
         type: "array",
@@ -127,7 +127,12 @@ export const advisorTool = {
     // protocol like code reviews (CLI parity).
 
     // Generate the design token BEFORE the review and inject it into the advisor's prompt.
+    // A random designId is minted for EVERY design-review call (2026-09-01 multi-design
+    // slots, CLI parity): on pass the token is stored in parent._engDesignTokens keyed by
+    // this id and the id is echoed to the parent; on failure the id is dropped — never
+    // stored, so it cannot clobber any other design's slot. Not a document anchor.
     const designToken = reviewType === "design" ? generateDesignToken(agent) : null
+    const designId = reviewType === "design" ? randomUUID() : null
     // Progress chunks ({kind, text}) stream into the webview — same emission
     // contract as the CLI TUI (think / tool / text kinds). A "start" chunk first
     // opens the in-conversation advisor block tagged with the round number.
@@ -144,17 +149,23 @@ export const advisorTool = {
       const tokenPattern = makeDesignTokenRegex(designToken)
       if (designToken && result && tokenPattern.test(result)) {
         // Advisor echoed the token → review passed. Issue it to the parent for eng-coder.
+        // Multi-design slots (2026-09-01, CLI parity): store under this review's designId;
+        // the single `_engDesignToken` mirror stays for the legacy boolean gates.
+        agent._engDesignTokens ??= new Map()
+        agent._engDesignTokens.set(designId, designToken)
         agent._engDesignToken = designToken
         if (agent._role === "eng-coder") agent._engDesignReviewed = true
         const cleanResult = result.replace(makeDesignTokenRegex(designToken, "g"), "").trim()
-        return `${cleanResult}\n\nApproved. Pass this exact token to eng-coder (designToken parameter): ${designToken}`
+        // designId rides the Approved block (review #1): the parent needs it to aim the
+        // FIRST eng-coder spawn when several designs live in the same session.
+        return `${cleanResult}\n\nApproved. Pass this exact token to eng-coder (designToken parameter): ${designToken}\ndesignId: ${designId} (pass as the designId parameter when spawning eng-coder; optional while this session holds a single design)`
       }
-      // Review failed (or advisor chose not to pass) → invalidate any previously-issued token.
-      // Guards (v2 2026-08-25): result === null = SKIPPED review — must not revoke. An error
-      // reply (own "Advisor:" prefix — runAdvisorReview's error-return convention) is a crash/
-      // timeout artifact, not a verdict — only a COMPLETED non-passing review revokes.
-      const isCompletedReview = result !== null && !result.startsWith("Advisor:")
-      if (isCompletedReview) agent._engDesignToken = null
+      // Review failed (or advisor chose not to pass) → do NOT touch ANY slot (方案 ②, review #2:
+      // a failed RE-review leaves the previously approved token alive until TTL; the failed
+      // call's own designId was never stored, so there is nothing to clear). Isolation
+      // (2026-08-30, extended to the multi-slot Map 2026-09-01, CLI parity): a network
+      // glitch must not clear / other designs' slots must not be affected — only a COMPLETED
+      // non-passing review lands here, and it revokes nothing.
       if (result) {
         const stripped = result.replace(makeDesignTokenRegex(designToken, "g"), "").trim()
         return stripped || "Advisor: design review did not pass."

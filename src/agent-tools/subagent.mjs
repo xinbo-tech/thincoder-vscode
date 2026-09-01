@@ -64,6 +64,34 @@ export function resolveChildProvider(parent, modelArg) {
   return { ...parent._provider, model: modelArg }
 }
 
+/**
+ * Resolve the design-token slot for an eng-coder spawn (2026-09-01 multi-design, FR3,
+ * CLI parity): designId given → exact slot; omitted → exactly ONE slot must exist
+ * (multiple slots refuse rather than guess — T16). The HMAC/TTL check itself stays in
+ * validateDesignToken (unchanged). Mirror-cleared + slots present = engineering mode
+ * re-entered (eng.mjs reset) → stale slots must not resurrect tokens.
+ */
+export function resolveDesignSlot(parent, designIdArg) {
+  const slots = parent._engDesignTokens
+  const hasSlots = slots instanceof Map && slots.size > 0
+  const legacy = parent._engDesignToken
+  if (!legacy && hasSlots) {
+    throw new Error("Design tokens were reset (engineering mode was re-entered) — run advisor with type='design' again and spawn with the fresh designId+token pair.")
+  }
+  if (designIdArg) {
+    if (!hasSlots || !slots.has(designIdArg)) {
+      throw new Error(`designId not found — no approved design review holds this id. Run advisor with type='design' again and pass the designId echoed with the token. (session holds ${hasSlots ? slots.size : 0} approved design slot(s))`)
+    }
+    return { token: slots.get(designIdArg) }
+  }
+  if (hasSlots && slots.size > 1) {
+    throw new Error(`Multiple approved designs in this session (${slots.size}) — pass the designId parameter (echoed with each token) to choose which design this eng-coder spawn belongs to.`)
+  }
+  if (hasSlots && slots.size === 1) return { token: [...slots.values()][0] }
+  if (legacy) return { token: legacy } // single-slot mirror fallback (pre-multi-slot sessions)
+  throw new Error("Invalid or missing design token — run advisor with type='design' first and pass the returned token as designToken.")
+}
+
 export const subagentTool = {
   name: "subagent",
   sideEffectExempt: true, // subagent mutations are tracked by the child, not the parent
@@ -74,7 +102,7 @@ export const subagentTool = {
     "- explore — read-only search & analysis. Toolset: the read/search family (grep, read, glob, code_search, doc_search, repo_outline, lsp, tree...). Receives git context auto-injected (branch, recent commits, working-tree state) when the project is a git repo. Its report must list what it searched and what it did NOT find. Fast — specify thoroughness in the task: quick / medium / thorough (default medium).\n" +
     "- plan — read-only implementation planning. Same read/search toolset; NEVER edits files. Returns a step-by-step plan for the parent to execute.\n" +
     "- coder — full implementation. The parent's complete read/write/execute toolset plus verify and advisor for self-review. Its final report must include a delivery transparency table with one row per task requirement (Done / Simplified / Not done — no deferred column).\n" +
-    "- eng-coder — engineering-mode coder (available only in engineering mode, replacing coder). Same full toolset as coder plus the design-driven methodology overlay; REQUIRES a valid designToken arg obtained from a passed advisor(type='design') review.\n" +
+    "- eng-coder — engineering-mode coder (available only in engineering mode, replacing coder). Same full toolset as coder plus the design-driven methodology overlay; REQUIRES a valid designToken arg obtained from a passed advisor(type='design') review. The advisor's Approved reply also echoes a designId — pass it as the designId arg: required to pick between designs when several approved reviews are active, optional for a single design. The delivery report echoes the designId back for the audit fix round.\n" +
     "Mode filtering: normal mode exposes explore/plan/coder; engineering mode exposes explore/plan/eng-coder. The schema enum reflects the active mode.\n\n" +
     "Writing the prompt:\n" +
     "- The sub-agent starts with zero context — it has not seen this conversation. Brief it like a colleague who just walked into the room: state the goal, list what you already know, hand over the specifics.\n" +
@@ -88,10 +116,11 @@ export const subagentTool = {
       role: { type: "string", enum: ["explore", "plan", "coder", "eng-coder"], description: "The sub-agent role — see the tool description for the role capability matrix. Exact spelling required." },
       model: { type: "string", description: "Provider/model override for this sub-agent: 'provider:model', a provider name from config, or a model name on the parent's provider. Defaults to the agent.subagentModel config, then the parent's provider. Useful for offloading heavy work to a cheaper model." },
       designToken: { type: "string", description: "Required when role='eng-coder': the token returned by advisor(type='design') after the design review passed. Without a valid token, eng-coder cannot modify files." },
+      designId: { type: "string", description: "Optional when role='eng-coder': the designId echoed with the approved token by advisor(type='design'). Required to pick between designs when several approved reviews are active in the session — each eng-coder carries its own designId+token pair so parallel implementations never overwrite each other. Optional for a single design." },
     },
     required: ["task", "role"],
   },
-  async execute({ task, role, designToken, model }, ctx) {
+  async execute({ task, role, designToken, designId, model }, ctx) {
     const { runAgent } = await import("../agent.mjs")
     const parent = ctx.agent
     const cwd = ctx.cwd
@@ -118,9 +147,12 @@ export const subagentTool = {
 
     // eng-coder token gate: the design review must have passed and the caller must
     // present the exact token advisor issued — otherwise the child is not authorized to code.
+    // 2026-09-01: multi-design slots — the token is located by designId (exact slot,
+    // single-slot fallthrough); HMAC/TTL validation itself is unchanged (CLI parity).
+    let issuedToken
     if (role === "eng-coder") {
-      const issued = parent._engDesignToken
-      if (!issued || designToken !== issued || !validateDesignToken(designToken)) {
+      issuedToken = resolveDesignSlot(parent, designId).token
+      if (!issuedToken || designToken !== issuedToken || !validateDesignToken(designToken)) {
         throw new Error("Invalid or missing design token — run advisor with type='design' first and pass the returned token as designToken.")
       }
     }
@@ -170,7 +202,12 @@ export const subagentTool = {
         mergeChildMutations(parent, sink)
 
         ctx.callbacks?.onSubagent?.({ id: subId, role, status: "done" })
-        return `Subagent (${role}) completed:\n${result || output.slice(0, 4000)}`
+        // designId rides the delivery report (2026-09-01, CLI parity): the audit fix
+        // round re-spawns with the SAME designId+token — the parent copies it from here.
+        const designIdNote = role === "eng-coder"
+          ? `\ndesignId: ${designId ?? "(single-design session — designId optional)"} — reuse this designId with the same designToken (from the approved advisor type='design' review) when re-spawning this eng-coder for an audit fix round.`
+          : ""
+        return `Subagent (${role}) completed:\n${result || output.slice(0, 4000)}${designIdNote}`
       } catch (e) {
         // Max-turns exhaustion may still have written files — merge whatever the child touched
         if (role === "eng-coder") mergeChildMutations(parent, sink)
@@ -183,7 +220,10 @@ export const subagentTool = {
             if (go === "Continue") continue
           }
           ctx.callbacks?.onSubagent?.({ id: subId, role, status: "error", error: `turn cap reached (${e.turns} turns) — work may be partial` })
-          return `Subagent (${role}) stopped: turn cap reached (${e.turns} turns) — work may be partial; review recent_changes before deciding next steps.\nPartial output: ${output.slice(0, 2000)}`
+          // declined eng-coder delivery still carries its designId — the fix round
+          // re-spawns with the same slot (2026-09-01, CLI parity).
+          const capNote = role === "eng-coder" ? `\ndesignId: ${designId ?? "(single-design session — designId optional)"} — reuse it (with the same designToken) when re-spawning this eng-coder.` : ""
+          return `Subagent (${role}) stopped: turn cap reached (${e.turns} turns) — work may be partial; review recent_changes before deciding next steps.\nPartial output: ${output.slice(0, 2000)}${capNote}`
         }
         ctx.callbacks?.onSubagent?.({ id: subId, role, status: "error", error: e.message })
         return `Subagent (${role}) error: ${e.message}\nPartial output: ${output.slice(0, 2000)}`

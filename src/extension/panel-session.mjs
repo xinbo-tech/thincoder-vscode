@@ -99,6 +99,10 @@ export function saveLines(panel, fullHistory, contextHistory, extra = {}, slotOv
       // token) as "missing" and revived the stale slot value on the next save — a revived token
       // re-opened the parent write gate. An explicit key always wins; absent key keeps the slot.
       engDesignToken: "engDesignToken" in extra ? extra.engDesignToken : (existing.engDesignToken ?? null),
+      // Key-presence write (same v2 semantics as engDesignToken): a save carrying no
+      // engDesignTokens (abort/finally) keeps the slot value; an explicit null (eng exit/re-enter
+      // cleared the Map, or the run had no slots) pins the field null — restore sets NO Map.
+      engDesignTokens: "engDesignTokens" in extra ? extra.engDesignTokens : (existing.engDesignTokens ?? null),
       pendingReminders: existing.pendingReminders ?? [], sessionStart: existing.sessionStart ?? new Date().toISOString(),
       // 2026-09-01 会诊 kimi/qwen 🔴：sessionStart 是 F2 覆盖防护的会话身份——VS Code
       // 此前从不赋值（恒 null）→ diskStart 恒 null → F2 轮转条件永不触发（纯 VS Code

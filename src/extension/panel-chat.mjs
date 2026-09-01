@@ -143,6 +143,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     enabled: sessionData.engineering ?? null,
     advisorGuard: sessionData.advisor?.guard ?? null,
     engDesignToken: sessionData.engDesignToken ?? null,
+    engDesignTokens: sessionData.engDesignTokens ?? null,
   }
 
   // Persist model selection

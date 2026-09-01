@@ -624,4 +624,89 @@ it("eng(enter) idempotent: already-on keeps the token (AC6)", async () => {
   assert.equal(agent._engDesignToken, "keepme")
 })
 
+// ─── designId multi-slot tokens (ENGINEERING-MODE.md 2026-09-01: AC8/T15/T17, CLI parity) ───
+
+/** Mock advisor LLM: pass=true echoes the injected [DESIGN-TOKEN:…] (review passes);
+ *  pass=false returns a findings table without any token (COMPLETED review, not passed). */
+function mockDesignReviewServer(pass) {
+  return import("node:http").then(({ createServer }) => {
+    const server = createServer((req, res) => {
+      let text = ""
+      req.on("data", (c) => (text += c))
+      req.on("end", () => {
+        const body = JSON.parse(text)
+        const m = JSON.stringify(body.messages).match(/([0-9a-f-]+:\d+:[0-9a-f]{16})/)
+        const token = m ? m[1] : "no-token-found"
+        const content = pass
+          ? `## Review\n\n设计通过，未发现问题。\n\n[DESIGN-TOKEN:${token}]`
+          : "## Review\n\n| # | Category | Severity | Issue | Suggestion |\n|---|---------|----------|------|------------|\n| 1 | correctness | 🔴 | spec gap | fix the spec |"
+        const frames =
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content } }] })}\n\n` +
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` +
+          `data: [DONE]\n\n`
+        res.writeHead(200, { "Content-Type": "text/event-stream" })
+        res.end(frames)
+      })
+    })
+    return new Promise((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port }))
+    })
+  })
+}
+
+it("designId multi-slot: pass → designId echoed + token stored in _engDesignTokens + single mirror kept (review #1)", async () => {
+  const { advisorTool } = await import("../src/agent-tools/advisor.mjs")
+  const { server, port } = await mockDesignReviewServer(true)
+  try {
+    const agent = {
+      config: { agent: { engineering: true } },
+      _provider: { name: "p", model: "m", baseURL: `http://127.0.0.1:${port}`, apiKey: "x" },
+      history: [], _touchedFiles: [], _advisorRound: 0, _advisorSession: null, cwd: tmpdir(),
+    }
+    const out1 = await advisorTool.execute({ type: "design", documents: ["docs/design/A.md"] }, { agent })
+    assert.match(out1, /Approved\. Pass this exact token/, "first review passes")
+    assert.match(out1, /designId: [0-9a-f-]{36}/, "approved result echoes designId (review #1)")
+    const out2 = await advisorTool.execute({ type: "design", documents: ["docs/design/B.md"] }, { agent })
+    assert.match(out2, /Approved\. Pass this exact token/, "second review passes")
+    const map = agent._engDesignTokens
+    assert.ok(map instanceof Map && map.size === 2, "two slots coexist — later issue does not overwrite the earlier one (AC8)")
+    const idOf = (out) => out.match(/designId: ([0-9a-f-]{36})/)[1]
+    assert.notEqual(map.get(idOf(out1)), map.get(idOf(out2)), "each designId holds its own token")
+    assert.equal(agent._engDesignToken, map.get(idOf(out2)), "single-slot mirror = most recently issued token (legacy boolean gates)")
+    assert.ok(map.has(idOf(out1)) && map.has(idOf(out2)), "echoed designId ↔ slot one-to-one")
+  } finally {
+    server.close()
+  }
+})
+
+it("designId isolation: completed review that does not pass → its designId not stored, every existing slot intact (方案 ②)", async () => {
+  const { advisorTool } = await import("../src/agent-tools/advisor.mjs")
+  const { server, port } = await mockDesignReviewServer(false)
+  try {
+    const agent = {
+      config: { agent: { engineering: true } },
+      _provider: { name: "p", model: "m", baseURL: `http://127.0.0.1:${port}`, apiKey: "x" },
+      history: [], _touchedFiles: [], _advisorRound: 0, _advisorSession: null, cwd: tmpdir(),
+      _engDesignTokens: new Map([["slot-a", "tok-a"], ["slot-b", "tok-b"]]),
+      _engDesignToken: "tok-a",
+    }
+    const out = await advisorTool.execute({ type: "design", documents: ["docs/design/B.md"] }, { agent })
+    assert.doesNotMatch(out, /Approved\./, "re-review did not pass (no token echo)")
+    assert.equal(agent._engDesignTokens.size, 2, "failure clears NO existing slot (isolation extended to the multi-slot Map)")
+    assert.equal(agent._engDesignTokens.get("slot-a"), "tok-a", "slot a untouched (T17)")
+    assert.equal(agent._engDesignTokens.get("slot-b"), "tok-b", "slot b untouched (T17)")
+    assert.equal(agent._engDesignToken, "tok-a", "single mirror not cleared either — old token survives to TTL (review #2, plan ②)")
+  } finally {
+    server.close()
+  }
+})
+
+it("subagent schema declares the optional designId parameter (CLI parity)", async () => {
+  const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+  const designId = subagentTool.parameters.properties.designId
+  assert.ok(designId, "designId 参数应存在于 subagent 工具 schema")
+  assert.equal(designId.type, "string")
+  assert.ok(designId.description.includes("Required to pick between designs"), "描述声明多设计必须指定")
+})
+
 })

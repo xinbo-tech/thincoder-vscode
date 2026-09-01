@@ -294,7 +294,13 @@ function streamServer(walls) {
   return { server, calls }
 }
 
-const realToken = "c8721152-df45-4f7b-96f2-db877500f9ba:1788244221240:feef8f9c40ec98c7" // v2: real signed token
+// v2: real signed token — minted at runtime (the hardcoded fixture expired 2026-08-31
+// and started failing that day; TTL'd tokens must never be baked into test files)
+const realToken = await import("node:crypto").then(({ createHmac }) => {
+  const exp = Date.now() + 24 * 3600 * 1000
+  const sig = createHmac("sha256", "thincoder-default-secret").update(`c8721152-df45-4f7b-96f2-db877500f9ba:${exp}`).digest("hex").slice(0, 16)
+  return `c8721152-df45-4f7b-96f2-db877500f9ba:${exp}:${sig}`
+})
 
 test("activity stream: panel channel name carries #subId (one block per invocation)", async () => {
   const { server } = streamServer(0)
@@ -419,4 +425,80 @@ test("modeRoleField role description stays in sync with the matrix-pointer text 
     assert.ok(!f.role.description.includes("read-only search/analysis"), "stale one-line role label resurrected")
     assert.equal(f.role.enum.length, 3, "enum must expose exactly 3 roles per mode")
   }
+})
+
+// ─── designId multi-slot spawn gate (ENGINEERING-MODE.md 2026-09-01: T15/T16, CLI parity) ───
+
+/** Real signed token with a fixed uuid+expiry (v2 HMAC scheme), minted at runtime —
+ *  TTL'd tokens must never be baked into test files (expired-fixture lesson 2026-08-31). */
+async function signedToken(uuid, expiresAt) {
+  const { createHmac } = await import("node:crypto")
+  const sig = createHmac("sha256", "thincoder-default-secret").update(`${uuid}:${expiresAt}`).digest("hex").slice(0, 16)
+  return `${uuid}:${expiresAt}:${sig}`
+}
+
+test("T15 (vscode mirror): 双设计并行 spawn 各带 designId+token 互不覆盖", async () => {
+  const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+  const exp = Date.now() + 24 * 3600 * 1000
+  const tokenA = await signedToken("eeeeeeee-1111-4111-8111-00000000000a", exp)
+  const tokenB = await signedToken("eeeeeeee-2222-4222-8222-00000000000b", exp)
+  const { server } = streamServer(0)
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-t15-"))
+  try {
+    const makeCtx = () => ({
+      cwd,
+      agent: {
+        _provider: { name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" },
+        config: {
+          providersList: [{ name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" }],
+          agent: { subagentTurns: 3, engineering: true },
+        },
+        _subIdCounter: 0,
+        _engDesignTokens: new Map([["id-a", tokenA], ["id-b", tokenB]]),
+        _engDesignToken: tokenB, // 后签发覆盖镜像——spawn 消费端必须按槽定位，不受镜像误导
+        _touchedFiles: [],
+      },
+      callbacks: {},
+    })
+    const rA = String(await subagentTool.execute({ task: "child", role: "eng-coder", designId: "id-a", designToken: tokenA }, makeCtx()))
+    assert.ok(rA.includes("Subagent (eng-coder) completed"), "A 通过（按 designId 定位槽，不受镜像=tokenB 影响）")
+    assert.ok(rA.includes("designId: id-a"), "A 交付报告回传 designId A（修正轮复用）")
+    const rB = String(await subagentTool.execute({ task: "child", role: "eng-coder", designId: "id-b", designToken: tokenB }, makeCtx()))
+    assert.ok(rB.includes("Subagent (eng-coder) completed"), "B 通过")
+    assert.ok(rB.includes("designId: id-b"), "B 交付报告回传 designId B")
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("T16 (vscode mirror): 多设计缺 designId → throw 要求指定；镜像被清 + 槽残留 → 不复活", async () => {
+  const { subagentTool, resolveDesignSlot } = await import("../src/agent-tools/subagent.mjs")
+  const exp = Date.now() + 24 * 3600 * 1000
+  const tokenA = await signedToken("ffffffff-1111-4111-8111-00000000000a", exp)
+  const tokenB = await signedToken("ffffffff-2222-4222-8222-00000000000b", exp)
+  const parent = {
+    config: { agent: { engineering: true } },
+    _engDesignTokens: new Map([["id-x", tokenA], ["id-y", tokenB]]),
+    _engDesignToken: tokenB,
+    _touchedFiles: [],
+  }
+  await assert.rejects(
+    subagentTool.execute({ task: "x", role: "eng-coder", designToken: tokenA }, { agent: parent, cwd: process.cwd(), callbacks: {} }),
+    /Multiple approved designs[\s\S]*designId/,
+    "多槽缺 designId → throw 要求指定（不误取任一槽）",
+  )
+  assert.throws(() => resolveDesignSlot(parent, undefined), /Multiple approved designs/)
+  assert.throws(() => resolveDesignSlot(parent, "no-such-id"), /designId not found/, "给定 designId 无匹配槽 → 明确报错")
+  assert.throws(
+    () => resolveDesignSlot({ _engDesignTokens: new Map([["k", "v"]]), _engDesignToken: null }, undefined),
+    /Design tokens were reset/,
+    "镜像被 eng(exit/enter) 清空而 Map 残留 → 不复活过期 token",
+  )
+  const single = resolveDesignSlot({ _engDesignTokens: new Map([["only", tokenA]]), _engDesignToken: tokenA }, undefined)
+  assert.equal(single.token, tokenA, "单槽省略 designId → 取唯一槽")
+  const legacy = resolveDesignSlot({ _engDesignToken: tokenA }, undefined)
+  assert.equal(legacy.token, tokenA, "无 Map（旧会话）→ 单值镜像兜底")
 })

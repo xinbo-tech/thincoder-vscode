@@ -147,55 +147,95 @@ export const editTool = {
       if (args.path || args.old_string !== undefined || args.new_string !== undefined) {
         return "Error: edits array is mutually exclusive with path/old_string/new_string"
       }
-      // 原子：先全量检查（所有文件都能替换）——任一失败全不写
-      const prepared = []
+      // 原子：先全量检查（所有文件的替换都可执行）——任一失败全不写。
+      // 2026-09-01 缺陷修复（TOOLS.md §9 ②"同文件多条规则"）：同一 path 的多条编辑
+      // 按序**串行累积应用**——第 n 条基于前 n-1 条已应用后的累积内容做匹配与替换
+      // （原实现每条都基于盘上/文档原始内容计算、应用循环后置，同文件后者覆盖前者 →
+      // 除最后一条外全部静默丢失）；跨 path 条目互不影响（并行原子语义不变）。
+      const groups = new Map() // abs → 每文件一条流水线（LF 域累积 text + 对应 raw 域快照）
       for (const e of args.edits) {
         if (!e.path) return "Error: each edit must have a path"
         if (!e.old_string) return `Error: edit for ${e.path}: old_string must not be empty`
-        const oldS = normalizeEOL(e.old_string)
-        const newS = normalizeEOL(e.new_string)
         const abs = resolvePath(e.path, ctx.cwd)
-        const doc = getOpenDoc(abs)
-        const rawText = doc ? doc.getText() : await readFile(abs, "utf8").catch(() => null)
-        if (rawText === null) return `Error: edit aborted (atomic — no files written): cannot read ${e.path}`
-        const fileEol = detectFileEol(rawText)
-        const text = normalizeEOL(rawText)
-        const count = text.split(oldS).length - 1
-        if (count === 0) {
-          return `Error: edit aborted (atomic — no files written): old_string not found in ${e.path}\n` +
-            `  searched: "${oldS.slice(0, 100).split("\n")[0]}${oldS.length > 100 ? "…" : ""}"`
+        let g = groups.get(abs)
+        if (!g) {
+          const doc = getOpenDoc(abs)
+          const rawText = doc ? doc.getText() : await readFile(abs, "utf8").catch(() => null)
+          if (rawText === null) return `Error: edit aborted (atomic — no files written): cannot read ${e.path}`
+          if (doc?.isDirty) return `Error: edit aborted (atomic — no files written): ${e.path} has unsaved changes in the editor`
+          g = { abs, path: e.path, doc, rawText, fileEol: detectFileEol(rawText), text: normalizeEOL(rawText), edits: [], rawReplaceAll: false }
+          groups.set(abs, g)
         }
-        if (!e.replace_all && count > 1) {
-          return `Error: edit aborted (atomic — no files written): old_string matches ${count} times in ${e.path}; ` +
-            `provide more context or set replace_all`
-        }
-        if (doc?.isDirty) return `Error: edit aborted (atomic — no files written): ${e.path} has unsaved changes in the editor`
-        prepared.push({ abs, path: e.path, doc, rawText, fileEol, text, oldS, newS, count, replaceAll: !!e.replace_all })
+        g.edits.push(e)
       }
-      // 全部检查通过——逐个执行
+      const prepared = [] // 顺序 = args.edits 顺序（回显按条）；midText/range 冻结该条应用前的累积状态
+      for (const g of groups.values()) {
+        for (const e of g.edits) {
+          const oldS = normalizeEOL(e.old_string)
+          const newS = normalizeEOL(e.new_string)
+          const count = g.text.split(oldS).length - 1
+          if (count === 0) {
+            return `Error: edit aborted (atomic — no files written): old_string not found in ${g.path}\n` +
+              `  searched: "${oldS.slice(0, 100).split("\n")[0]}${oldS.length > 100 ? "…" : ""}"`
+          }
+          if (!e.replace_all && count > 1) {
+            return `Error: edit aborted (atomic — no files written): old_string matches ${count} times in ${g.path}; ` +
+              `provide more context or set replace_all`
+          }
+          const idx = g.text.indexOf(oldS)
+          // #1（2026-09-01 交付评审尾巴）：raw 镜像只支持"单处替换"的精确拼接。
+          // replace_all 条目（count ≥ 2）原实现只把首处替换拼进 rawText——镜像从此
+          // 漂移，后续条目的 lfOffsetToRaw 定位错 → applyEditorRangeEdit 改错位置
+          // （静默数据损坏）。修法（方案 ②）：doc 路径下 replace_all 条目不计算
+          // range（其应用本就要求走 applyEditorEdit 全量语义）；且从该条起 raw 镜像
+          // 不再推进（全量替换无法精确镜像），后续所有条目 range 置 null 统一走
+          // 全量语义——midText 域串行累积正确，结果与逐条单独调用完全一致。
+          // 注：raw 镜像不同于 fileEol 化重建——fileEol 化会把文件里 lone-\r 的
+          // 行内混合 EOL 片段整体翻成 CRLF，破坏 raw 域快照语义（方案 ① 被否）。
+          const range = (g.doc && !g.rawReplaceAll && !e.replace_all)
+            ? { start: lfOffsetToRaw(g.rawText, idx), end: lfOffsetToRaw(g.rawText, idx + oldS.length) }
+            : null
+          prepared.push({
+            g, midText: g.text, oldS, newS, count, replaceAll: !!e.replace_all,
+            // doc range edit 的位置映射基于本条应用前的 raw 域快照——串行累积，不漂移
+            range,
+          })
+          g.text = e.replace_all ? g.text.split(oldS).join(newS) : g.text.replace(oldS, () => newS)
+          if (range) {
+            // 精确镜像（本条替换区 LF→raw 逐段拼接）：CRLF 文件里 newS 带 LF 时
+            // normalize-rebuild 会把混合 EOL 片段全转 CRLF——后续条目的 raw 坐标随之漂移
+            g.rawText = g.rawText.slice(0, range.start) +
+              (g.fileEol === "\r\n" ? newS.replace(/\n/g, "\r\n") : newS) +
+              g.rawText.slice(range.end)
+          } else if (g.doc) {
+            g.rawReplaceAll = true // raw 镜像从 replace_all 条目起失效——后续条目不再定位
+          }
+        }
+      }
+      // 全部检查通过——逐条应用（每条基于其冻结的累积中间态：最终状态 = 所有条目依序生效）
       const results = []
       for (const p of prepared) {
-        if (p.doc) {
-          if (p.replaceAll) {
-            const replaced = p.text.replaceAll(p.oldS, () => p.newS)
-            const out = p.fileEol === "\r\n" ? normalizeEOL(replaced).replace(/\n/g, "\r\n") : replaced
-            await applyEditorEdit(p.doc, out)
+        if (p.g.doc) {
+          // range edit 仅在「单处替换 + raw 镜像有效」时用（精确、最小 WorkspaceEdit）；
+          // 其余（replace_all / 镜像失效后的条目，range=null）统一走 applyEditorEdit
+          // 全量语义——midText 为该条应用前的串行累积内容，替换后即为目标状态。
+          if (p.range) {
+            const newText = p.g.fileEol === "\r\n" ? normalizeEOL(p.newS).replace(/\n/g, "\r\n") : normalizeEOL(p.newS)
+            const pos = p.g.doc.positionAt(p.range.start)
+            const endPos = p.g.doc.positionAt(p.range.end)
+            await applyEditorRangeEdit(p.g.doc, pos.line, pos.character, endPos.line, endPos.character, newText)
           } else {
-            const idx = p.text.indexOf(p.oldS)
-            const start = lfOffsetToRaw(p.rawText, idx)
-            const end = lfOffsetToRaw(p.rawText, idx + p.oldS.length)
-            const newText = p.fileEol === "\r\n" ? normalizeEOL(p.newS).replace(/\n/g, "\r\n") : normalizeEOL(p.newS)
-            const pos = p.doc.positionAt(start)
-            const endPos = p.doc.positionAt(end)
-            await applyEditorRangeEdit(p.doc, pos.line, pos.character, endPos.line, endPos.character, newText)
+            const replaced = p.replaceAll ? p.midText.replaceAll(p.oldS, () => p.newS) : p.midText.replace(p.oldS, () => p.newS)
+            const out = p.g.fileEol === "\r\n" ? normalizeEOL(replaced).replace(/\n/g, "\r\n") : replaced
+            await applyEditorEdit(p.g.doc, out)
           }
-          results.push(`Replaced ${p.replaceAll ? p.count : 1} occurrence(s) in ${p.path} (via editor)`)
+          results.push(`Replaced ${p.replaceAll ? p.count : 1} occurrence(s) in ${p.g.path} (via editor)`)
         } else {
-          const replaced = p.replaceAll ? p.text.replaceAll(p.oldS, () => p.newS) : p.text.replace(p.oldS, () => p.newS)
-          const out = p.fileEol === "\r\n" ? normalizeEOL(replaced).replace(/\n/g, "\r\n") : replaced
-          await writeFile(p.abs, out, "utf8")
-          refreshMarkdownPreview(p.abs)
-          results.push(`Replaced ${p.replaceAll ? p.count : 1} occurrence(s) in ${p.path}`)
+          const replaced = p.replaceAll ? p.midText.replaceAll(p.oldS, () => p.newS) : p.midText.replace(p.oldS, () => p.newS)
+          const out = p.g.fileEol === "\r\n" ? normalizeEOL(replaced).replace(/\n/g, "\r\n") : replaced
+          await writeFile(p.g.abs, out, "utf8")
+          refreshMarkdownPreview(p.g.abs)
+          results.push(`Replaced ${p.replaceAll ? p.count : 1} occurrence(s) in ${p.g.path}`)
         }
       }
       return results.join("\n")

@@ -854,6 +854,37 @@ describe("pre-work plan confirmation discipline", () => {
     assert.ok(text.includes("First delivery audit"), "work-loop state table carries the audit state")
   })
 
+  it("engineering.md: multi-task parallelism discipline injected at top level (2026-09-01, CLI parity)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "engineering.md"), "utf8")
+    assert.ok(text.includes("## Multi-Task Parallelism"), "top-level parallelism section present")
+    assert.ok(text.includes("Parallelize aggressively: send multiple\nindependent tool calls in one response"), "§14 D1 clause appears inside engineering.md (top-level mode never loads system.md)")
+    assert.ok(text.includes("splitting changes across independent\nsub-projects"), "F7 sub-project split trigger")
+    assert.ok(text.includes("Do NOT parallelize:\nwrites to the same file, dependent steps, bash/approval-gated commands"), "five no-parallel boundaries")
+    assert.ok(text.includes("approval storms"), "approval storms named")
+    assert.ok(text.includes("skip micro-parallelism (<1s ops)"), "no micro-parallelism")
+    assert.ok(text.includes("share NO file"), "parallel pre-check: affected-file sets disjoint")
+    assert.ok(text.includes("Dependency chain → serial"), "dependency chains run serially")
+    assert.ok(text.includes("at most 3 concurrent eng-coders"), "≤3 concurrency cap")
+    assert.ok(text.includes('designId=<id-A>,\n  designToken=<token-A>'), "parallel spawn call form (each with designId+token)")
+    assert.ok(text.includes("each parallel\n   design keeps its own designId+token pair"), "token isolation semantics")
+    assert.ok(text.includes("the DESIGN review is still only fired when\n  the user asks"), "initiation rights unchanged")
+    assert.ok(text.includes("plus its designId parameter"), "work-loop approval line mentions designId")
+  })
+
+  it("engineering.md: divergence-audit fix round reuses the same designId+token (2026-09-01, T19)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "engineering.md"), "utf8")
+    assert.ok(text.includes("This audit is an automatic flow node — no user initiation needed"), "audit is an automatic node (AC9)")
+    assert.ok(text.includes("same `designToken`\n     and `designId` parameters"), "fix round reuses the same designId+token")
+  })
+
+  it("engineering.md: no duplicated section headers (2026-09-01 fix #4 hygiene)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "engineering.md"), "utf8")
+    const dupes = [...text.matchAll(/^## .+$/gm)].map((m) => m[0])
+    assert.equal(dupes.length, new Set(dupes).size,
+      "every ## header appears exactly once: " + dupes.filter((h, i) => dupes.indexOf(h) !== i).join(" | "))
+    assert.ok(text.includes("## Questioning Style (requirement clarification)"), "header kept (dedup only)")
+  })
+
   it("eng-coder.md: full-design fidelity — no silent degradation (2026-08-30)", () => {
     const text = readFileSync(join(PROMPTS_DIR, "eng-coder.md"), "utf8")
     assert.ok(text.includes("Implement to the full design — no silent degradation"), "positive prohibition present")
