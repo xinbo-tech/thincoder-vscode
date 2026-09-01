@@ -2,6 +2,17 @@
 
 All notable changes to ThinCoder VS Code are documented here.
 
+## [0.8.10] — 2026-09-01
+
+### Added
+
+- **MCP Streamable POST 误判修复（CLI parity，MCP.md §4）+ 面板 [Edit]/[Test]**：http transport 增 postOnly 标记——GET SSE 405 降级后的纯 POST 模式 `isAlive()` 不再误判死（glm-websearch 类 server 的 reconnect failed 根因，与 CLI 同构）；`probeMcpServer` 镜像导出（一次性探活 initialize + tools/list，零副作用）；MCP 面板每行新增 [Edit]/[Test] 按钮——edit 复用添加表单（name 锁定、逐字段预填、token 字段、headers 逗号分隔提示 `k=v, k2=v2`），test 结果（工具数/延迟/错误透传）渲染到服务器行下；config-io 增 `updateMcpServer` 原位更新（数组序保持）；**[Reconnect] 死按钮修复**——webview 一直在发 `reconnectMcp` 消息但路由表无 case（路由拆分时丢失），面板重连按钮此前完全无效；token 一等字段（connect 链合成 `Authorization: Bearer <token>`，显式 headers 优先）随面板 token 表单字段一并落地
+
+### Changed
+
+- **multi-design 并行令牌（designId slots）**（CLI parity）：eng-coder 子 agent 多设计并行 spawn 各带 `{designId, token}` 互不覆盖
+- **memory_delete 工具**（CLI parity）：三层记忆条目删除
+
 ## [0.8.9] — 2026-09-01
 
 ### Added

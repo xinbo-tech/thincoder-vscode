@@ -178,6 +178,11 @@ export async function handlePanelMessage(panel, msg) {
     case "deleteProviderKey": await panel._deleteProviderKey(msg.name); break
     case "saveMcpServer": await panel._saveMcpServer(msg.name, msg.config); panel._pushMcpStatus(); break
     case "deleteMcpServer": await panel._deleteMcpServer(msg.name); panel._pushMcpStatus(); break
+    // MCP.md §4 F5/D-4：reconnectMcp（既有死按钮修复——webview 已在发此消息，路由拆分时
+    // 丢失）+ edit/test（CLI /mcp edit/test parity，交互随面板惯例）。
+    case "reconnectMcp": await panel._reconnectMcp(msg.name); break
+    case "editMcp": panel._editMcp(msg.name, msg.config ?? {}); break
+    case "testMcp": await panel._testMcp(msg.name); break
     case "addProvider":
       // Payload form (settings panel [+ Add] form): persist directly.
       // No payload (model dropdown shortcut): interactive QuickPick flow.

@@ -8,7 +8,7 @@
 import { SS } from "./settings-state.js"
 import { installProviderHandlers, providersCardHtml, bindAddProviderForm, updateProviderStatus, updateTestProviderResult } from "./settings-providers.js"
 import { agentCardHtml, consultAdvisorCardHtml, bindAgentControls, updateAgentSettings } from "./settings-agent.js"
-import { installToolsKeyHandlers, toolsCardHtml, bindToolsControls, renderMcpList, updateMcpTools, updateWebsearchSettings, updateIndexStatus } from "./settings-tools.js"
+import { installToolsKeyHandlers, toolsCardHtml, bindToolsControls, renderMcpList, updateMcpTools, updateMcpTestResult, updateWebsearchSettings, updateIndexStatus } from "./settings-tools.js"
 import { envCardHtml, bindEnvControls, updateShellCandidates, updateProxySettings, updateProxyTestResult } from "./settings-env.js"
 
 // openSettings refresh (GitHub #3): one-shot callbacks waiting for the next agentSettings
@@ -40,7 +40,7 @@ export function initSettings({ onClose, getModels }) {
   // Single-click delete — these actions are reversible (provider/MCP/key can be re-added).
   window._confirmDelete = function(btn, action) { action() }
 
-  return { openSettings, closeSettings, renderMcpList, updateMcpTools, updateProviderStatus, updateIndexStatus, updateAgentSettings, notifyAgentSettingsRefreshed, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
+  return { openSettings, closeSettings, renderMcpList, updateMcpTools, updateMcpTestResult, updateProviderStatus, updateIndexStatus, updateAgentSettings, notifyAgentSettingsRefreshed, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError }
 }
 
 /** Error banner at the top of the settings panel (extension-side failures). */

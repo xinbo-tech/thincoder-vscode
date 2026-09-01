@@ -9,6 +9,8 @@
  *   mcpConnect(serverConfig)        → client { id, serverName, tools } (idempotent per server name)
  *   connectMcpServersExpanded(cfgs) → { tools, warnings } — batch idempotent connect + expansion
  *   buildMcpTools(serverEntry)      → expanded native tools (CLI buildTools parity)
+ *   probeMcpServer(config)          → { ok, toolCount, latencyMs } / { ok:false, error } (F4/D-2,
+ *                                     CLI 镜像——零副作用一次性探活，panel testMcp 使用)
  *   mcpListTools(client) / mcpCallTool(client, name, args) / mcpDisconnect(client)
  *   closeAllMcp() / mcpConnectedNames() / mcpConnectedToolCounts() / mcpDisconnectByName(name)
  */
@@ -38,6 +40,14 @@ import { stdioTransport } from "./stdio.mjs"
 import { httpTransport } from "./http.mjs"
 import { wsTransport } from "./ws.mjs"
 
+/** F6/D-5（CLI parity）：config.token → `Authorization: Bearer <token>` 合成（仅当
+ *  headers 未显式给 Authorization——显式优先，向后兼容）。合成发生在传给 transport
+ *  前，不写回 config。 */
+export function withBearerToken(config) {
+  if (!config?.token || config.headers?.Authorization) return config
+  return { ...config, headers: { ...config.headers, Authorization: `Bearer ${config.token}` } }
+}
+
 // ─── MCP handshake ───────────────────────────────────────────────
 
 /** Initialize the MCP handshake and return the server's tool list */
@@ -55,10 +65,14 @@ async function doInitialize(transport, _name) {
 
   // 2026-08-31 MCP 会诊 P6：tools/list 分页被忽略（nextCursor 多页工具静默丢失）——
   // 循环跟随 cursor 直到 server 不再返回（上限 20 页防死循环）。
+  // MCP.md §4 评审 #8（CLI parity）：每页同受 INIT_TIMEOUT_MS 约束。
   const tools = []
   let cursor
   for (let page = 0; page < 20; page++) {
-    const toolsResp = await transport.send("tools/list", cursor ? { cursor } : {})
+    const toolsResp = await withTimeout(
+      transport.send("tools/list", cursor ? { cursor } : {}),
+      INIT_TIMEOUT_MS,
+    )
     if (toolsResp.error) throw new Error(`tools/list failed: ${toolsResp.error.message}`)
     tools.push(...(toolsResp.result?.tools ?? []))
     cursor = toolsResp.result?.nextCursor
@@ -86,7 +100,8 @@ export const _mcpHooks = {
 }
 
 /** 按 config 创建并完成握手的 transport（与 mcpConnect 的建连逻辑共享）。 */
-async function createConnectedTransport(config, serverName) {
+async function createConnectedTransport(rawConfig, serverName) {
+  const config = withBearerToken(rawConfig) // F6/D-5：token 合成（不写回原 config）
   let transport
   if (config.wsUrl) {
     transport = wsTransport(config.wsUrl, config.headers ?? {})
@@ -96,13 +111,33 @@ async function createConnectedTransport(config, serverName) {
     try {
       await transport.openSSE()
     } catch {
-      // Server doesn't support GET SSE — degrade to pure Streamable HTTP POST mode
+      // Server doesn't support GET SSE — degrade to pure Streamable HTTP POST mode.
+      // MCP.md §4 D-1（CLI parity）：显式标记 postOnly——isAlive 不得因
+      // eventSource == null 误判死。
+      transport.markPostOnly()
     }
   } else {
     transport = stdioTransport(config.command, config.args ?? [], config.env)
   }
   const mcpTools = await doInitialize(transport, serverName)
   return { transport, mcpTools }
+}
+
+/** F5/D-2（CLI probeMcpServer 镜像，评审 #5 定位）：一次性探活——initialize + tools/list
+ *  + 计时 → { ok, toolCount, latencyMs } / { ok:false, error }。零副作用：不进 _servers
+ *  注册表、无 onDead 挂钩；finally close。panel-mcp 的 testMcp 调用之。 */
+export async function probeMcpServer(config) {
+  const start = Date.now()
+  let transport
+  let mcpTools
+  try {
+    ;({ transport, mcpTools } = await createConnectedTransport(config, config.name ?? config.command ?? config.url ?? config.wsUrl))
+    return { ok: true, toolCount: mcpTools.length, latencyMs: Date.now() - start }
+  } catch (error) {
+    return { ok: false, error: error?.message ?? String(error) }
+  } finally {
+    try { transport?.close() } catch { /* ignore */ }
+  }
 }
 
 /** 后台退避重连（onDead 触发 & execute 前置检查共用）。 */
@@ -153,7 +188,9 @@ export async function mcpConnect(config) {
   // 2026-08-31 MCP 会诊 P3：原实现同名即复用——server 进程崩溃或 config 变更
   // （url/command/args/env）后每 turn 展开的工具全部 "MCP connection closed" 且无法自愈。
   // 现在复用前做 transport liveness 检查 + config 指纹比对（不一致即断开重连）。
-  const configFingerprint = JSON.stringify([config.command ?? null, config.args ?? null, config.url ?? null, config.wsUrl ?? null, config.env ?? null, config.headers ?? null])
+  // MCP.md §4 D-5（CLI parity）：fingerprint 计入 token 字段——面板 edit 改 token →
+  // 指纹变更 → 旧连接断开重连。
+  const configFingerprint = JSON.stringify([config.command ?? null, config.args ?? null, config.url ?? null, config.wsUrl ?? null, config.env ?? null, config.headers ?? null, config.token ?? null])
   for (const [id, s] of _servers) {
     if (s.serverName === serverName) {
       const sameConfig = s.configFingerprint === configFingerprint

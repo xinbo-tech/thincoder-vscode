@@ -5,7 +5,7 @@
 import { escHtml } from "./ui.js"
 import { t } from "./i18n.js"
 import { SS } from "./settings-state.js"
-import { keyRowEdit, flashSaved, markInputError } from "./settings-widgets.js"
+import { keyRowEdit, flashSaved } from "./settings-widgets.js"
 
 /** Install the window._* handlers the embed/websearch key rows' inline onclick attributes call. */
 export function installToolsKeyHandlers() {
@@ -74,21 +74,25 @@ export function toolsCardHtml() {
   html += `<div class="settings-subtitle">${t("settings.mcpSection")}</div>`
   html += `<div id="mcp-list"></div>`
   html += `<button id="mcp-add-btn" class="key-btn">${t("settings.mcpAdd")}</button>`
+  // F5/MCP.md §4：同一表单服务 add 与 edit（edit 时 name 只读）——token 一等字段（F6②）
+  // + headers 逗号分隔提示（F6③，value 可含空格）。
   html += `<div id="mcp-form" style="display:none">
     <div class="key-field"><label>${t("settings.mcp.name")}</label><input id="mcp-name" placeholder="my-server"></div>
     <div class="key-field"><label>${t("settings.mcp.type")}</label><select id="mcp-type"><option value="stdio">stdio</option><option value="http">http</option><option value="ws">ws</option></select></div>
     <div id="mcp-stdio-fields">
       <div class="key-field"><label>${t("settings.mcp.command")}</label><input id="mcp-command" placeholder="npx"></div>
       <div class="key-field"><label>${t("settings.mcp.args")}</label><input id="mcp-args" placeholder="-y pkg"></div>
-      <div class="key-field"><label>${t("settings.mcp.env")}</label><input id="mcp-env" placeholder="KEY=value ..."></div>
+      <div class="key-field"><label>${t("settings.mcp.env")}</label><input id="mcp-env" placeholder="KEY=value, KEY2=value2 (comma-separated)"></div>
     </div>
     <div id="mcp-http-fields" style="display:none">
       <div class="key-field"><label>${t("settings.mcp.url")}</label><input id="mcp-url" placeholder="https://..."></div>
-      <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-headers" placeholder='{"Authorization":"..."}'></div>
+      <div class="key-field"><label>${t("settings.mcp.token")}</label><input id="mcp-token" placeholder="paste token (Bearer)"></div>
+      <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-headers" placeholder="Authorization=Bearer xxx, X-Foo=bar"></div>
     </div>
     <div id="mcp-ws-fields" style="display:none">
       <div class="key-field"><label>${t("settings.mcp.wsUrl")}</label><input id="mcp-ws-url" placeholder="ws://..."></div>
-      <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-ws-headers" placeholder='{"Authorization":"..."}'></div>
+      <div class="key-field"><label>${t("settings.mcp.token")}</label><input id="mcp-ws-token" placeholder="paste token (Bearer)"></div>
+      <div class="key-field"><label>${t("settings.mcp.headers")}</label><input id="mcp-ws-headers" placeholder="Authorization=Bearer xxx, X-Foo=bar"></div>
     </div>
     <button id="mcp-save-btn" class="key-btn">${t("settings.save")}</button>
     <button id="mcp-cancel-btn" class="key-btn">${t("settings.cancel")}</button>
@@ -132,24 +136,13 @@ export function bindToolsControls() {
 
   // Bind MCP add
   document.getElementById("mcp-add-btn").addEventListener("click", () => {
-    document.getElementById("mcp-form").style.display = "block"
-    document.getElementById("mcp-name").value = ""
-    document.getElementById("mcp-command").value = ""
-    document.getElementById("mcp-args").value = ""
-    document.getElementById("mcp-env").value = ""
-    document.getElementById("mcp-url").value = ""
-    document.getElementById("mcp-headers").value = ""
-    document.getElementById("mcp-ws-url").value = ""
-    document.getElementById("mcp-ws-headers").value = ""
-    document.getElementById("mcp-type").value = "stdio"
-    document.getElementById("mcp-stdio-fields").style.display = ""
-    document.getElementById("mcp-http-fields").style.display = "none"
-    document.getElementById("mcp-ws-fields").style.display = "none"
+    openMcpForm(null)
   })
 
-  // Bind MCP save
+  // Bind MCP save (add AND edit — name 锁定：edit 时 input readonly)
   document.getElementById("mcp-save-btn").addEventListener("click", () => {
-    const name = document.getElementById("mcp-name").value.trim()
+    const nameEl = document.getElementById("mcp-name")
+    const name = nameEl.value.trim()
     if (!name) return
     const type = document.getElementById("mcp-type").value
     const config = {}
@@ -158,25 +151,22 @@ export function bindToolsControls() {
       const argsStr = document.getElementById("mcp-args").value.trim()
       config.args = argsStr ? argsStr.split(/\s+/).map((s) => s.trim()).filter(Boolean) : []
       const envStr = document.getElementById("mcp-env").value.trim()
-      if (envStr) {
-        config.env = {}
-        for (const pair of envStr.split(/\s+/)) {
-          const eq = pair.indexOf("=")
-          if (eq > 0) config.env[pair.slice(0, eq)] = pair.slice(eq + 1).replace(/^["']|["']$/g, "")
-        }
-      }
+      if (envStr) config.env = parseHeadersLike(envStr)
     } else if (type === "ws") {
       config.wsUrl = document.getElementById("mcp-ws-url").value.trim()
-      const headersEl = document.getElementById("mcp-ws-headers")
-      try { config.headers = JSON.parse(headersEl.value || "{}") }
-      catch { config.headers = {}; markInputError(headersEl) }
+      const token = document.getElementById("mcp-ws-token").value.trim()
+      if (token) config.token = token
+      const headersStr = document.getElementById("mcp-ws-headers").value.trim()
+      if (headersStr) config.headers = parseHeadersLike(headersStr)
     } else {
       config.url = document.getElementById("mcp-url").value.trim()
-      const headersEl = document.getElementById("mcp-headers")
-      try { config.headers = JSON.parse(headersEl.value || "{}") }
-      catch { config.headers = {}; markInputError(headersEl) }
+      const token = document.getElementById("mcp-token").value.trim()
+      if (token) config.token = token
+      const headersStr = document.getElementById("mcp-headers").value.trim()
+      if (headersStr) config.headers = parseHeadersLike(headersStr)
     }
-    window._vscode.postMessage({ type: "saveMcpServer", name, config })
+    const editing = nameEl.readOnly
+    window._vscode.postMessage(editing ? { type: "editMcp", name, config } : { type: "saveMcpServer", name, config })
     flashSaved(document.getElementById("mcp-save-btn"))
     document.getElementById("mcp-form").style.display = "none"
   })
@@ -206,7 +196,7 @@ export function bindToolsControls() {
 export function renderMcpList() {
   const list = document.getElementById("mcp-list")
   if (!list) return
-  const servers = window._mcpServers // array of { name, desc, connected, toolCount }
+  const servers = window._mcpServers // array of { name, desc, connected, toolCount, config }
   if (!Array.isArray(servers) || servers.length === 0) {
     list.innerHTML = `<div style="font-size:12px;opacity:0.5;padding:4px 0">${t("settings.mcp.noServers")}</div>`
     return
@@ -222,6 +212,8 @@ export function renderMcpList() {
       <span style="opacity:0.5;flex:1;margin:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.desc)}${count}</span>
       <span style="font-size:10px;opacity:0.4;margin-right:8px">${type}</span>
       <button class="key-btn mcp-tools-btn" data-name="${escHtml(s.name)}">${t("settings.mcp.tools")}</button>
+      <button class="key-btn mcp-edit-btn" data-name="${escHtml(s.name)}">${t("settings.mcp.edit")}</button>
+      <button class="key-btn mcp-test-btn" data-name="${escHtml(s.name)}">${t("settings.mcp.test")}</button>
       <button class="key-btn mcp-reconnect-btn" data-name="${escHtml(s.name)}">${t("settings.mcp.reconnect")}</button>
       <button class="key-btn del-key mcp-del-btn" data-name="${escHtml(s.name)}">✕</button>
     </div>
@@ -242,11 +234,38 @@ export function renderMcpList() {
       window._vscode.postMessage({ type: "mcpTools", name: btn.dataset.name })
     })
   })
+  list.querySelectorAll(".mcp-edit-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const s = (window._mcpServers || []).find((x) => x.name === btn.dataset.name)
+      openMcpForm(s?.config ? { ...s.config, name: s.name } : null)
+    })
+  })
+  list.querySelectorAll(".mcp-test-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const detail = document.getElementById("mcp-tools-" + btn.dataset.name)
+      if (detail) {
+        detail.style.display = ""
+        detail.innerHTML = '<div style="opacity:0.5;font-size:11px">' + t("settings.mcp.testing") + "</div>"
+      }
+      window._vscode.postMessage({ type: "testMcp", name: btn.dataset.name })
+    })
+  })
   list.querySelectorAll(".mcp-reconnect-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       window._vscode.postMessage({ type: "reconnectMcp", name: btn.dataset.name })
     })
   })
+}
+
+/** MCP test result (F4/D-2): render under the server row (same expander as tools). */
+export function updateMcpTestResult({ name, ok, toolCount, latencyMs, error }) {
+  const detail = document.getElementById("mcp-tools-" + name)
+  if (!detail) return
+  if (!ok) {
+    detail.innerHTML = `<div style="color:#f14c4c;font-size:11px;padding:4px 0">${escHtml(error || "failed")}</div>`
+    return
+  }
+  detail.innerHTML = `<div style="color:var(--green,#4ec9b0);font-size:11px;padding:4px 0">${escHtml(t("settings.mcp.testOk", { count: toolCount, latency: latencyMs }))}</div>`
 }
 
 /** MCP tools expander result: render the tool list (or error) under the server row. */
@@ -296,4 +315,52 @@ function renderIndexStatus() {
     el.textContent = t("settings.indexNotBuilt")
     if (btn) btn.disabled = false
   }
+}
+
+// ─── MCP add/edit form helpers (F5/F6, MCP.md §4) ─────────────────────────────
+
+/** F6③（CLI parseHeaders parity）：`key=value, key2=value2` 逗号分隔解析——value 可含
+ *  空格（Bearer token 场景）。`k=`（空 value）删除该项；返回 null = 全部清空。 */
+export function parseHeadersLike(input) {
+  const out = {}
+  for (const pair of String(input).split(",")) {
+    const eq = pair.indexOf("=")
+    if (eq > 0) {
+      const key = pair.slice(0, eq).trim()
+      const value = pair.slice(eq + 1).trim().replace(/^["']|["']$/g, "")
+      if (!key) continue
+      if (value) out[key] = value
+      else delete out[key]
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
+/** Open the MCP form: null = add (blank), otherwise prefill from the server's config
+ *  (edit — name input becomes readonly, F3 name 不可改). */
+export function openMcpForm(cfg) {
+  const nameEl = document.getElementById("mcp-name")
+  const editing = !!cfg
+  document.getElementById("mcp-form").style.display = "block"
+  nameEl.value = editing ? cfg.name : ""
+  nameEl.readOnly = editing
+  const type = editing ? (cfg.wsUrl ? "ws" : cfg.url ? "http" : "stdio") : "stdio"
+  document.getElementById("mcp-type").value = type
+  document.getElementById("mcp-command").value = editing && cfg.command ? cfg.command : ""
+  document.getElementById("mcp-args").value = editing && Array.isArray(cfg.args) ? cfg.args.join(" ") : ""
+  document.getElementById("mcp-env").value = editing && cfg.env ? kvToInput(cfg.env) : ""
+  document.getElementById("mcp-url").value = editing && cfg.url ? cfg.url : ""
+  document.getElementById("mcp-token").value = editing && cfg.token ? cfg.token : ""
+  document.getElementById("mcp-headers").value = editing && cfg.headers ? kvToInput(cfg.headers) : ""
+  document.getElementById("mcp-ws-url").value = editing && cfg.wsUrl ? cfg.wsUrl : ""
+  document.getElementById("mcp-ws-token").value = editing && cfg.token ? cfg.token : ""
+  document.getElementById("mcp-ws-headers").value = editing && cfg.headers ? kvToInput(cfg.headers) : ""
+  document.getElementById("mcp-stdio-fields").style.display = type === "stdio" ? "" : "none"
+  document.getElementById("mcp-http-fields").style.display = type === "http" ? "" : "none"
+  document.getElementById("mcp-ws-fields").style.display = type === "ws" ? "" : "none"
+}
+
+/** headers/env 对象 → 单行输入串（`k=v, k2=v2`，与 parseHeadersLike 互逆）。 */
+function kvToInput(obj) {
+  return Object.entries(obj).map(([k, v]) => `${k}=${v}`).join(", ")
 }

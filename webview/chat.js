@@ -52,7 +52,7 @@ const { showAtDropdown } = _ac
 
 // ─── Settings panel (init early so openSettings is available for toolbar binding) ──
 const _settings = initSettings({ onClose: () => ctx.inputEl.focus(), getModels: () => ctx._models })
-const { openSettings, closeSettings, renderMcpList, updateMcpTools, updateProviderStatus, updateIndexStatus, updateAgentSettings, notifyAgentSettingsRefreshed, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError } = _settings
+const { openSettings, closeSettings, renderMcpList, updateMcpTools, updateMcpTestResult, updateProviderStatus, updateIndexStatus, updateAgentSettings, notifyAgentSettingsRefreshed, updateWebsearchSettings, updateTestProviderResult, updateShellCandidates, updateProxySettings, updateProxyTestResult, showSettingsError } = _settings
 
 initOnboarding({ openSettings })
 
@@ -222,6 +222,7 @@ window.addEventListener("message", (e) => {
       renderMcpList()
       break
     case "mcpTools": updateMcpTools(m); break
+    case "mcpTestResult": updateMcpTestResult(m); break
     case "indexStatus":
       updateIndexStatus(m.status)
       break

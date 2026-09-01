@@ -9,7 +9,7 @@ import {
   buildProvider, providerLabel, readProviders,
 } from "./presets.mjs"
 import {
-  persistRaw, resolveProviders, loadMcpServers, addMcpServer, removeMcpServer,
+  persistRaw, resolveProviders, loadMcpServers, addMcpServer, updateMcpServer, removeMcpServer,
   loadAgentSettings, loadRaw, normalizeProxy,
 } from "../config-io.mjs"
 import { addProviderEntry, removeProviderEntry } from "./provider-flows.mjs"
@@ -250,9 +250,13 @@ export function getMcpServers() {
   return loadMcpServers()
 }
 
-/** Add/update an MCP server in the shared config.json. Returns error string or null (duplicate rejection). */
+/** Add an MCP server (duplicate → update). Returns error string or null.
+ *  F5/MCP.md §4：面板 [Edit] 复用同一表单——已存在即原位更新（CLI /mcp edit parity，
+ *  保持数组序 + token 字段落盘）。 */
 export function saveMcpServer(name, config) {
-  return addMcpServer(name, config)
+  const err = addMcpServer(name, config)
+  if (err === null) return null
+  return updateMcpServer(name, config)
 }
 
 export function deleteMcpServer(name) {

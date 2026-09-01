@@ -21,7 +21,7 @@ import { initStopTrace } from "./stop-trace.mjs"
 import { ensureSlot, activeData, activeHistory, activeLines, saveLines, loadModelPrefs, loadSession, loadOlder, newSession, deleteSession, pushSessions, generateTitle, status as bootstrapStatus } from "./panel-session.mjs"
 import { projectInfo, pushProject, applyProjectSwitch, onProjectChanged, pickProject } from "./panel-project.mjs"
 import { pushIndexStatus, atComplete, saveEmbeddingConfig, maybePromptIndex, buildIndex } from "./panel-index.mjs"
-import { pushMcpStatus, reconnectMcp } from "./panel-mcp.mjs"
+import { pushMcpStatus, reconnectMcp, editMcp, testMcp } from "./panel-mcp.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -188,6 +188,8 @@ export class ChatPanel {
 
   _pushMcpStatus() { return pushMcpStatus(this) }
   async _reconnectMcp(name) { return reconnectMcp(this, name) }
+  _editMcp(name, config) { return editMcp(this, name, config) }
+  async _testMcp(name) { return testMcp(this, name) }
 
   // ─── Settings ─────────────────────────────────
 

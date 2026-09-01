@@ -2,13 +2,16 @@
  * mcp.test.mjs — MCP tool expansion (CLI parity, MCP.md)
  * Tools are expanded into NATIVE agent tools ({server}_{tool} prefix, full schema,
  * direct tools/call routing); the gateway mcp tool is gone.
+ * MCP.md §4 (2026-09-01)：T7 镜像（postOnly isAlive）+ probe 零副作用 + token 合成
+ * + updateMcpServer 原位更新（panel edit 的持久化落点）。
  */
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
 import { fileURLToPath } from "node:url"
 import { join, dirname } from "node:path"
 import { tmpdir } from "node:os"
-import { rmSync } from "node:fs"
+import { rmSync, mkdtempSync } from "node:fs"
+import { createServer } from "node:http"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FAKE_SERVER = join(__dirname, "fixtures", "fake-mcp-server.mjs")
@@ -171,6 +174,133 @@ describe("2026-08-31 MCP 会诊：transport 鲁棒性", () => {
     assert.deepEqual(p2, ["bearer.sk-secret"])
     assert.deepEqual(withAuthToken("ws://example.com/mcp", undefined), { url: "ws://example.com/mcp", protocols: [] })
     assert.throws(() => withAuthToken("not a url", "Bearer t"), /Invalid WebSocket URL/)
+  })
+})
+
+// ─── MCP.md §4（2026-09-01）：POST-only isAlive（T7 镜像）+ probe 零副作用 + token ───
+
+/** Streamable POST-only mock server（CLI postOnlyServer 同款）：GET → 405；POST
+ *  initialize/tools/list 正常应答。seenHeaders 收集 Authorization 供 token 断言。 */
+function postOnlyServerVscode(seenHeaders = []) {
+  return createServer((req, res) => {
+    seenHeaders.push(req.headers.authorization ?? null)
+    if (req.method === "GET") {
+      res.writeHead(405, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "Method Not Allowed" }))
+      return
+    }
+    let body = ""
+    req.on("data", (d) => (body += d))
+    req.on("end", () => {
+      const msg = JSON.parse(body)
+      const result = msg.method === "initialize"
+        ? { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "postonly", version: "1" } }
+        : { tools: [{ name: "web_search", description: "search the web", inputSchema: { type: "object", properties: { query: { type: "string" } } } }] }
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }))
+    })
+  })
+}
+
+describe("MCP.md §4：postOnly / probe / token / edit", () => {
+  it("T7 (F5 CLI 镜像): openSSE 405 降级 → markPostOnly → isAlive true；close 后 false", async () => {
+    const { httpTransport } = await import("../src/mcp/http.mjs")
+    const { mcpConnect, mcpDisconnectByName } = mcp
+    // ① transport 三态直测（与 CLI T1b 同构）
+    const t = httpTransport("http://127.0.0.1:9/mcp")
+    assert.equal(t.isAlive(), false, "未降级未标记 → 死")
+    t.markPostOnly()
+    assert.equal(t.isAlive(), true, "postOnly 标记后不得因 eventSource==null 判死（F5）")
+    t.close()
+    assert.equal(t.isAlive(), false, "close 后判死（F2 同构）")
+    // ② 全链：mcpConnect POST-only server → registry entry isAlive true
+    const seenHeaders = []
+    const server = postOnlyServerVscode(seenHeaders)
+    await new Promise((r) => server.listen(0, "127.0.0.1", r))
+    try {
+      const client = await mcpConnect({ name: "vscode-postonly", url: `http://127.0.0.1:${server.address().port}/mcp` })
+      assert.equal(client.tools.length, 1, "tools/list over POST succeeded")
+      assert.ok(mcp._servers?.get?.(client.id)?.transport?.isAlive?.() ?? true, "entry reachable")
+      mcpDisconnectByName("vscode-postonly")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("probeMcpServer 成功/失败均零副作用：_servers 不增 (F4/D-2 镜像)", async () => {
+    const { probeMcpServer, closeAllMcp } = mcp
+    const seenHeaders = []
+    const server = postOnlyServerVscode(seenHeaders)
+    await new Promise((r) => server.listen(0, "127.0.0.1", r))
+    try {
+      const countServers = () => mcp.mcpConnectedNames().length
+      const before = countServers()
+      const ok = await probeMcpServer({ name: "probe-ok", url: `http://127.0.0.1:${server.address().port}/mcp` })
+      assert.equal(ok.ok, true, `probe must succeed: ${ok.error ?? ""}`)
+      assert.equal(ok.toolCount, 1)
+      assert.ok(Number.isFinite(ok.latencyMs))
+      assert.equal(countServers(), before, "成功探活不进注册表")
+      const bad = await probeMcpServer({ name: "probe-fail", url: "http://127.0.0.1:9/mcp" })
+      assert.equal(bad.ok, false)
+      assert.ok(bad.error, "失败有错误信息")
+      assert.equal(countServers(), before, "失败探活同样零副作用")
+    } finally {
+      server.close()
+      closeAllMcp()
+    }
+  })
+
+  it("withBearerToken: 合成/显式优先/不写回原 config (F6/D-5)", async () => {
+    const { withBearerToken } = mcp
+    const cfg = { name: "t", url: "http://x", token: "abc" }
+    const merged = withBearerToken(cfg)
+    assert.equal(merged.headers.Authorization, "Bearer abc")
+    assert.equal(cfg.headers, undefined, "不写回原 config")
+    assert.equal(withBearerToken({ url: "http://x", token: "abc", headers: { Authorization: "Bearer real" } }).headers.Authorization, "Bearer real", "显式优先")
+    assert.equal(withBearerToken({ url: "http://x" }).headers, undefined, "无 token 不合成")
+    // 链路：token config 真实连接 → 请求头 Bearer abc
+    const { mcpConnect, mcpDisconnectByName } = mcp
+    const seenHeaders = []
+    const server = postOnlyServerVscode(seenHeaders)
+    await new Promise((r) => server.listen(0, "127.0.0.1", r))
+    try {
+      const client = await mcpConnect({ name: "vscode-tok", url: `http://127.0.0.1:${server.address().port}/mcp`, token: "abc" })
+      assert.equal(client.tools.length, 1)
+      assert.ok(seenHeaders.every((h) => h === "Bearer abc"), `every request carries Bearer abc, got ${JSON.stringify(seenHeaders)}`)
+      mcpDisconnectByName("vscode-tok")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("updateMcpServer: 原位替换保数组序 + token 落盘 + name 不存在报错（panel edit 落点）", async () => {
+    const { _setConfigPathForTest, loadRaw, addMcpServer, updateMcpServer, removeMcpServer } = await import("../src/config-io.mjs")
+    const dir = mkdtempSync(join(tmpdir(), "vscode-mcp-edit-"))
+    const cfgPath = join(dir, "config.json")
+    _setConfigPathForTest(cfgPath)
+    try {
+      addMcpServer("srv", { url: "https://old.example.com/mcp", headers: { Authorization: "Bearer old" } })
+      addMcpServer("other", { command: "npx", args: ["-y", "pkg"] })
+      const err = updateMcpServer("srv", { url: "https://new.example.com/mcp", token: "newtok", headers: { "X-Foo": "bar" } })
+      assert.equal(err, null)
+      const servers = loadRaw().mcp.servers
+      assert.equal(servers.length, 2, "无新增条目")
+      assert.equal(servers[0].name, "srv", "原位替换——数组序保持")
+      assert.equal(servers[0].url, "https://new.example.com/mcp")
+      assert.equal(servers[0].token, "newtok", "token 字段落盘（D-6）")
+      assert.deepEqual(servers[0].headers, { "X-Foo": "bar" })
+      assert.equal(servers[1].name, "other", "后条目不受影响")
+      assert.match(updateMcpServer("ghost", { command: "x" }), /No MCP server named/)
+      // transport 字段被清空 → 回落既有值（编辑表单只改 headers/token 的场景）
+      updateMcpServer("srv", { token: "tok2", headers: { "X-A": "1" } })
+      const srv2 = loadRaw().mcp.servers.find((s) => s.name === "srv")
+      assert.equal(srv2.url, "https://new.example.com/mcp", "url 回落既有值（不产出退化条目）")
+      assert.equal(srv2.token, "tok2")
+      removeMcpServer("srv")
+      removeMcpServer("other")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
