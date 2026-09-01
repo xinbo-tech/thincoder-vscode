@@ -39,3 +39,32 @@ export function permissionGate(panel) {
     else sig?.addEventListener("abort", onAbort, { once: true })
   })
 }
+
+/**
+ * §16 D-B1 batch permission gate: one merged ask for a same-response batch of non-readonly
+ * tools. Returns "approveAll" / "oneByOne" / "deny" (deny → the whole batch is refused,
+ * no second ask; oneByOne → the caller falls back to the per-item channel).
+ * No handler → execute-tools falls back to per-item asks (NF-B1: ACP bridge / headless /
+ * old versions are never blocked by the batch).
+ * @param {{ _autoApprove: boolean, _batchPermissionQueue: {resolve: Function}[], _panel?: { webview: { postMessage: Function } } }} panel
+ */
+export function batchPermissionGate(panel) {
+  if (panel._autoApprove) return undefined
+  return ({ tools, count }) => new Promise((resolve) => {
+    if (panel._autoApprove) { resolve("approveAll"); return }
+    const entry = { resolve }
+    panel._batchPermissionQueue = panel._batchPermissionQueue ?? []
+    panel._batchPermissionQueue.push(entry)
+    panel._setStatus?.("waiting")
+    panel._panel?.webview.postMessage({ type: "batchPermissionRequest", tools, count })
+    // Stop must release a batch-parked turn — same abort semantics as the per-item gate.
+    const onAbort = () => {
+      const i = panel._batchPermissionQueue.indexOf(entry)
+      if (i >= 0) panel._batchPermissionQueue.splice(i, 1)
+      resolve("deny")
+    }
+    const sig = panel._abortController?.signal
+    if (sig?.aborted) onAbort()
+    else sig?.addEventListener("abort", onAbort, { once: true })
+  })
+}
