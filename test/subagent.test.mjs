@@ -773,6 +773,33 @@ test("T5 (vscode): 回合收尾——未 check 的 async 在 runAgent 结束自�
   }
 })
 
+test("D-A3 (vscode): async 子代理 settle 即发 onSubagent done 通知——完成即冻结信号，不等到回合收尾", async () => {
+  const { server } = await asyncChildServer(200)
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  try {
+    const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+    const parent = asyncParent(port)
+    const notes = []
+    const ctx = asyncCtx(parent, cwd, { callbacks: { onSubagent: (info) => notes.push(info) } })
+    const r = await subagentTool.execute({ task: "slow task", role: "coder", async: true }, ctx)
+    assert.equal(r.status, "running")
+    assert.ok(!notes.some((n) => n.status === "done"), "spawn 返回时尚无 done 通知")
+    const entry = parent._asyncSubagents.get(r.id)
+    await entry.settled
+    // settle 即发 done（webview 区块完成态信号，runChild 完成路径——无需回合收尾）
+    const doneNote = notes.find((n) => n.id === r.id && n.status === "done")
+    assert.ok(doneNote, "settle 时收到 onSubagent done 通知（完成即冻结）")
+    assert.equal(doneNote.role, "coder")
+    // 收尾注入仍在（既有 T5 已断言 reminder 注入 + 注册表清空——本用例只验证通知时机）
+    assert.equal(entry.done, true)
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
 test("T8 (vscode): 中断——signal aborted → 注册表立即清空、不注入陈旧错误", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
   const { runAgent } = await import("../src/agent.mjs")
