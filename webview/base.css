@@ -173,6 +173,32 @@ body {
   line-height: 1.5;
 }
 
+
+/* ─── Compression status line (CONTEXT-COMPACTION §7 D-C3) ──── */
+
+.compress-status {
+  margin: 6px 0;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, rgba(128,128,128,0.08));
+  border: 1px solid var(--vscode-editorWidget-border, rgba(128,128,128,0.25));
+  font-size: 11px;
+  opacity: 0.85;
+  color: var(--vscode-foreground, inherit);
+}
+
+.compress-status.compress-done {
+  background: var(--vscode-inputValidation-infoBackground, rgba(0,122,204,0.08));
+  border-color: var(--vscode-inputValidation-infoBorder, rgba(0,122,204,0.35));
+}
+
+.compress-status.compress-failed {
+  background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.08));
+  border-color: var(--vscode-inputValidation-errorBorder, rgba(255,0,0,0.35));
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+
 .permission-prompt-text {
   color: var(--vscode-inputValidation-warningForeground, #cca700);
   margin-bottom: 8px;

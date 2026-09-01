@@ -6,7 +6,7 @@
 import { ctx, vscode, S } from "./state.js"
 import {
   showWelcome, showBanner, addUser, addAssistantHistory,
-  addTool, addToolHistory, finishTool, setLoading, showError, maybeScrollDown,
+  addTool, addToolHistory, finishTool, setLoading, showError, maybeScrollDown, escHtml,
 } from "./ui.js"
 import { MAX_TOOL_OUTPUT } from "./lib.js"
 import { setStrings, t } from "./i18n.js"
@@ -23,7 +23,7 @@ import { initOnboarding, showWelcomePanel, maybeShowWelcome } from "./onboarding
 import { handleAutoApprove, handleAgentSettings, handlePlanMode } from "./mode-buttons.js"
 import { handleModelsMessage } from "./model-picker.js"
 import { showQuestion } from "./question.js"
-import { showPermissionRequest } from "./permission.js"
+import { showPermissionRequest, showBatchPermissionRequest } from "./permission.js"
 // Side-effect imports: these register their DOM listeners on evaluation.
 // Order preserves the original chat.js top-to-bottom registration order for
 // listeners on the same target (scroll.js's initScrollFollow before history.js's
@@ -211,8 +211,14 @@ window.addEventListener("message", (e) => {
     case "question":
       showQuestion(ctx, m.question, m.options)
       break
+    case "compress":
+      showCompressStatus(m)
+      break
     case "permissionRequest":
       showPermissionRequest(m)
+      break
+    case "batchPermissionRequest":
+      showBatchPermissionRequest(m)
       break
     case "atResults":
       showAtDropdown(m.matches || [])
@@ -239,6 +245,41 @@ window.addEventListener("message", (e) => {
       break
   }
 })
+
+
+// ─── Compression status line (CONTEXT-COMPACTION §7 D-C3) ─────
+// Lifecycle-only visibility: "Compressing context…" → "Compressed: N tokens freed
+// (Xs)" / "failed: <error>" / 3-failure degradation note. One element in the messages
+// stream, updated in place (session view clears recreate it via replaceChildren).
+function showCompressStatus(m) {
+  let el = document.getElementById("compress-status")
+  if (!el) {
+    el = document.createElement("div")
+    el.id = "compress-status"
+    el.className = "compress-status"
+    document.getElementById("messages").appendChild(el)
+  }
+  el.classList.remove("compress-done", "compress-failed")
+  let text
+  if (m.status === "start") {
+    text = m.messages != null ? t("compress.start", { n: m.messages }) : t("compress.starting")
+  } else if (m.status === "done") {
+    text = t("compress.done", {
+      tokens: m.tokensFreed != null ? String(m.tokensFreed) : "?",
+      seconds: ((m.elapsedMs ?? 0) / 1000).toFixed(1),
+    })
+    el.classList.add("compress-done")
+  } else if (m.status === "fallback") {
+    text = t("compress.fallback", { n: m.tailMessages != null ? String(m.tailMessages) : "?" })
+    el.classList.add("compress-failed")
+  } else {
+    text = t("compress.failed", { error: escHtml(m.error ?? "") })
+    el.classList.add("compress-failed")
+  }
+  el.innerHTML = text
+  maybeScrollDown(ctx)
+}
+
 
 // ─── Startup handshake: the extension sets webview.html then immediately
 // postMessages i18n — but the webview loads ASYNCHRONOUSLY, so that message is

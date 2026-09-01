@@ -65,3 +65,43 @@ export function showPermissionRequest(m) {
   // Focus the deny button (safest default)
   setTimeout(() => el.querySelector(".deny")?.focus(), 50)
 }
+
+
+/**
+ * §16 D-B1 merged batch-approval row: "N tools need permission: A、B、C" with
+ * approve-all / one-by-one / deny. One ask covers the whole batch — no click fatigue.
+ * approveAll → whole batch runs; oneByOne → the extension falls back to per-item cards;
+ * deny → whole batch refused (no second ask).
+ */
+export function showBatchPermissionRequest(m) {
+  const el = document.createElement("div")
+  el.className = "permission-prompt"
+  el.setAttribute("role", "alert")
+  const names = (m.tools ?? []).map((t) => escHtml(t?.name ?? "?")).join(", ")
+  let html =
+    '<div class="permission-prompt-text">' +
+    t("perm.batch.wantsTo", { count: String(m.count ?? (m.tools ?? []).length), names }) +
+    "</div>"
+  html += '<div class="permission-prompt-actions">'
+  html += '<button class="approve-all">' + t("perm.approveAll") + "</button>"
+  html += '<button class="one-by-one">' + t("perm.batch.oneByOne") + "</button>"
+  html += '<button class="deny">' + t("perm.deny") + "</button>"
+  html += "</div>"
+  el.innerHTML = html
+  el.querySelector(".approve-all").addEventListener("click", () => {
+    el.remove()
+    vscode.postMessage({ type: "batchPermissionResponse", choice: "approveAll" })
+  })
+  el.querySelector(".one-by-one").addEventListener("click", () => {
+    el.remove()
+    vscode.postMessage({ type: "batchPermissionResponse", choice: "oneByOne" })
+  })
+  el.querySelector(".deny").addEventListener("click", () => {
+    el.remove()
+    vscode.postMessage({ type: "batchPermissionResponse", choice: "deny" })
+  })
+  document.getElementById("messages").appendChild(el)
+  el.scrollIntoView({ behavior: "smooth" })
+  // Focus the deny button (safest default)
+  setTimeout(() => el.querySelector(".deny")?.focus(), 50)
+}
