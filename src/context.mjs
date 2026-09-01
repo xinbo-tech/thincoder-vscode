@@ -8,6 +8,7 @@ import { execSync } from "node:child_process"
 import * as os from "node:os"
 import { search as memorySearch } from "./memory.mjs"
 import { loadRules } from "./extension/rules.mjs"
+import { safeSliceUTF16 } from "./agent/run-helpers.mjs"
 
 /**
  * Build a repo dependency outline for the project.
@@ -244,7 +245,7 @@ export function injectContext(history, cwd, userInput) {
           role: "user",
           content:
             "[Relevant documentation:\n" +
-            docChunks.map((d) => `- ${d.path}: <untrusted_doc_chunk>${escapeXml(d.content.slice(0, 800))}</untrusted_doc_chunk>`).join("\n") +
+            docChunks.map((d) => `- ${d.path}: <untrusted_doc_chunk>${escapeXml(safeSliceUTF16(d.content, 800))}</untrusted_doc_chunk>`).join("\n") +
             "]",
         })
       }
@@ -272,7 +273,7 @@ function findDocChunks(cwd, query, limit) {
       for (const chunk of chunks) {
         if (results.length >= limit) return results
         if (pattern.test(chunk)) {
-          results.push({ path: rel, content: chunk.trim().slice(0, 800) })
+          results.push({ path: rel, content: safeSliceUTF16(chunk.trim(), 800) })
         }
       }
     } catch { /* skip */ }
