@@ -5,6 +5,7 @@
  */
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
+import { createServer } from "node:http"
 
 
 // ─── CLI parity constants ────────────────────────────────────────
@@ -375,6 +376,145 @@ function createMockResponse(sseLines) {
     headers: new Map([["content-type", "text/event-stream"]]),
   }
 }
+
+// ─── V3（CLI §14.2/§14.3 parity）：prefix 续写精简 / reasoning 回传 / partial 不受影响 / 400 可见性 ───
+
+/** 构造含 3 组工具链 + 10 条文本的历史（CLI test/provider.test.mjs toolHistory 同构）。 */
+function toolHistory() {
+  const chains = Array.from({ length: 3 }, (_, n) => [
+    { role: "assistant", content: null, tool_calls: [{ id: `call_${n}`, type: "function", function: { name: "ls", arguments: "{}" } }] },
+    { role: "tool", tool_call_id: `call_${n}`, content: `结果${n}` },
+  ]).flat()
+  const texts = Array.from({ length: 10 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: `文本${i}` }))
+  return [{ role: "system", content: "你是助手" }, ...chains, ...texts]
+}
+
+/** Mock SSE LLM：按 script 顺序响应（content/finishReason/reasoning 或 400 error）。 */
+function mockContinuationServer(script) {
+  const requests = []
+  const server = createServer((req, res) => {
+    let bodyText = ""
+    req.on("data", (c) => (bodyText += c))
+    req.on("end", () => {
+      requests.push({ ...JSON.parse(bodyText), _url: req.url })
+      const step = script[Math.min(requests.length - 1, script.length - 1)]
+      if (step.status === 400) {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: { message: step.error } }))
+        return
+      }
+      res.writeHead(200, { "Content-Type": "text/event-stream" })
+      let sse = ""
+      if (step.content) {
+        sse += `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: step.content } }] })}\n\n`
+      }
+      if (step.reasoning) {
+        sse += `data: ${JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: step.reasoning } }] })}\n\n`
+      }
+      sse += `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: step.finishReason ?? "stop" }] })}\n\n`
+      sse += "data: [DONE]\n\n"
+      res.end(sse)
+    })
+  })
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve({ server, requests, port: server.address().port }))
+  })
+}
+
+describe("V3 prefix 续写构造（CLI §14 parity）", () => {
+  it("T1: prefix 续写精简——工具链全过滤、文本保留 ≤8、末条 prefix:true（§14.2）", async () => {
+    const { chat } = await import("../src/provider.mjs")
+    const { server, requests, port } = await mockContinuationServer([
+      { content: "前半段", finishReason: "length" },
+      { content: "后半段" },
+    ])
+    try {
+      const ds = { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: "x", model: "deepseek-v4-pro" }
+      const result = await chat(ds, { messages: toolHistory() })
+      assert.equal(result.content, "前半段后半段")
+      assert.equal(result.finishReason, "stop")
+      assert.equal(requests.length, 2)
+      assert.equal(requests[1]._url, "/beta/chat/completions", "prefix 续写走 /beta 端点")
+      const cont = requests[1].messages
+      assert.ok(!cont.some((m) => m.role === "tool"), "tool 消息必须被过滤")
+      assert.ok(!cont.some((m) => m.role === "assistant" && m.tool_calls), "assistant(tool_calls) 必须被过滤")
+      const textCount = cont.filter((m) => m.role !== "system").length - 1
+      assert.ok(textCount <= 8, `文本保留 ${textCount} 条（≤8）`)
+      assert.ok(cont.some((m) => m.content === "文本9"), "最近文本消息保留")
+      const tail = cont.at(-1)
+      assert.equal(tail.role, "assistant")
+      assert.equal(tail.prefix, true)
+      assert.equal(tail.partial, undefined)
+      assert.equal(tail.content, "前半段")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("T2: prefix 续写 reasoning 回传——末条带 reasoning_content（§14.2，不再跳过续写）", async () => {
+    const { chat } = await import("../src/provider.mjs")
+    const { server, requests, port } = await mockContinuationServer([
+      { content: "截断了", finishReason: "length", reasoning: "思考链" },
+      { content: "续写内容" },
+    ])
+    try {
+      const ds = { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: "x", model: "deepseek-v4-pro" }
+      const result = await chat(ds, { messages: toolHistory() })
+      assert.equal(result.content, "截断了续写内容")
+      assert.equal(result.reasoning, "思考链")
+      const tail = requests[1].messages.at(-1)
+      assert.equal(tail.prefix, true)
+      assert.equal(tail.reasoning_content, "思考链", "reasoning_content 必须回传（thinking 模式约束）")
+      assert.equal(tail.partial, undefined)
+    } finally {
+      server.close()
+    }
+  })
+
+  it("T3: partial 续写不受影响——同场景不精简、全量历史 + partial 尾条（§14.2）", async () => {
+    const { chat } = await import("../src/provider.mjs")
+    const { server, requests, port } = await mockContinuationServer([
+      { content: "前半段", finishReason: "length" },
+      { content: "后半段" },
+    ])
+    try {
+      const kimi = { baseURL: `http://127.0.0.1:${port}`, apiKey: "x", model: "kimi-k3" }
+      const history = toolHistory()
+      const result = await chat(kimi, { messages: history })
+      assert.equal(result.content, "前半段后半段")
+      const cont = requests[1].messages
+      assert.equal(cont.length, history.length + 1, "全量历史原样 + partial 尾条")
+      assert.ok(cont.some((m) => m.role === "tool"), "tool 消息保留")
+      assert.ok(cont.some((m) => m.role === "assistant" && m.tool_calls), "assistant(tool_calls) 保留")
+      const tail = cont.at(-1)
+      assert.equal(tail.role, "assistant")
+      assert.equal(tail.partial, true)
+      assert.equal(tail.prefix, undefined)
+      assert.equal(tail.content, "前半段")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("T4: 续写 400 失败可见性——_warnings 含错误文本，不静默飞出（§14.3）", async () => {
+    const { chat } = await import("../src/provider.mjs")
+    const { server, requests, port } = await mockContinuationServer([
+      { content: "前半段", finishReason: "length" },
+      { status: 400, error: "Function call should not be used with prefix" },
+    ])
+    try {
+      const ds = { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: "x", model: "deepseek-v4-pro" }
+      const result = await chat(ds, { messages: toolHistory() })
+      assert.equal(requests.length, 2, "续写请求确已发出")
+      assert.equal(requests[1]._url, "/beta/chat/completions")
+      assert.equal(result.content, "前半段", "不抛出：已收内容保留")
+      assert.ok(Array.isArray(result._warnings) && result._warnings.length >= 1, "结果必须带 _warnings")
+      assert.match(result._warnings[0].message, /Function call should not be used with prefix/)
+    } finally {
+      server.close()
+    }
+  })
+})
 
 // ─── 2026-08-31 vscode 会诊鲁棒性修复 ───────────────────────────
 

@@ -456,6 +456,174 @@ describe("compaction — threshold is model-aware", () => {
   })
 })
 
+
+// ─── V4（CONTEXT-COMPACTION §7 D-C1/D-C3）：压缩可见性回调 + 3 次失败降级 ───
+
+/** 构造超阈值历史（128K 模型 60% = 76.8K；600 条大消息远超）。 */
+function oversizedHistory() {
+  const messages = []
+  for (let i = 0; i < 600; i++) {
+    messages.push({ role: "user", content: `test message number ${i} `.repeat(80) })
+    messages.push({ role: "assistant", content: `response number ${i} `.repeat(60) })
+  }
+  return messages
+}
+
+/** 脚本化 mock：主会话返回 tool_calls（前 2 轮）或 done，摘要请求返回 400。 */
+function compressFailureServer() {
+  return import("node:http").then(({ createServer }) => {
+    const requests = []
+    const server = createServer((req, res) => {
+      let body = ""
+      req.on("data", (c) => (body += c))
+      req.on("end", () => {
+        requests.push(body)
+        const n = requests.length
+        const isSummary = body.includes("conversation compressor") // SUMMARIZE_PROMPT 特征
+        if (isSummary) {
+          res.writeHead(400, { "Content-Type": "application/json" })
+          res.end(JSON.stringify({ error: { message: "invalid api key" } }))
+          return
+        }
+        res.writeHead(200, { "Content-Type": "text/event-stream" })
+        if (n < 6) {
+          // 主会话前 2 轮：tool_calls（读不同路径，避免 stall 检测触发）
+          const path = "x" + Math.floor((n + 1) / 2)
+          const frame = { choices: [{ index: 0, finish_reason: "tool_calls", delta: { content: "", tool_calls: [{ index: 0, id: `t${n}`, type: "function", function: { name: "read", arguments: JSON.stringify({ path }) } }] } }] }
+          res.end(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`)
+          return
+        }
+        res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "done" } }] })}\n\n` + `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` + "data: [DONE]\n\n")
+      })
+    })
+    return new Promise((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve({ server, requests, port: server.address().port }))
+    })
+  })
+}
+
+/** 400-响应 mock：每次请求都回 400（压缩摘要失败路径）。 */
+function failingServer() {
+  return import("node:http").then(({ createServer }) => {
+    const requests = []
+    const server = createServer((req, res) => {
+      req.resume()
+      req.on("end", () => {
+        requests.push(1)
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: { message: "invalid api key" } }))
+      })
+    })
+    return new Promise((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve({ server, requests, port: server.address().port }))
+    })
+  })
+}
+void failingServer // 保留供调试（未直接使用——V4 runAgent 失败路径用 compressFailureServer）
+
+describe("V4 压缩可见性（§7 D-C1/D-C3，VS Code 对齐形态）", () => {
+  it("compactHistory: onCompressStart 在摘要调用前触发（messages 计数），完成后 agent._lastCompressInfo 落位", async () => {
+    const cwd = setupTempDir()
+    const { server, port, requests } = await mockLLMServer()
+    try {
+      const events = []
+      const agent = {}
+      const result = await compactHistory(
+        oversizedHistory(), "system prompt", mockProvider("unknown-model", port), null, null, null, null,
+        { onCompressStart: (i) => events.push(["start", i.messages]) },
+        agent,
+      )
+      assert.notEqual(result, null, "应触发压缩")
+      assert.equal(requests.length, 1)
+      assert.ok(events.length === 1 && events[0][0] === "start", "onCompressStart 恰好一次")
+      assert.ok(events[0][1] > 0, `summarizing N messages（N=${events[0][1]}）`)
+      assert.equal(agent._lastCompressInfo.mode, "summary", "完成信息 mode=summary")
+      assert.ok(agent._lastCompressInfo.tokensFreed > 0, `释放 token 数=${agent._lastCompressInfo.tokensFreed}`)
+      assert.ok(agent._lastCompressInfo.elapsedMs >= 0, "耗时存在")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("compactHistory: 无 callbacks/agent 不崩（F4 回调缺省 no-op）", async () => {
+    const cwd = setupTempDir()
+    const { server, port } = await mockLLMServer()
+    try {
+      const result = await compactHistory(oversizedHistory(), "system prompt", mockProvider("unknown-model", port))
+      assert.notEqual(result, null, "无回调环境压缩照常执行")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("runAgent: 压缩失败 → onCompressFail + console.error（不再静默）；3 次失败 → 降级截断 + onCompress(fallback)", async () => {
+    const cwd = setupTempDir()
+    const { server, port, requests } = await compressFailureServer()
+    const errs = []
+    const origError = console.error
+    console.error = (...a) => errs.push(a.join(" "))
+    const compressEvents = []
+    try {
+      const history = oversizedHistory()
+      const opts = { history, fullHistory: [] }
+      const out = await runAgent(mockProvider("unknown-model", port), cwd, "do it", {
+        onCompressFail: (e) => compressEvents.push(["fail", e?.message ?? String(e)]),
+        onCompress: (info) => compressEvents.push(["done", info?.mode]),
+      }, undefined, true, opts)
+      assert.equal(out, "done", "run 正常结束")
+      // 3 轮压缩检查：每轮摘要 400 → onCompressFail；第 3 次失败后降级截断 → onCompress(mode=fallback)
+      assert.equal(compressEvents.filter(([k]) => k === "fail").length, 3, "连续 3 次 onCompressFail")
+      assert.ok(compressEvents.some(([k, mode]) => k === "done" && mode === "fallback"), "3 次失败后 onCompress 带 mode=fallback（降级说明）")
+      assert.ok(errs.some((e) => e.includes("compression failed")), "console.error 落错误（Q3 不再静默）")
+      // 降级截断真实发生：历史被 note + tail 替换
+      const fallbackNote = history.findIndex((m) => typeof m.content === "string" && m.content.includes("truncated after repeated summarization"))
+      assert.ok(fallbackNote >= 0, "降级 note 注入历史")
+      // 摘要请求确实发了 3 次（其余为主会话）
+      assert.equal(requests.filter((b) => b.includes("conversation compressor")).length, 3, "3 次摘要尝试")
+    } finally {
+      console.error = origError
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("runAgent: 压缩成功 → onCompress 带 mode=summary + 释放 token 数", async () => {
+    const cwd = setupTempDir()
+    const { server, port } = await mockLLMServer("这是摘要")
+    const compressEvents = []
+    try {
+      const history = oversizedHistory()
+      const out = await runAgent(mockProvider("unknown-model", port), cwd, "do it", {
+        onCompress: (info) => compressEvents.push(info),
+      }, undefined, true, { history, fullHistory: [] })
+      assert.equal(out, "这是摘要", "mock 内容即最终回复")
+      const done = compressEvents.filter((i) => i?.mode === "summary")
+      assert.ok(done.length >= 1, "onCompress 触发（mode=summary）")
+      assert.ok(done[0].tokensFreed > 0, "释放 token 数可见")
+      assert.ok(done[0].elapsedMs != null, "耗时可见")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("runAgent: 无 onCompressStart/onCompressFail handler 不崩（headless/桥接 no-op）", async () => {
+    const cwd = setupTempDir()
+    const { server, port } = await mockLLMServer("这是摘要")
+    try {
+      const history = oversizedHistory()
+      const out = await runAgent(mockProvider("unknown-model", port), cwd, "do it", {}, undefined, true, { history, fullHistory: [] })
+      assert.equal(out, "这是摘要", "无回调环境压缩照常执行、run 正常返回")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+})
+
+
 // ─── Tool execution edge cases ──────────────────────────────────
 
 describe("tool edge cases", () => {
@@ -864,7 +1032,7 @@ describe("pre-work plan confirmation discipline", () => {
     assert.ok(text.includes("skip micro-parallelism (<1s ops)"), "no micro-parallelism")
     assert.ok(text.includes("share NO file"), "parallel pre-check: affected-file sets disjoint")
     assert.ok(text.includes("Dependency chain → serial"), "dependency chains run serially")
-    assert.ok(text.includes("at most 3 concurrent eng-coders"), "≤3 concurrency cap")
+    assert.ok(text.includes("at most 4 concurrent eng-coders"), "≤4 concurrency cap")
     assert.ok(text.includes('designId=<id-A>,\n  designToken=<token-A>'), "parallel spawn call form (each with designId+token)")
     assert.ok(text.includes("each parallel\n   design keeps its own designId+token pair"), "token isolation semantics")
     assert.ok(text.includes("the DESIGN review is still only fired when\n  the user asks"), "initiation rights unchanged")

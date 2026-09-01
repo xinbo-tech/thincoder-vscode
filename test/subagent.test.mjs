@@ -502,3 +502,303 @@ test("T16 (vscode mirror): 多设计缺 designId → throw 要求指定；镜像
   const legacy = resolveDesignSlot({ _engDesignToken: tokenA }, undefined)
   assert.equal(legacy.token, tokenA, "无 Map（旧会话）→ 单值镜像兜底")
 })
+
+
+
+// ─── §15 async 子代理（AGENT-LOOP.md D-A1/D-A2/D-A3/D-A4，VS Code 对齐）───
+
+/** 按任务文本响应的 async 子代理 mock：fast 立即完成；slow/queued-* 延迟完成；其他 "child done"。 */
+function asyncChildServer(delayMs = 0) {
+  const calls = { n: 0 }
+  const server = createServer((req, res) => {
+    let body = ""
+    req.on("data", (c) => (body += c))
+    req.on("end", () => {
+      calls.n++
+      const isSlow = /slow|queued/.test(body)
+      const send = () => {
+        const content = isSlow ? `slow result ${calls.n}` : `fast result ${calls.n}`
+        res.end(
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content } }] })}\n\n` +
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` +
+          "data: [DONE]\n\n"
+        )
+      }
+      if (isSlow && delayMs > 0) setTimeout(send, delayMs)
+      else send()
+    })
+  })
+  return { server, calls }
+}
+
+function asyncParent(port, extra = {}) {
+  const base = {
+    _provider: { name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" },
+    config: {
+      providersList: [{ name: "t", baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" }],
+      agent: { subagentTurns: 5, engineering: false },
+    },
+    _subIdCounter: 0,
+    _touchedFiles: [],
+    _asyncSubagents: new Map(),
+    _asyncCheckN: 0,
+  }
+  return { ...base, ...extra }
+}
+
+function asyncCtx(parent, cwd, extra = {}) {
+  return { agent: parent, cwd, callbacks: {}, ...extra }
+}
+
+test("T1/T2 (vscode): async spawn 立即返回 {id, status:running}，不等待子代理完成；主会话可继续", async () => {
+  const { server } = await asyncChildServer(400)
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  try {
+    const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+    const parent = asyncParent(port)
+    const ctx = asyncCtx(parent, cwd)
+    const t0 = Date.now()
+    const r = await subagentTool.execute({ task: "slow task", role: "coder", async: true }, ctx)
+    const elapsed = Date.now() - t0
+    assert.equal(r.status, "running", "async spawn 立即返回 running（不 await 报告）")
+    assert.equal(r.id, 1)
+    assert.ok(elapsed < 300, `spawn 返回早于子代理完成（elapsed=${elapsed}ms < 400ms 延迟）`)
+    const entry = parent._asyncSubagents.get(1)
+    assert.ok(entry && entry.status === "running", "_asyncSubagents 有该项且 running")
+    // 子代理后台照常跑完（T1 补：settle 后落 report）
+    await entry.settled
+    assert.ok(entry.done && entry.report.includes("slow result"), "后台完成并落 report")
+    // T2：async spawn 后同一回合再做只读操作不被阻塞（execute 已返回，直接再调一个只读工具）
+    const again = await subagentTool.execute({ task: "slow task 2", role: "coder", async: true }, ctx)
+    assert.equal(again.status, "running", "同回合第二个 async spawn 照常立即返回")
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("T3 (vscode): 完成顺序——快先慢后，arrival order 消费；全消费 → {done:true}", async () => {
+  const { server } = await asyncChildServer(300)
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  try {
+    const { subagentTool, subagentCheckTool } = await import("../src/agent-tools/subagent.mjs")
+    const parent = asyncParent(port)
+    const ctx = asyncCtx(parent, cwd)
+    const fast = await subagentTool.execute({ task: "fast task", role: "coder", async: true }, ctx)
+    const slow = await subagentTool.execute({ task: "slow task", role: "coder", async: true }, ctx)
+    assert.equal(fast.status, "running")
+    assert.equal(slow.status, "running")
+    // 无 id 检查：先完成先返回（快）
+    const first = JSON.parse(await subagentCheckTool.execute({ n: 1 }, ctx))
+    assert.equal(first.id, fast.id, "先返回快的")
+    assert.equal(first.status, "done")
+    assert.match(first.report, /fast result/)
+    // 第二次：慢的
+    const second = JSON.parse(await subagentCheckTool.execute({ n: 2 }, ctx))
+    assert.equal(second.id, slow.id, "第二次返回慢的")
+    assert.match(second.report, /slow result/)
+    // 全消费 → done:true
+    const done = JSON.parse(await subagentCheckTool.execute({ n: 3 }, ctx))
+    assert.deepEqual(done, { done: true })
+    assert.equal(parent._asyncSubagents.size, 0, "消费后注册表清空")
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("T4 (vscode): 带 id 等待特定子代理——阻塞到该 id 完成返回其报告", async () => {
+  const { server } = await asyncChildServer(200)
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  try {
+    const { subagentTool, subagentCheckTool } = await import("../src/agent-tools/subagent.mjs")
+    const parent = asyncParent(port)
+    const ctx = asyncCtx(parent, cwd)
+    await subagentTool.execute({ task: "slow task", role: "coder", async: true }, ctx)
+    await subagentTool.execute({ task: "slow task 2", role: "coder", async: true }, ctx)
+    const r = JSON.parse(await subagentCheckTool.execute({ id: 2, n: 1 }, ctx))
+    assert.equal(r.id, 2, "按 id 取回指定子代理")
+    assert.equal(r.status, "done")
+    assert.match(r.report, /slow result/)
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("T6/T10/T11 (vscode): 槽位队列——超限入队 + 位置递增 + 腾槽自动补位", async () => {
+  const { server } = await asyncChildServer(250)
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  try {
+    const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+    const parent = asyncParent(port)
+    const ctx = asyncCtx(parent, cwd)
+    const spawned = []
+    for (let i = 1; i <= 4; i++) {
+      const r = await subagentTool.execute({ task: `queued task ${i}`, role: "coder", async: true }, ctx)
+      spawned.push(r)
+      assert.equal(r.status, "running", `第 ${i} 个 running`)
+    }
+    const fifth = await subagentTool.execute({ task: "queued task 5", role: "coder", async: true }, ctx)
+    assert.equal(fifth.status, "queued", "第 5 个入队（不拒绝）")
+    assert.equal(fifth.position, 1, "position=1")
+    const sixth = await subagentTool.execute({ task: "queued task 6", role: "coder", async: true }, ctx)
+    assert.equal(sixth.status, "queued")
+    assert.equal(sixth.position, 2, "position 递增（6→2）")
+    assert.equal(parent._asyncSubagents.get(fifth.id).status, "queued")
+    // T10：任一 running settle → 队列头部自动启动（无需模型再 spawn）
+    await parent._asyncSubagents.get(1).settled
+    // 等补位逻辑跑完（onSettled 微任务链）
+    for (let i = 0; i < 50 && parent._asyncSubagents.get(fifth.id)?.status === "queued"; i++) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    assert.notEqual(parent._asyncSubagents.get(fifth.id).status, "queued", "running settle 后队列头部自动启动（status→running）")
+    // 全部最终完成
+    await Promise.allSettled([...parent._asyncSubagents.values()].map((e) => e.settled))
+    assert.ok([...parent._asyncSubagents.values()].every((e) => e.done), "全部完成")
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("T12/T13/T14 (vscode): check 错误路径——未知 id / n 超限 / 乱序重复 n", async () => {
+  const { server } = await asyncChildServer()
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  try {
+    const { subagentTool, subagentCheckTool } = await import("../src/agent-tools/subagent.mjs")
+    const parent = asyncParent(port)
+    const ctx = asyncCtx(parent, cwd)
+    // T12：未知 id
+    const unknown = JSON.parse(await subagentCheckTool.execute({ id: 999, n: 1 }, ctx))
+    assert.equal(unknown.status, "error")
+    assert.match(unknown.error, /unknown async subagent id: 999/)
+    // T14：乱序/重复 n——先消费一个，再传 n=1（非 lastN+1）
+    await subagentTool.execute({ task: "fast task", role: "coder", async: true }, ctx)
+    await subagentTool.execute({ task: "fast task 2", role: "coder", async: true }, ctx)
+    const first = JSON.parse(await subagentCheckTool.execute({ n: 1 }, ctx))
+    assert.equal(first.status, "done")
+    const dup = JSON.parse(await subagentCheckTool.execute({ n: 1 }, ctx))
+    assert.equal(dup.status, "error")
+    assert.equal(dup.error, "invalid read counter — pass n = lastN+1")
+    const skip = JSON.parse(await subagentCheckTool.execute({ n: 3 }, ctx))
+    assert.equal(skip.status, "error", "跳号 n=3（lastN=1）→ 拒绝")
+    // T13：n 超限（> MAX_ASYNC_CHECKS=3）
+    const over = JSON.parse(await subagentCheckTool.execute({ n: 4 }, ctx))
+    assert.equal(over.status, "error")
+    assert.equal(over.error, "check limit exceeded — use turn-end auto-wait for the rest")
+    // 已消费 id → unknown（T12 补）
+    const consumed = JSON.parse(await subagentCheckTool.execute({ id: first.id, n: 2 }, ctx))
+    assert.equal(consumed.status, "error", "已消费 id 视为 unknown")
+    assert.match(consumed.error, /unknown async subagent id/)
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("depth>0 传 async → 报错拒绝（§15 D-A3：async 仅顶层可用）", async () => {
+  const { subagentTool } = await import("../src/agent-tools/subagent.mjs")
+  const parent = asyncParent(1)
+  await assert.rejects(
+    subagentTool.execute({ task: "x", role: "coder", async: true }, asyncCtx(parent, process.cwd(), { depth: 1 })),
+    /async spawn only available at the top level/,
+  )
+})
+
+test("T5 (vscode): 回合收尾——未 check 的 async 在 runAgent 结束自动等待 + 注入会话 + 注册表清空", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  const { runAgent } = await import("../src/agent.mjs")
+  let parentCalls = 0
+  const server = createServer((req, res) => {
+    let body = ""
+    req.on("data", (c) => (body += c))
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "text/event-stream" })
+      const hasToolCalls = body.includes('"tool_calls"') // 父回合 2 的历史含工具调用；子请求与父回合 1 无
+      if (!hasToolCalls && body.includes("child job")) {
+        // 子代理请求：直接完成（与父回合 2 到达顺序无关——按体区分）
+        res.end(
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "child report" } }] })}\n\n` +
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` +
+          "data: [DONE]\n\n"
+        )
+        return
+      }
+      parentCalls++
+      if (parentCalls === 1) {
+        // 父回合 1：spawn async 子代理
+        const frame = { choices: [{ index: 0, finish_reason: "tool_calls", delta: { content: "", tool_calls: [{ index: 0, id: "t1", type: "function", function: { name: "subagent", arguments: JSON.stringify({ task: "child job", role: "coder", async: true }) } }] } }] }
+        res.end(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`)
+      } else {
+        // 父回合 2：最终回复
+        res.end(
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "final" } }] })}\n\n` +
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` +
+          "data: [DONE]\n\n"
+        )
+      }
+    })
+  })
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  try {
+    const history = []
+    const fullHistory = []
+    const out = await runAgent(
+      { baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" },
+      cwd, "spawn and finish", {}, undefined, true,
+      { history, fullHistory },
+    )
+    assert.equal(out, "final")
+    const injected = history.filter((m) => typeof m.content === "string" && m.content.includes("async subagent #1 (coder) finished"))
+    assert.equal(injected.length, 1, "收尾注入 reminder")
+    assert.ok(injected[0].content.includes("child report"), "报告文本注入（XML 转义后仍在）")
+    // pushReal 双线同步：真实消息 + 收尾注入都进人读线（机读线另有 system/time 注入，天然更长）
+    assert.equal(fullHistory.filter((m) => typeof m.content === "string" && m.content.includes("async subagent #1")).length, 1, "人读线同步注入")
+    assert.equal(history._asyncSubagents, undefined, "收尾后注册表清空（depth-0 载体释放）")
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test("T8 (vscode): 中断——signal aborted → 注册表立即清空、不注入陈旧错误", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "tc-sub-"))
+  const { runAgent } = await import("../src/agent.mjs")
+  const server = createServer(() => {})
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  try {
+    const history = []
+    // 预置一个未完成的 async 项（模拟上一轮残留）
+    const entry = { id: 1, role: "coder", status: "running", report: null, error: null, done: false, settled: new Promise(() => {}) }
+    const map = new Map([[1, entry]])
+    history._asyncSubagents = map
+    const ctrl = new AbortController()
+    ctrl.abort()
+    await assert.rejects(
+      runAgent(
+        { baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "deepseek-v4-pro" },
+        cwd, "x", {}, ctrl.signal, true, { history, fullHistory: [] },
+      ),
+      (e) => e?.name === "AbortError",
+      "已 abort 的 signal → runAgent 抛 AbortError",
+    )
+    assert.equal(map.size, 0, "中断后注册表立即清空（不注入陈旧错误）")
+    assert.ok(!history.some((m) => typeof m.content === "string" && m.content.includes("async subagent")), "无注入")
+  } finally {
+    server.close()
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})

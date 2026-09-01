@@ -967,6 +967,23 @@ describe("read_image — description lists multimodal model keywords (content as
     }
   })
 })
+describe("工具描述 — 批量引导句（§16 D-B2/D-B3，T-B3）", () => {
+  it("editTool/applyPatchTool description 含批量引导语义句", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    const { applyPatchTool } = await import("../src/tools/more-file.mjs")
+    const d = editTool.description
+    assert.ok(d.includes("edits` 数组"), "edit 描述提及 edits 数组批量形态")
+    assert.ok(d.includes("原子"), "edit 描述含原子语义")
+    assert.ok(d.includes("多文件"), "edit 描述含多文件同批语义")
+    const editsParam = editTool.parameters.properties.edits.description
+    assert.ok(editsParam.includes("prefer one batched call over N single edits"), "edits 参数含批量引导句")
+    assert.ok(editsParam.includes("same file"), "edits 参数含同文件多处修改引导")
+    const p = applyPatchTool.description
+    assert.ok(p.includes("MULTIPLE new files"), "apply_patch 描述含新建多文件语义")
+    assert.ok(p.includes("/dev/null"), "apply_patch 描述含 --- /dev/null 新建形态")
+  })
+})
+
 
   describe("edit — EOL normalization (CRLF files, LF old_string)", () => {
   beforeEach(setup)
@@ -1290,3 +1307,131 @@ describe("edit tools — EOL semantics + candidates + encoding probe (EDIT-TOOL-
     assert.equal(findCandidates(["short"], "a much longer needle that shares nothing").length, 0)
   })
 })
+
+describe("file tools — batch edits validation + touchedPaths + apply_patch atomicity + delete dirty guard (2026-09-02 review fixes)", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("batch edits: missing new_string rejected with a message (no TypeError), nothing written", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    writeFileSync(join(cwd, "a.txt"), "one\ntwo\n")
+    const r = await editTool.execute({
+      edits: [
+        { path: "a.txt", old_string: "one", new_string: "ONE" },
+        { path: "a.txt", old_string: "two" }, // new_string 缺省——原实现 normalizeEOL 抛 TypeError
+      ],
+    }, ctx())
+    assert.match(r, /edit for a\.txt: new_string must be a string/)
+    assert.equal(readFileSync(join(cwd, "a.txt"), "utf8"), "one\ntwo\n", "atomic — nothing written")
+  })
+
+  it("batch edits: non-string old_string/new_string rejected with a message", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    writeFileSync(join(cwd, "a.txt"), "one\n")
+    const r1 = await editTool.execute({ edits: [{ path: "a.txt", old_string: 42, new_string: "x" }] }, ctx())
+    assert.match(r1, /edit for a\.txt: old_string must be a string/)
+    const r2 = await editTool.execute({ edits: [{ path: "a.txt", old_string: "one", new_string: null }] }, ctx())
+    assert.match(r2, /edit for a\.txt: new_string must be a string/)
+    assert.equal(readFileSync(join(cwd, "a.txt"), "utf8"), "one\n", "nothing written")
+  })
+
+  it("touchedPaths: edits-array mapping (write/edit) + multi-path patch (apply_patch) + delete", async () => {
+    const { writeTool, editTool } = await import("../src/tools/file.mjs")
+    const { applyPatchTool, deleteTool } = await import("../src/tools/more-file.mjs")
+    assert.deepStrictEqual(writeTool.touchedPaths({ path: "w.txt" }), ["w.txt"])
+    assert.deepStrictEqual(writeTool.touchedPaths({ filePath: "w2.txt" }), ["w2.txt"])
+    assert.deepStrictEqual(editTool.touchedPaths({ path: "e.txt" }), ["e.txt"])
+    assert.deepStrictEqual(editTool.touchedPaths({ filePath: "e2.txt" }), ["e2.txt"])
+    assert.deepStrictEqual(
+      editTool.touchedPaths({ edits: [{ path: "a.txt" }, { path: "b.txt" }, { old_string: "x" }] }),
+      ["a.txt", "b.txt"], "edits 数组逐条映射，缺 path 条目过滤")
+    const patch = `--- a/a.txt
++++ b/a.txt
+@@ -1 +1 @@
+-x
++y
+--- /dev/null
++++ b/new.txt
+@@ -0,0 +1 @@
++n
+`
+    assert.deepStrictEqual(applyPatchTool.touchedPaths({ patch }), ["a.txt", "new.txt"], "多文件 patch 全部路径")
+    assert.deepStrictEqual(applyPatchTool.touchedPaths({ patch: "garbage --- no headers" }), [], "畸形 patch → 无路径")
+    assert.deepStrictEqual(deleteTool.touchedPaths({ path: "d.txt" }), ["d.txt"])
+    assert.deepStrictEqual(deleteTool.touchedPaths({ filePath: "d2.txt" }), ["d2.txt"])
+  })
+
+  it("apply_patch atomic: hunk failure on the 2nd file leaves the 1st file untouched", async () => {
+    const { applyPatchTool } = await import("../src/tools/more-file.mjs")
+    writeFileSync(join(cwd, "a.txt"), "aaa\n")
+    writeFileSync(join(cwd, "b.txt"), "bbb\n")
+    const patch = `--- a/a.txt
++++ b/a.txt
+@@ -1 +1 @@
+-aaa
++AAA
+--- a/b.txt
++++ b/b.txt
+@@ -1 +1 @@
+-zzz
++ZZZ
+`
+    await assert.rejects(() => applyPatchTool.execute({ patch }, ctx()), /Hunk 1 in b\.txt does not apply/)
+    assert.equal(readFileSync(join(cwd, "a.txt"), "utf8"), "aaa\n", "file 1 NOT written — never write a partial patch")
+    assert.equal(readFileSync(join(cwd, "b.txt"), "utf8"), "bbb\n")
+    assert.ok(!existsSync(join(cwd, "a.txt.thincoder-tmp")), "no leftover .tmp")
+  })
+
+  it("apply_patch atomic: dirty open doc on the 2nd file leaves the 1st file untouched", async () => {
+    const vscode = await import("vscode")
+    vscode.workspace.textDocuments.length = 0
+    try {
+      const { applyPatchTool } = await import("../src/tools/more-file.mjs")
+      writeFileSync(join(cwd, "a.txt"), "aaa\n")
+      const bAbs = join(cwd, "b.txt")
+      writeFileSync(bAbs, "bbb\n")
+      vscode.workspace.textDocuments.push({ uri: { fsPath: bAbs }, isDirty: true, getText: () => "dirty content" })
+      const patch = `--- a/a.txt
++++ b/a.txt
+@@ -1 +1 @@
+-aaa
++AAA
+--- a/b.txt
++++ b/b.txt
+@@ -1 +1 @@
+-bbb
++BBB
+`
+      const r = await applyPatchTool.execute({ patch }, ctx())
+      assert.match(r, /unsaved changes in the editor: .*b\.txt/)
+      assert.equal(readFileSync(join(cwd, "a.txt"), "utf8"), "aaa\n", "file 1 NOT written")
+    } finally {
+      vscode.workspace.textDocuments.length = 0
+    }
+  })
+
+  it("delete refuses an open dirty doc; deletes an open clean doc", async () => {
+    const vscode = await import("vscode")
+    vscode.workspace.textDocuments.length = 0
+    try {
+      const { deleteTool } = await import("../src/tools/more-file.mjs")
+      const dAbs = join(cwd, "d.txt")
+      writeFileSync(dAbs, "x\n")
+      vscode.workspace.textDocuments.push({ uri: { fsPath: dAbs }, isDirty: true, getText: () => "x\n" })
+      const r = await deleteTool.execute({ path: "d.txt" }, ctx())
+      assert.match(r, /unsaved changes in the editor: .*d\.txt/)
+      assert.ok(existsSync(dAbs), "dirty file NOT deleted")
+
+      const cAbs = join(cwd, "c.txt")
+      writeFileSync(cAbs, "y\n")
+      vscode.workspace.textDocuments.length = 0
+      vscode.workspace.textDocuments.push({ uri: { fsPath: cAbs }, isDirty: false, getText: () => "y\n" })
+      const r2 = await deleteTool.execute({ path: "c.txt" }, ctx())
+      assert.match(r2, /Deleted c\.txt/)
+      assert.ok(!existsSync(cAbs), "clean open file deleted")
+    } finally {
+      vscode.workspace.textDocuments.length = 0
+    }
+  })
+})
+

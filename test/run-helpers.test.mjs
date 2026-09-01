@@ -105,3 +105,76 @@ test("offloadToolResult: 落盘失败回退截断 = 65536（评审 #6 / AC10）"
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+
+// ─── V2（CLI §14.7 对齐清单 #2）：UTF-16 安全截断——截断点落高代理向前收一码元 ───
+
+import { safeSliceUTF16 } from "../src/agent/run-helpers.mjs"
+
+test("safeSliceUTF16: 截断点落高代理 → 向前收一码元（不产生孤立代理）", () => {
+  // 🔴 = D83D+DD34；`"ab" + "🔴" + "cd"` 长度 6（b 在 index 1）
+  const s = "ab\uD83D\uDD34cd"
+  assert.equal(s.length, 6)
+  // max=3 → 截断点 index 2 = 高代理 D83D → 收到 2（丢掉整个代理对）
+  assert.equal(safeSliceUTF16(s, 3), "ab", "截断点落高代理 → 向前收一码元（代理对整体丢弃）")
+  assert.equal(safeSliceUTF16(s, 4), "ab\uD83D\uDD34", "截断点落低代理（配对内）→ 正常截到低代理后")
+  assert.equal(safeSliceUTF16(s, 5), "ab\uD83D\uDD34c", "非代理边界 → 原样 slice")
+  assert.equal(safeSliceUTF16(s, 6), s, "不超长 → 原样返回")
+  // 净化兜底：即使某处漏切产生孤立代理，escape 层 U+FFFD 兜底（双保险）
+  const lone = "\uD83D"
+  assert.equal(safeSliceUTF16(lone, 1), lone, "截断点不在高代理上（len 1 ≤ max 1）→ 原样")
+})
+
+test("offloadToolResult: 预览截断与回退截断不产生孤立代理（safeSliceUTF16 接入）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "thincoder-vscode-tmp-"))
+  try {
+    // 构造 64K+1 且截断点恰在高代理上的文本：65535 个 'a' + 高代理 D83D + 低代理 DD34
+    const text = "a".repeat(64 * 1024 - 1) + "\uD83D\uDD34"
+    const out = offloadToolResult(dir, text) // 65537 长度 → 落盘 + preview
+    const preview = out.slice(out.indexOf("]\n\n") + 3)
+    assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(preview.replace(/\uD83D\uDD34$/, "")), "preview 无孤立高代理")
+    assert.ok(!/[\uDC00-\uDFFF]/.test(preview), "preview 无孤立低代理")
+    // 回退路径（落盘失败）：同样安全
+    const fileAsCwd = join(dir, "not-a-dir")
+    writeFileSync(fileAsCwd, "occupied")
+    const fb = offloadToolResult(fileAsCwd, "a".repeat(64 * 1024) + "\uD83D")
+    assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(fb), "回退截断无孤立高代理")
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("compactHistory/explore 序列化: emoji 在截断边界 → 摘要请求体无孤立代理（V2 接入 compact.mjs）", async () => {
+  const { compactHistory } = await import("../src/compact.mjs")
+  const { createServer } = await import("node:http")
+  const requests = []
+  const server = createServer((req, res) => {
+    let body = ""
+    req.on("data", (c) => (body += c))
+    req.on("end", () => {
+      requests.push(body)
+      res.writeHead(200, { "Content-Type": "text/event-stream" })
+      res.end(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "摘要" } }] })}\n\n` +
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n` +
+        `data: [DONE]\n\n`
+      )
+    })
+  })
+  await new Promise((r) => server.listen(0, "127.0.0.1", r))
+  const port = server.address().port
+  const provider = { baseURL: `http://127.0.0.1:${port}`, apiKey: "k", model: "unknown-model" }
+  try {
+    // 单条超 8000 码元（user cap）且第 8000 码元恰为高代理的消息 → 序列化不得产生孤立代理
+    const messages = []
+    for (let i = 0; i < 40; i++) messages.push({ role: "user", content: `m${i} `.repeat(200) })
+    messages.push({ role: "user", content: "a".repeat(7999) + "\uD83D\uDD34tail" })
+    messages.push({ role: "assistant", content: "done" })
+    await compactHistory(messages, "sys", provider)
+    const body = requests.at(-1) ?? ""
+    assert.ok(!body.includes("\\ud83d"), "摘要请求体无孤立代理转义（截断点安全）")
+    assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(body), "请求体无孤立高代理字符")
+  } finally {
+    server.close()
+  }
+})
