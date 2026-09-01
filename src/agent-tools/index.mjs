@@ -3,7 +3,7 @@
  */
 export { taskTool } from "./task.mjs"
 export { recentChangesTool } from "./recent_changes.mjs"
-export { subagentTool } from "./subagent.mjs"
+export { subagentTool, subagentCheckTool } from "./subagent.mjs"
 export { planTool } from "./plan.mjs"
 export { goalTool } from "./goal.mjs"
 export { skillTool } from "./skill.mjs"
