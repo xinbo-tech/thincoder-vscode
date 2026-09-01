@@ -13,12 +13,74 @@ import {
 import { isDocFile } from "../advisor/repos.mjs"
 
 /**
+ * 前置门禁（planMode / 工程设计闸）——单点判定，批扫描与逐项执行共用（§16 D-B1：
+ * 被前置门禁拦下的工具不计入批询问）。返回 { blocked, content }。
+ */
+function preGateBlocked(agent, { tool, toolName, args, depth }) {
+  // Plan mode guard
+  if (agent._planMode && tool && !tool.readonly) {
+    return { blocked: true, content: "Error: plan mode active" }
+  }
+  // Engineering coder hard gate: no file modification before the design review passed (CLI dispatch.mjs parity).
+  if (agent._role === "eng-coder" && agent.config?.agent?.engineering
+      && !agent._engDesignReviewed && FILE_MUTATORS.has(toolName)) {
+    return { blocked: true, content: "Error: engineering design gate — call advisor with type='design' to review the design document before any file modification. If the review found issues, report them to the parent agent." }
+  }
+  // Engineering mode PARENT gate: no code-file writes before the design review passed.
+  // Docs/** and root-level docs are exempt (writing them IS the design step); everything
+  // under src/ (incl. src/prompts/*.md) is product code and needs a design token.
+  if (agent.config?.agent?.engineering && depth === 0 && !agent._engDesignToken
+      && FILE_MUTATORS.has(toolName)) {
+    const paths = tool.touchedPaths ? tool.touchedPaths(args) : [args.path]
+    // Unknown/missing paths are treated as code — block conservatively.
+    const touchesCode = paths.some((p) => typeof p !== "string" || /^src[\\/]/.test(p) || !isDocFile(p))
+    if (touchesCode) {
+      return { blocked: true, content: "Error: engineering design gate — write the design document in docs/ first, then call advisor with type='design' to review it, and wait for user approval. Implementation is done by eng-coder subagents." }
+    }
+  }
+  return { blocked: false }
+}
+
+/**
+ * §16 D-B1 同批权限合并询问：扫描同一 response.toolCalls 中所有通过前置门禁、到达权限
+ * 询问阶段的非只读工具（深度 0 + 手动模式 + 有 onPermissionRequired），≥2 个时一次询问
+ * （onBatchPermissionRequest）→ "approveAll"（本批放行）/ "oneByOne"（回退逐项）/
+ * "deny"（全批拒绝、无二次询问）。无 handler 或不足 2 个 → 返回 null（逐项通道原样）。
+ * autoApprove 短路不变（getAuto 实时读取——扫描时已开则不聚合）。
+ */
+async function collectBatchPermission(agent, { response, toolByName, getAuto, callbacks, depth }) {
+  if (getAuto() || depth !== 0 || !callbacks.onPermissionRequired || !callbacks.onBatchPermissionRequest) return null
+  const list = []
+  for (const tc of response.toolCalls) {
+    const tool = toolByName.get(tc.name)
+    let args
+    try { args = JSON.parse(tc.arguments || "{}") } catch { continue } // JSON 解析失败已被逐项路径拦下
+    const pre = preGateBlocked(agent, { tool, toolName: tc.name, args, depth })
+    if (pre.blocked) continue // 前置门禁拦下的不计入批询问（评审 #7）
+    const actionReadonly = tool?.isReadonlyAction?.(args) ?? false
+    if (!tool || tool.readonly || actionReadonly) continue
+    list.push({ id: tc.id, name: tc.name, args })
+  }
+  if (list.length < 2) return null
+  const choice = await callbacks.onBatchPermissionRequest({
+    tools: list.map(({ name, args }) => ({ name, args })),
+    count: list.length,
+  })
+  if (choice === "deny") return { denied: new Set(list.map((x) => x.id)), approved: null }
+  if (choice === "approveAll") return { denied: null, approved: new Set(list.map((x) => x.id)) }
+  return null // oneByOne / 其他 → 既有逐项通道
+}
+
+/**
  * Execute the tool calls of one assistant turn.
  * Batches: consecutive readonly tools run in parallel; consecutive subagent calls also run
  * in parallel (each has its own agent). sideEffectExempt tools (like subagent) don't block
  * readonly merging. Batch order is serial — results are committed in call order.
  */
 export async function executeToolBatches(agent, { response, history, fullHistory, toolByName, getAuto, callbacks, signal, cwd, recentSigs, depth }) {
+  // §16 D-B1：同批（同一 toolCalls 数组）权限合并询问——执行前一次聚合，deny/approveAll
+  // 以 tc.id 标记，逐项执行时套用；oneByOne/无 handler 走既有逐项通道。
+  const batchPerm = await collectBatchPermission(agent, { response, toolByName, getAuto, callbacks, depth })
   // Group tool calls into batches — consecutive readonly tools run in parallel,
   // consecutive subagent calls also run in parallel (each has its own agent).
   // sideEffectExempt tools (like subagent) don't block readonly merging.
@@ -58,28 +120,10 @@ export async function executeToolBatches(agent, { response, history, fullHistory
         return { tool_call_id: tc.id, toolName, content: "Error: invalid JSON", meta: null }
       }
 
-      // Plan mode guard
-      if (agent._planMode && tool && !tool.readonly) {
-        return { tool_call_id: tc.id, toolName, content: "Error: plan mode active", meta: null }
-      }
-
-      // Engineering coder hard gate: no file modification before the design review passed (CLI dispatch.mjs parity).
-      if (agent._role === "eng-coder" && agent.config?.agent?.engineering
-          && !agent._engDesignReviewed && FILE_MUTATORS.has(toolName)) {
-        return { tool_call_id: tc.id, toolName, content: "Error: engineering design gate — call advisor with type='design' to review the design document before any file modification. If the review found issues, report them to the parent agent.", meta: null }
-      }
-
-      // Engineering mode PARENT gate: no code-file writes before the design review passed.
-      // Docs/** and root-level docs are exempt (writing them IS the design step); everything
-      // under src/ (incl. src/prompts/*.md) is product code and needs a design token.
-      if (agent.config?.agent?.engineering && depth === 0 && !agent._engDesignToken
-          && FILE_MUTATORS.has(toolName)) {
-        const paths = tool.touchedPaths ? tool.touchedPaths(args) : [args.path]
-        // Unknown/missing paths are treated as code — block conservatively.
-        const touchesCode = paths.some((p) => typeof p !== "string" || /^src[\\/]/.test(p) || !isDocFile(p))
-        if (touchesCode) {
-          return { tool_call_id: tc.id, toolName, content: "Error: engineering design gate — write the design document in docs/ first, then call advisor with type='design' to review it, and wait for user approval. Implementation is done by eng-coder subagents.", meta: null }
-        }
+      // 前置门禁（planMode / 工程设计闸）——与批扫描同一判定（单点）
+      const pre = preGateBlocked(agent, { tool, toolName, args, depth })
+      if (pre.blocked) {
+        return { tool_call_id: tc.id, toolName, content: pre.content, meta: null }
       }
 
       // Permission gate: any non-readonly tool at depth 0 in manual mode. getAuto() is the
@@ -89,43 +133,51 @@ export async function executeToolBatches(agent, { response, history, fullHistory
       // those skip approval while write actions (git commit/push/rm) still prompt.
       const actionReadonly = tool?.isReadonlyAction?.(args) ?? false
       if (!getAuto() && tool && !tool.readonly && !actionReadonly && depth === 0 && callbacks.onPermissionRequired) {
-        // Compute diff preview for file-based tools
-        let diffInfo = null
-        if (toolName !== "bash" && args.path) {
-          try {
-            const abs = join(cwd, args.path)
-            const oldContent = existsSync(abs) ? readFileSync(abs, "utf8") : ""
-            let newContent = ""
-            if (toolName === "write") {
-              newContent = args.content || ""
-            } else if (toolName === "edit") {
-              if (args.replace_all) {
-                newContent = oldContent.replaceAll(args.old_string, args.new_string)
-              } else {
-                newContent = oldContent.replace(args.old_string, args.new_string)
-              }
-            } else if (toolName === "insert_after") {
-              const lines = oldContent.split("\n")
-              let target = (args.after_line != null) ? args.after_line : lines.length
-              if (target < 0) target = 0
-              if (target > lines.length) target = lines.length
-              lines.splice(target, 0, args.content || "")
-              newContent = lines.join("\n")
-            } else if (toolName === "delete") {
-              newContent = "" // deletion — show all as removed
-            } else if (toolName === "apply_patch") {
-              // Unified diff is human-readable as-is — show the raw patch with
-              // +/- coloring in the panel (per-file old/new reconstruction would
-              // need full hunk parsing; the approval goal is visibility, met).
-              diffInfo = { patch: args.patch || "" }
-            }
-            if (newContent !== oldContent) {
-              diffInfo = { old: oldContent, new: newContent, path: args.path }
-            }
-          } catch { /* best-effort — permission still works without diff */ }
+        // §16 D-B1 批确认结果套用：deny → 全批拒绝（无二次询问）；approveAll → 本批放行
+        if (batchPerm?.denied?.has(tc.id)) {
+          return { tool_call_id: tc.id, toolName, content: "Denied by user (permission mode).", meta: null }
         }
-        const approved = await callbacks.onPermissionRequired(toolName, args, diffInfo)
-        if (!approved) return { tool_call_id: tc.id, toolName, content: "Denied by user (permission mode).", meta: null }
+        if (batchPerm?.approved?.has(tc.id)) {
+          // 本批已合并批准——跳过逐项询问直接执行
+        } else {
+          // Compute diff preview for file-based tools
+          let diffInfo = null
+          if (toolName !== "bash" && args.path) {
+            try {
+              const abs = join(cwd, args.path)
+              const oldContent = existsSync(abs) ? readFileSync(abs, "utf8") : ""
+              let newContent = ""
+              if (toolName === "write") {
+                newContent = args.content || ""
+              } else if (toolName === "edit") {
+                if (args.replace_all) {
+                  newContent = oldContent.replaceAll(args.old_string, args.new_string)
+                } else {
+                  newContent = oldContent.replace(args.old_string, args.new_string)
+                }
+              } else if (toolName === "insert_after") {
+                const lines = oldContent.split("\n")
+                let target = (args.after_line != null) ? args.after_line : lines.length
+                if (target < 0) target = 0
+                if (target > lines.length) target = lines.length
+                lines.splice(target, 0, args.content || "")
+                newContent = lines.join("\n")
+              } else if (toolName === "delete") {
+                newContent = "" // deletion — show all as removed
+              } else if (toolName === "apply_patch") {
+                // Unified diff is human-readable as-is — show the raw patch with
+                // +/- coloring in the panel (per-file old/new reconstruction would
+                // need full hunk parsing; the approval goal is visibility, met).
+                diffInfo = { patch: args.patch || "" }
+              }
+              if (newContent !== oldContent) {
+                diffInfo = { old: oldContent, new: newContent, path: args.path }
+              }
+            } catch { /* best-effort — permission still works without diff */ }
+          }
+          const approved = await callbacks.onPermissionRequired(toolName, args, diffInfo)
+          if (!approved) return { tool_call_id: tc.id, toolName, content: "Denied by user (permission mode).", meta: null }
+        }
       }
 
       callbacks.onToolCall?.(toolName, args, tc.id) // subagents forward to the activity stream (depth guard removed)
