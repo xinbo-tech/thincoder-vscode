@@ -2,7 +2,7 @@
  * more-file.mjs — Additional file tools: insert_after, apply_patch, ls, delete
  */
 
-import { readFile, writeFile } from "node:fs/promises"
+import { readFile, writeFile, rename, unlink, mkdir } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import { join, dirname } from "node:path"
@@ -165,7 +165,7 @@ export const applyPatchTool = {
   description:
     "Apply a unified diff to one or more files. Use for multi-file changes.\n" +
     "Parameters:\n" +
-    "- patch (required): Unified diff text (--- / +++ headers per file, @@ hunks; --- /dev/null creates a file)",
+    "- patch (required): Unified diff text — may span multiple files (multiple --- / +++ header pairs, including creating MULTIPLE new files via --- /dev/null); --- / +++ headers per file, @@ -old,count +new,count @@ hunks。场景引导：一次新建多个文件 / 整文件替换 / 统一 diff 形态",
   parameters: {
     type: "object",
     properties: {
@@ -173,10 +173,21 @@ export const applyPatchTool = {
     },
     required: ["patch"],
   },
+  /** #4（2026-09-02 评审修复）：parsePatch 后返回所有目标路径——之前缺 touchedPaths 时
+   *  兜底 `[args?.path]` 取到整段 diff 文本 → join(cwd, patchText) 产生垃圾路径条目，
+   *  且工程模式父门禁对任何 patch 判 touchesCode（纯 docs 补丁也被拦，docs 豁免失效）。
+   *  照 CLI patch.mjs:112-114。 */
+  touchedPaths(args) {
+    try { return parsePatch(args.patch ?? "").map((f) => f.path) } catch { return [] }
+  },
   async execute({ patch }, ctx) {
     let files
     try { files = parsePatch(patch) } catch (e) { return `Error: ${e.message}` }
-    const results = []
+    // #3（2026-09-02 评审修复）：两段式原子（CLI patch.mjs "never write a partial patch"
+    // parity）——阶段一全量试算：所有文件的读取/门禁（isDirty、已存在、hunk 应用）全部
+    // 通过才进入阶段二；任一失败任何文件都不落盘（原实现逐文件写入，文件 2 报错时文件 1
+    // 已落盘——模型按错误重试整个 patch 时已改文件导致 old_string 失配死循环）。
+    const planned = []
     for (const f of files) {
       const abs = resolvePath(f.path, ctx.cwd)
       const doc = getOpenDoc(abs)
@@ -200,9 +211,33 @@ export const applyPatchTool = {
         applyHunks(lines, f.hunks, "\n", f.path)
         content = lines.join(eol)
       }
-      if (doc) await applyEditorEdit(doc, content)
-      else { await writeFile(abs, content, "utf8"); refreshMarkdownPreview(abs) }
-      results.push(`Patched ${f.path} (${f.isNew ? "created" : "modified"})`)
+      planned.push({ abs, path: f.path, doc, content, isNew: f.isNew })
+    }
+    // 阶段二：统一写入。编辑器文档走 WorkspaceEdit；磁盘走 .tmp 全量写 + rename
+    // （rename 失败 → 清理已写 .tmp，已提交文件保持原状，CLI patch.mjs 同款语义）。
+    const tmpWritten = []
+    const results = []
+    try {
+      for (const p of planned) {
+        if (p.doc) await applyEditorEdit(p.doc, p.content)
+        else {
+          await mkdir(dirname(p.abs), { recursive: true })
+          await writeFile(p.abs + ".thincoder-tmp", p.content, "utf8")
+          tmpWritten.push(p.abs)
+        }
+      }
+      for (const p of planned) {
+        if (!p.doc) await rename(p.abs + ".thincoder-tmp", p.abs)
+      }
+      for (const p of planned) {
+        if (!p.doc) refreshMarkdownPreview(p.abs)
+        results.push(`Patched ${p.path} (${p.isNew ? "created" : "modified"})`)
+      }
+    } catch (e) {
+      for (const abs of tmpWritten) {
+        try { await unlink(abs + ".thincoder-tmp") } catch { /* */ }
+      }
+      throw e
     }
     return results.join("\n") || "No files patched"
   },
@@ -271,11 +306,16 @@ export const deleteTool = {
     },
     required: [],
   },
+  touchedPaths(args) { return args.path || args.filePath ? [args.path || args.filePath] : [] },
   async execute({ path, force, filePath }, ctx) {
     path = path || filePath
     if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
     const abs = resolvePath(path, ctx.cwd)
-    const { unlink } = await import("node:fs/promises")
+    // #5（2026-09-02 评审修复）：同一工具族的 write/edit/hashline/insert_after/apply_patch
+    // 全部在改动前检查 getOpenDoc(abs)?.isDirty 并拒绝，唯独 delete 直接 unlink——打开且
+    // 脏的文件被删后编辑器缓存丢失。unlink 前同款守卫。
+    const doc = getOpenDoc(abs)
+    if (doc?.isDirty) return `Error: File has unsaved changes in the editor: ${abs}. Save or discard first.`
     // Check if git-tracked — execFileSync (array args, no shell) so a path with
     // shell metacharacters can't inject.
     try {

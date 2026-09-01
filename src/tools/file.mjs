@@ -69,6 +69,7 @@ export const writeTool = {
     },
     required: ["path", "content"],
   },
+  touchedPaths(args) { return args.path || args.filePath ? [args.path || args.filePath] : [] },
   async execute({ path, content, filePath }, ctx) {
     path = path || filePath
     if (typeof path !== "string" || !path) return "Error: path (or filePath) is required and must be a string"
@@ -112,7 +113,7 @@ export const editTool = {
     "- old_string (required): Exact text to find and replace\n" +
     "- new_string (required): Replacement text\n" +
     "- replace_all: Replace all occurrences instead of just one (default false)\n" +
-    "- edits: 2026-08-31 工具顺手度（CLI ebd70eb parity）：一次多文件原子替换 [{path, old_string, new_string, replace_all?}, ...]——先全量检查所有替换可执行，任一失败全不写。与 path/old_string/new_string 互斥。",
+    "- edits: 批量形态（CLI parity）——同文件多处修改 → 一次调用原子完成（同文件条目串行应用，各基于前一条结果）；多文件独立修改 → 同一 `edits` 数组多条目（先全量检查，任一失败全不写）——prefer one batched call over N single edits。与 path/old_string/new_string 互斥。",
   parameters: {
     type: "object",
     properties: {
@@ -123,7 +124,8 @@ export const editTool = {
       replace_all: { type: "boolean", description: "Replace all occurrences" },
       edits: {
         type: "array",
-        description: "一次多文件原子替换——任一失败全不写",
+        description:
+          "Batch form — multiple edits in ONE call, atomic (any failure writes nothing; same-file entries apply serially, each based on the previous result). Use it for multiple changes to the same file AND for independent changes across multiple files — prefer one batched call over N single edits. Mutually exclusive with path/old_string/new_string.",
         items: {
           type: "object",
           properties: {
@@ -137,6 +139,14 @@ export const editTool = {
       },
     },
     required: [],
+  },
+  // #2（2026-09-02 评审修复）：edits 数组形态的路径感知——之前缺 touchedPaths 时兜底
+  // `[args?.path]` 在批量形态下是 `[undefined]`，被 typeof 检查跳过 → 批量编辑的文件
+  // 完全未记入 _touchedFiles（verify 文件清单 / lint "最近修改文件" 全漏）。照 CLI
+  // file.mjs:239 实现；filePath 别名一并处理（否则 filePath-only 写入绕过工程门禁）。
+  touchedPaths(args) {
+    if (args.edits) return args.edits.map((e) => e.path).filter(Boolean)
+    return args.path || args.filePath ? [args.path || args.filePath] : []
   },
   async execute(args, ctx) {
     // 2026-08-31 工具顺手度（CLI ebd70eb parity）：数组形态——一次多文件原子替换
@@ -154,8 +164,14 @@ export const editTool = {
       // 除最后一条外全部静默丢失）；跨 path 条目互不影响（并行原子语义不变）。
       const groups = new Map() // abs → 每文件一条流水线（LF 域累积 text + 对应 raw 域快照）
       for (const e of args.edits) {
+        // #1（2026-09-02 评审修复）：批量形态类型校验补齐——非字符串 old_string/new_string
+        // （含缺省 undefined）之前在 normalizeEOL 抛 TypeError 而非错误消息；逐条返回与
+        // 单条路径形态同款的诊断消息（单条形态有 typeof 校验，批量形态缺）。
+        if (!e || typeof e !== "object") return "Error: each edit must be an object with {path, old_string, new_string}"
         if (!e.path) return "Error: each edit must have a path"
         if (!e.old_string) return `Error: edit for ${e.path}: old_string must not be empty`
+        if (typeof e.old_string !== "string") return `Error: edit for ${e.path}: old_string must be a string`
+        if (typeof e.new_string !== "string") return `Error: edit for ${e.path}: new_string must be a string`
         const abs = resolvePath(e.path, ctx.cwd)
         let g = groups.get(abs)
         if (!g) {

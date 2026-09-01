@@ -8,6 +8,7 @@ import * as vscode from "vscode"
 import { relative } from "node:path"
 import { getEmbedder } from "../embed-config.mjs"
 import { searchIndex, loadIndexManifest } from "../indexer.mjs"
+import { safeSliceUTF16 } from "../agent/run-helpers.mjs"
 
 // ─── Vector search helper ──────────────────────────────────────
 
@@ -147,7 +148,7 @@ export const docSearchTool = {
           for (const chunk of chunks) {
             if (results.length >= maxResults) break
             if (new RegExp(pattern, "i").test(chunk)) {
-              const cleaned = chunk.trim().slice(0, 800)
+              const cleaned = safeSliceUTF16(chunk.trim(), 800)
               results.push(`${relPath}:\n${cleaned}`)
             }
           }
