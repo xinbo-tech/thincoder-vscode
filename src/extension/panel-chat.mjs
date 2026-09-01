@@ -15,7 +15,7 @@ import { getMcpServers } from "./settings.mjs"
 import { loadSkills } from "./skills.mjs"
 import { collectEditorInjection } from "./editor-context.mjs"
 import { injectAtRefs } from "./file-refs.mjs"
-import { permissionGate } from "./permission-gate.mjs"
+import { permissionGate, batchPermissionGate } from "./permission-gate.mjs"
 import { notifyCompletionIfUnfocused } from "./notify.mjs"
 import { extractFileLinks } from "./file-links.mjs"
 import { traceStop } from "./stop-trace.mjs"
@@ -202,6 +202,19 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
     },
     onPlanMode: (active) => { panel._panel?.webview.postMessage({ type: "planMode", active }); panel._setPlanMode(active).catch(() => {}) },
     onSubagent: (info) => panel._panel?.webview.postMessage({ type: "subagent", ...info }),
+    // Compression lifecycle visibility (CONTEXT-COMPACTION §7 D-C1/D-C3): the webview
+    // status line shows "Compressing context…" → "Compressed: N tokens freed (Xs)" /
+    // "failed: <error>" / 3-failure degradation note. Only the lifecycle is surfaced —
+    // the summary body never reaches the frontend.
+    onCompressStart: (info) => panel._panel?.webview.postMessage({ type: "compress", status: "start", messages: info?.messages ?? null }),
+    onCompress: (info) => panel._panel?.webview.postMessage({
+      type: "compress",
+      status: info?.mode === "fallback" ? "fallback" : "done",
+      tokensFreed: info?.tokensFreed ?? null,
+      elapsedMs: info?.elapsedMs ?? null,
+      tailMessages: info?.tailMessages ?? null,
+    }),
+    onCompressFail: (err) => panel._panel?.webview.postMessage({ type: "compress", status: "failed", error: err?.message ?? String(err ?? "unknown error") }),
     onGoal: (info) => panel._panel?.webview.postMessage({ type: "goal", ...info }),
     onUsage: (u) => {
       totalUsage.prompt_tokens += u.prompt_tokens ?? 0
@@ -239,6 +252,8 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       catch (e) { console.error("[chat-panel] distill save failed:", e.message) }
     },
     onPermissionRequired: permissionGate(panel),
+    // §16 D-B1: same-response non-readonly tools ask ONCE (approveAll / oneByOne / deny).
+    onBatchPermissionRequest: batchPermissionGate(panel),
     onQuestion: (question, options) => askInPanel(question, options),
   })
   const runOpts = (resume) => ({ mcpServers: getMcpServers(), images, skills: loadSkills(cwd), history, fullHistory, engState, injections: [collectEditorInjection(cwd)].filter(Boolean), resume, planMode: panel._activeData(turnSlot)?.planMode ?? false, distillState: panel._distillState, distillSignal: panel._distillController?.signal, engPersist: { cwd, slot: turnSlot } })
