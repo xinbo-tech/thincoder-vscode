@@ -109,14 +109,32 @@ export function contextWindowForModel(model) {
 }
 
 /**
- * Context utilization percentage: provider-reported prompt tokens vs the model's
- * spec context window. Null when there is no token data. (The spec field is
- * `context` — a `contextWindow` read would silently fall back to 128K and show
- * absurd percentages on 1M-context models.)
+ * Provider-aware spec (PROVIDER.md §15 D-C2): `providers[].context` (K units —
+ * 128 = 128K) overrides the MODEL_SPECS context for that provider. Copy-override
+ * ({ ...spec, context }) — the shared spec object is never mutated, so different
+ * providers can't leak values into each other. Invalid values (0/negative/non-
+ * integer) are ignored defensively here; the disk-level validation in
+ * config-io.mjs resolveProviders warns once per provider (D-C1).
+ * specForModel stays pure — model-level lookups are untouched.
  */
-export function ctxPercentForModel(promptTokens, model) {
+export function providerSpec(provider) {
+  const spec = specForModel(provider?.model)
+  const c = provider?.context
+  if (c == null) return spec
+  const n = Number(c)
+  if (!Number.isInteger(n) || n <= 0) return spec
+  return { ...spec, context: n * 1024 }
+}
+
+/**
+ * Context utilization percentage: provider-reported prompt tokens vs the provider-aware
+ * context window (specForModel context, overridden by providers[].context — PROVIDER.md §15).
+ * Null when there is no token data. (The spec field is `context` — a `contextWindow`
+ * read would silently fall back to 128K and show absurd percentages on 1M-context models.)
+ */
+export function ctxPercentForModel(promptTokens, provider) {
   if (!promptTokens) return null
-  return Math.round((promptTokens / contextWindowForModel(model)) * 100)
+  return Math.round((promptTokens / providerSpec(provider).context) * 100)
 }
 
 /**

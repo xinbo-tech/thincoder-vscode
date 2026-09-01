@@ -4,7 +4,7 @@
  * The unified compaction spec lives in thincoder/docs/design/CONTEXT-COMPACTION.md.
  */
 import { chat } from "./provider.mjs"
-import { specForModel } from "./config.mjs"
+import { providerSpec } from "./config.mjs"
 import { safeSliceUTF16 } from "./agent/run-helpers.mjs"
 import { performance } from "node:perf_hooks"
 
@@ -43,22 +43,22 @@ function estimateText(s) {
 }
 
 /**
- * Calculate the compaction threshold for a given model.
- * Uses 60% of the model's actual context window — no arbitrary caps.
+ * Calculate the compaction threshold for a given provider.
+ * Uses 60% of the provider-aware context window (providers[].context override,
+ * PROVIDER.md §15 D-C3) — no arbitrary caps.
  */
 function compactionThreshold(provider) {
-  const model = provider?.model || ""
-  const ctxWindow = specForModel(model).context
+  const ctxWindow = providerSpec(provider).context
   return Math.floor(ctxWindow * THRESHOLD_FRACTION)
 }
 
 /**
  * Calculate how many messages to keep after compaction.
- * Scales with context window: ~30 per 100K tokens, capped at 40% of history
- * (CLI parity D4 — replaces the old fixed tail).
+ * Scales with the provider-aware context window: ~30 per 100K tokens, capped at 40%
+ * of history (CLI parity D4 — replaces the old fixed tail).
  */
 function keepTailSize(provider, historyLen) {
-  const ctxWindow = specForModel(provider?.model || "").context
+  const ctxWindow = providerSpec(provider).context
   return Math.min(Math.max(10, Math.floor((ctxWindow / 100_000) * 30)), Math.floor(historyLen * 0.4))
 }
 

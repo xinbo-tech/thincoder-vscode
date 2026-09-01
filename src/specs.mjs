@@ -2,4 +2,4 @@
  * specs.mjs — Model capability lookups
  * Self-contained copy — no dependency on thincoder CLI.
  */
-export { specForModel, contextWindowForModel } from "./config.mjs"
+export { specForModel, contextWindowForModel, providerSpec } from "./config.mjs"

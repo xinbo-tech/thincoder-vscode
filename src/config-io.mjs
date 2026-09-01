@@ -85,6 +85,9 @@ export function normalizeProxy(proxy) {
   return { uri, web: proxy.web !== false, model: proxy.model === true }
 }
 
+/** Warn once per provider name on an invalid providers[].context (PROVIDER.md §15 D-C1). */
+const warnedContext = new Set()
+
 /**
  * Resolve providers list + active name from disk. BaseURL trailing slashes normalized.
  * Returns { providers, activeProvider }. No env-var overrides — config.json is the
@@ -99,6 +102,19 @@ export function resolveProviders() {
     : []
   for (const p of providers) {
     if (typeof p.baseURL === "string") p.baseURL = p.baseURL.replace(/\/+$/, "")
+    // PROVIDER.md §15 D-C1: providers[].context must be a positive integer (K units).
+    // Invalid (0/negative/non-integer/non-numeric) → ignored (spec value used) +
+    // warned ONCE per provider name (loadConfig-equivalent validation).
+    if (p.context != null) {
+      const n = Number(p.context)
+      if (!Number.isInteger(n) || n <= 0) {
+        if (!warnedContext.has(p.name)) {
+          warnedContext.add(p.name)
+          console.warn(`[config] provider "${p.name}" has invalid context ${JSON.stringify(p.context)} — ignored (expected a positive integer in K units, e.g. 128 = 128K); using the model spec value.`)
+        }
+        delete p.context
+      }
+    }
   }
   const activeProvider = raw.activeProvider || providers[0]?.name
   return { providers, activeProvider }

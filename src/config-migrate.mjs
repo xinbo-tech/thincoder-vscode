@@ -44,6 +44,9 @@ export async function migrateCore(deps) {
         const meta = legacyMeta[name]
         if (!meta?.baseURL || !meta?.model) return // orphan key, no way to reconstruct
         entry = { name, baseURL: meta.baseURL, model: meta.model }
+        // PROVIDER.md §15 D-C4: migrate-settings is the same source — a legacy
+        // settings entry carrying context (K units) rides along into config.json.
+        if (meta.context != null) entry.context = meta.context
       }
       entry.apiKey = key
       providers.push(entry)

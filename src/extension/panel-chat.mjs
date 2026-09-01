@@ -221,7 +221,7 @@ export async function runPanelChat(panel, { text, modelOverride, reasoning, prov
       totalUsage.completion_tokens += u.completion_tokens ?? 0
       totalUsage.prompt_cache_hit_tokens += u.prompt_cache_hit_tokens ?? 0
       totalUsage.prompt_cache_miss_tokens += u.prompt_cache_miss_tokens ?? 0
-      const ctxPct = ctxPercentForModel(u.prompt_tokens, p.model)
+      const ctxPct = ctxPercentForModel(u.prompt_tokens, p)
       panel._panel?.webview.postMessage({ type: "usage", usage: { ...totalUsage }, ctxPct })
     },
     onToolCall: (n, a, id) => panel._panel?.webview.postMessage({ type: "toolCall", name: n, args: JSON.stringify(a, null, 2), id }),
