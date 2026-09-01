@@ -11,7 +11,7 @@ import { traceStop } from "./extension/stop-trace.mjs"
 import {
   MAX_ADVISOR_PUSHBACKS, MAX_VERIFY_PUSHBACKS, MAX_VERIFY_RETRIES, MAX_EMPTY_RETRIES,
   configuredMaxTurns, hasCodeMutations,
-  pushReal, agentState, reinjectAfterCompaction,
+  pushReal, agentState, reinjectAfterCompaction, escapeXml, offloadToolResult,
 } from "./agent/run-helpers.mjs"
 import { MAX_ADVISOR_ROUNDS } from "./advisor/run.mjs"
 import { executeToolBatches } from "./agent/execute-tools.mjs"
@@ -78,6 +78,12 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const { agent, history, fullHistory, toolByName, toolSchemas, cfgVerifyGuard, cfgCompactThreshold, systemPrompt } =
     await setupAgentRun({ provider, cwd, input, opts, depth, role, getAuto })
 
+  // §15 D-A3（VS Code 对齐）：async 子代理注册表挂在 agent 上；depth-0 的 map 沿共享
+  // history 数组跨 runAgent 调用存活（panel 每次 run 传同一数组——ContinueError 中断后
+  // resume 的下轮回合收尾继续顺延等待）。n 读数计数器随 runAgent 非 resume 重置。
+  agent._asyncSubagents = (depth === 0 && history._asyncSubagents instanceof Map) ? history._asyncSubagents : new Map()
+  if (!opts.resume) agent._asyncCheckN = 0
+
   // End-of-run exploration distillation boundary (CONTEXT-COMPACTION §5): setupAgentRun has already
   // pushed the user input + injections, so everything appended from here is "this run's" work.
   agent._runStartHistoryLen = history.length
@@ -87,6 +93,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
   const recentSigs = []
   let guardPushbacks = 0
   let advisorPushbacks = 0
+  let exitedNormally = false
 
   try {
   for (let turn = 0; turn < maxTurns; turn++) {
@@ -104,7 +111,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
         const compacted = await compactHistory(history, systemPrompt, provider, cfgCompactThreshold, {
           lastPromptTokens: agent._lastPromptTokens,
           usageAtLen: agent._usageAtLen,
-        }, toolSchemas, signal)
+        }, toolSchemas, signal, callbacks, agent)
         if (compacted) {
           // Only reset the end-of-run distillation boundary when the machine line was REBUILT —
           // a rebuild inserts a summary note + "Understood" placeholder and collapses the middle,
@@ -121,10 +128,20 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           agent._usageAtLen = null
           agent._compressFailures = 0
           reinjectAfterCompaction(history, agent, getAuto)
+          // Completion info (CONTEXT-COMPACTION §7 D-C1): { mode: "summary", tokensFreed,
+          // elapsedMs } from compactHistory — the webview renders "Compressed: N tokens
+          // freed (Xs)". Existing callers that ignore onCompress keep the old semantics.
+          callbacks.onCompress?.(agent._lastCompressInfo ?? {})
         }
       } catch (e) {
         // AbortError must not be swallowed: user cancellation must propagate
         if (e?.name === "AbortError" || signal?.aborted) throw e
+        // Q3 visibility (CONTEXT-COMPACTION §7 D-C1): a failed compression is no longer silent —
+        // console.error + onCompressFail let the webview render the error text. Failure
+        // STRATEGY is unchanged: COMPRESS_FAILURE_LIMIT consecutive failures still degrade
+        // to truncateFallback — this only adds observability.
+        console.error("[context] compression failed:", e)
+        callbacks?.onCompressFail?.(e)
         // Summary LLM failed — count consecutive failures; after the limit degrade to
         // deterministic truncation (no network) so the task can continue (CLI parity D6).
         agent._compressFailures = (agent._compressFailures ?? 0) + 1
@@ -140,6 +157,11 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
             agent._lastPromptTokens = null
             agent._usageAtLen = null
             reinjectAfterCompaction(history, agent, getAuto)
+            // Fallback completion info (D-C2/D-C3): mode marks the deterministic-truncation
+            // path — the status line shows the degradation note ("truncated to N messages")
+            // ONLY after 3 consecutive failures (the caller reached this branch).
+            agent._lastCompressInfo = { mode: "fallback", tailMessages: Math.max(0, truncated.length - 2) }
+            callbacks.onCompress?.(agent._lastCompressInfo)
           }
         }
       }
@@ -348,6 +370,7 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
           .catch(() => null)
         if (opts.distillState) opts.distillState.pending = distill
       }
+      exitedNormally = true
       return response.content
     }
 
@@ -407,5 +430,42 @@ export async function runAgent(provider, cwd, input, callbacks = {}, signal, aut
     // Turn-bound cleanup (CONSULTATION.md): abort any leftover consultation sessions
     // started during this turn — no orphan sub-agents past the turn's end.
     cleanupConsultSessions(agent)
+    // §15 D-A3 turn-end async-subagent drain (VS Code alignment): normal exit awaits all
+    // background children and injects their reports; user abort drops them without
+    // injecting (explicit stop); ContinueError/other errors keep the map so the resumed
+    // turn drains it at ITS turn-end (avoid delaying the continue panel).
+    const asyncMap = agent._asyncSubagents
+    if (asyncMap && asyncMap.size > 0) {
+      if (signal?.aborted) {
+        asyncMap.clear()
+      } else if (exitedNormally) {
+        await drainAsyncSubagents(agent, { history, fullHistory, cwd })
+      }
+      if (depth === 0) history._asyncSubagents = exitedNormally ? undefined : asyncMap
+    }
   }
+}
+
+/**
+ * §15 D-A3 turn-end drain: wait for every running/queued async subagent (queued entries
+ * auto-start as running slots settle — entry.start cascade via settleAsyncEntry), then
+ * inject each report/error into the session as a user-role reminder (XML-escaped — child
+ * reports may carry file/web content; >64K reports get a preview + disk path via
+ * offloadToolResult). Clears the registry.
+ */
+async function drainAsyncSubagents(agent, { history, fullHistory, cwd }) {
+  const map = agent._asyncSubagents
+  if (!map || map.size === 0) return
+  const entries = [...map.values()]
+  await Promise.allSettled(entries.map((e) => e.settled))
+  for (const e of [...entries].sort((a, b) => a.id - b.id)) {
+    const body = e.error != null
+      ? `error: ${escapeXml(e.error)}`
+      : escapeXml(offloadToolResult(cwd, e.report ?? ""))
+    pushReal(history, fullHistory, {
+      role: "user",
+      content: `[System reminder: async subagent #${e.id} (${e.role}) finished]\n\n${body}`,
+    })
+  }
+  map.clear()
 }
