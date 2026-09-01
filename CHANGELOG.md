@@ -2,6 +2,19 @@
 
 All notable changes to ThinCoder VS Code are documented here.
 
+## [0.12.57] - 2026-09-02
+
+### Added
+
+- **deepseek 400 对齐（PROVIDER.md §14.7）**：escape v5（sanitizeLoneSurrogates 孤立代理 → U+FFFD + arguments/reasoning_content 覆盖 + hex odd-run 修复）；UTF-16 安全截断 5 处（context doc 注入 / code.mjs 预览 / offloadToolResult / compact 序列化）；续写构造对齐（prefix 过滤工具消息 + ≤8 文本 + reasoning_content 回传继续而非跳过 + 失败 _warnings）
+- **压缩可见性（CONTEXT-COMPACTION.md §7 D-C3）**：onCompressStart/onCompressFail 回调 + webview 压缩状态行（Compressing context… → Compressed: N tokens freed (Xs) / failed；3 次失败降级说明）
+- **subagent 异步化 + 批确认（AGENT-LOOP.md §15/§16）**：async spawn（槽位队列 / subagent_check / 上限 4）+ approval 合并询问（approveAll/oneByOne/deny 三选项 webview UI）
+- **批量形态引导**：edit/apply_patch 描述批量句（两端 parity）+ system.md/engineering.md/main.md 同步
+
+### Fixed
+
+- **code review #1-#5**：batch edits 缺类型校验（TypeError → 错误消息）；write/edit/apply_patch 补 touchedPaths（批量文件记入 _touchedFiles、工程 docs 豁免恢复）；apply_patch 两段式原子（never write a partial patch，CLI parity）；deleteTool 补 isDirty 守卫（防静默删脏文件）
+
 ## [0.8.10] — 2026-09-01
 
 ### Added
