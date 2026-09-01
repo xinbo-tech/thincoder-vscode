@@ -50,6 +50,11 @@ export function loadEngineeringPrompt(cwd, role) {
   return { prompt, templateMissing, methodologyMissing }
 }
 
+/** XML 转义（reminder 纪律：子代理报告/错误可能含来自文件/网页的注入面内容——注入会话前转义）。 */
+export function escapeXml(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
 /**
  * True when this run mutated at least one CODE file (CLI hasCodeMutations parity).
  * Doc-only changes (docs/, *.md, LICENSE…) must NOT trigger the advisor guard.
@@ -64,7 +69,22 @@ export const MAX_TOOL_RESULT = 64 * 1024 // chars — large results saved to dis
 export const TOOL_RESULT_PREVIEW = 64 * 1024 // chars shown inline when offloaded (aligns with CLI)
 /** Offload-dir write-time self-cleanup retention window (CLI parity 2026-08-21): files older than 3 days are deleted on the next offload. */
 export const TMP_RETENTION_MS = 3 * 24 * 3600 * 1000
-export const MAX_PARALLEL_SUBAGENTS = 3
+export const MAX_PARALLEL_SUBAGENTS = 4
+
+/**
+ * UTF-16-safe truncation (CLI parity, PROVIDER.md §14.6/§14.7): plain `slice(0, N)` cuts
+ * BY UTF-16 CODE UNIT — an emoji (surrogate pair) straddling the boundary becomes a LONE
+ * high surrogate (U+D800-DBFF) that deepseek's strict UTF-16 decoder 400s with
+ * "unexpected end of hex escape". When the cut point lands on a high surrogate, step back
+ * one code unit instead (the pair is dropped whole). Same semantics as thincoder
+ * src/agent/helpers.mjs safeSliceUTF16 (two ends, independent implementations).
+ */
+export function safeSliceUTF16(text, max) {
+  if (text.length <= max) return text
+  const cp = text.charCodeAt(max - 1)
+  if (cp >= 0xd800 && cp <= 0xdbff) return text.slice(0, max - 1)
+  return text.slice(0, max)
+}
 
 /** Run async tasks with a concurrency limit */
 export async function runWithLimit(items, fn, limit) {
@@ -107,10 +127,10 @@ export function offloadToolResult(cwd, text) {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
     const path = join(dir, `tool-${id}.txt`)
     writeFileSync(path, text, "utf8")
-    return `[Large output saved. Read the full result with the read tool: ${path}]\n\n${text.slice(0, TOOL_RESULT_PREVIEW)}...`
+    return `[Large output saved. Read the full result with the read tool: ${path}]\n\n${safeSliceUTF16(text, TOOL_RESULT_PREVIEW)}...`
   } catch {
     // If saving fails (disk full, permissions), fall back to truncation
-    return text.slice(0, MAX_TOOL_RESULT) + `\n... (truncated ${text.length - MAX_TOOL_RESULT} chars)`
+    return safeSliceUTF16(text, MAX_TOOL_RESULT) + `\n... (truncated ${text.length - MAX_TOOL_RESULT} chars)`
   }
 }
 
