@@ -187,29 +187,28 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
   // Continuation handling (OpenAI-format only — Claude/Gemini handle truncation differently)
   const isOpenAI = provider.format === "openai" || !provider.format
   if (isOpenAI && (!spec.partialMode && !spec.prefixMode)) return result
-  if (isOpenAI && spec.prefixMode && !spec.partialMode && result.reasoning) return result
   for (let n = 0; result.finishReason === "length" && result.content && n < MAX_CONTINUATIONS; n++) {
-    const continued = await chat(
-      isOpenAI && spec.prefixMode ? { ...provider, baseURL: betaBaseURL(provider.baseURL) } : provider,
-      {
-        messages: [
-          ...messages,
-          spec.partialMode
-            ? {
-                role: "assistant",
-                content: result.content,
-                partial: true,
-                ...(result.reasoning ? { reasoning_content: result.reasoning } : {}),
-              }
-            : { role: "assistant", content: result.content, prefix: true },
-        ],
-        tools,
-        onToken,
-        onReasoning,
-        onWait,
-        signal,
-      },
-    )
+    let continued
+    try {
+      continued = await chat(
+        isOpenAI && spec.prefixMode ? { ...provider, baseURL: betaBaseURL(provider.baseURL) } : provider,
+        {
+          messages: buildContinuationMessages(messages, result, spec),
+          tools,
+          onToken,
+          onReasoning,
+          onWait,
+          signal,
+        },
+      )
+    } catch (error) {
+      // §14.3 失败可见性（CLI parity）：续写失败注入 _warnings（agent 机读线可见）不整轮飞出；
+      // AbortError 用户中断透传。400 非重试（requestWithRetry 语义不变）。
+      if (error?.name === "AbortError") throw error
+      result._warnings ??= []
+      result._warnings.push({ name: "continuation-failed", message: `output continuation failed: ${error.message}` })
+      break
+    }
     result.content += continued.content
     result.reasoning += continued.reasoning ?? ""
     // 2026-08-31 会诊 #6（与 CLI 465b9c3 #7 对齐）：续写合并时 readSSE 输出的 tc 已
@@ -238,6 +237,24 @@ export async function chat(provider, { messages, tools, onToken, onReasoning, on
   }
   return result
 }
+
+/** Prefix 续写保留的最近文本消息条数（§14.2：截断点上下文足够，prefix 续写只看最近语境；CLI parity） */
+const PREFIX_CONTINUATION_KEEP = 8
+
+/**
+ * 续写消息构造（§14.3，CLI core.mjs buildContinuationMessages parity）：prefix 精简历史
+ * （§14.2——deepseek /beta 网关对含工具链历史必 400，真机矩阵）；partial 保持现状。
+ * prefix 分支：过滤全部 tool 消息与 assistant(tool_calls) 消息（含其 reasoning_content
+ * 跟随问题一并规避），保留 system + 最近 ≤8 条非工具文本，末条 = { role:"assistant",
+ * content, prefix:true } 且 result.reasoning 回传 reasoning_content（thinking 模式回传约束）。
+ */
+export function buildContinuationMessages(messages, result, spec) {
+  const tail = (extra) => ({ role: "assistant", content: result.content, ...extra, ...(result.reasoning ? { reasoning_content: result.reasoning } : {}) })
+  if (!spec.prefixMode) return [...messages, tail({ partial: true })]
+  const slim = messages.filter((m) => m.role !== "tool" && !(m.role === "assistant" && m.tool_calls?.length))
+  return [...slim.filter((m) => m.role === "system"), ...slim.filter((m) => m.role !== "system").slice(-PREFIX_CONTINUATION_KEEP), tail({ prefix: true })]
+}
+
 
 /** List available model IDs from the provider's /models endpoint */
 export async function listModels(provider, { signal } = {}) {
