@@ -2,6 +2,12 @@
 
 All notable changes to ThinCoder VS Code are documented here.
 
+## [0.12.58] - 2026-09-02
+
+### Changed
+
+- **开发体验三项（与 CLI 同批，TOOLS.md §10 / PROVIDER.md §15）**：① lint 零依赖化（eslint 全套删除 → check-syntax 197 文件，workflow/vscodeignore 同步）；② 工具作用域限制移除（execute/git 边界断言删除，描述同步）；③ 模型上下文可配置（settings.json providers[].context K 单位——providerSpec 拷贝覆盖、压缩阈值/状态栏跟随、migrate 透传）
+
 ## [0.12.57] - 2026-09-02
 
 ### Added
