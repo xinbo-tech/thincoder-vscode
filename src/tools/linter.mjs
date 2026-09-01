@@ -1,12 +1,14 @@
 /**
  * linter.mjs — language-aware lint tool (replaces the weaker syntax_check)
  * Ported from CLI thincoder/src/tools/linter.mjs (DESC file-read replaced with inline description).
- * Fast path: node --check. Full path: language-aware cascade (eslint → tsc → node --check for JS/TS).
+ * Fast path: node --check. Full path: language-aware cascade (tsc → node --check for TS/TSX;
+ * ruff/cargo/go for the other languages; JS/JSX falls back to node --check — eslint removed
+ * 2026-09-02, TOOLS.md §10.2 zero-dependency).
  */
 
 import { runInterruptible } from "./shared.mjs"
 import { existsSync } from "node:fs"
-import { join, relative, isAbsolute } from "node:path"
+import { join } from "node:path"
 import { resolvePath } from "./shared.mjs"
 
 export const lintTool = {
@@ -14,7 +16,7 @@ export const lintTool = {
   description:
     "Run the appropriate linter/checker for a file. Auto-detects based on file extension and project config.\n" +
     "Without 'full', runs a fast node --check (JS/TS syntax only, catches parse errors in milliseconds).\n" +
-    "With 'full', runs the language-aware cascade: eslint → tsc --noEmit → node --check (JS/TS/TSX); ruff (Python); cargo check (Rust); go vet (Go).\n" +
+    "With 'full', runs the language-aware cascade: tsc --noEmit (TS/TSX); ruff (Python); cargo check (Rust); go vet (Go); JS/JSX falls back to node --check (eslint removed 2026-09-02 — zero-dependency).\n" +
     "Use the fast default after every write/edit; use 'full' before declaring a task complete.\n" +
     "Parameters:\n" +
     "- path: file to check (default: most recently modified file)\n" +
@@ -70,32 +72,6 @@ async function nodeCheckResult(abs, signal) {
 const NPX_CLI = join(process.execPath.replace(/[\\/][^\\/]+$/, ""), "node_modules", "npm", "bin", "npx-cli.js")
 const npxArgs = (args) => [NPX_CLI, ...args]
 
-async function eslintCheck(file, { cwd, signal }) {
-  // dir may be absolute (file given as absolute path) — resolve against cwd only when relative
-  let dir = file.split(/[\\/]/).slice(0, -1).join("/") || "."
-  const resolveDir = (d) => (isAbsolute(d) ? d : join(cwd, d))
-  while (true) {
-    for (const cfg of [".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yaml", ".eslintrc.yml", "eslint.config.js", "eslint.config.mjs"]) {
-      if (existsSync(join(resolveDir(dir), cfg))) {
-        try {
-          const cfgDir = resolveDir(dir)
-          const relPath = relative(cfgDir, file)
-          await runInterruptible(process.execPath, npxArgs(["eslint", "--no-color", relPath]), { cwd: cfgDir, timeout: 30000, signal })
-          return "✓ eslint: no issues"
-        } catch (e) {
-          const stdout = (e.stdout || "").trim()
-          if (stdout) return stdout
-          return `✗ eslint: ${(e.stderr || e.message).slice(0, 500)}`
-        }
-      }
-    }
-    const parent = dir.split("/").slice(0, -1).join("/")
-    if (!parent || parent === dir) break
-    dir = parent
-  }
-  return null
-}
-
 async function tscCheck(file, { cwd, signal }) {
   if (!existsSync(join(cwd, "tsconfig.json"))) return null
   if (!/\.(ts|tsx|mts|cts)$/.test(file)) return null
@@ -148,14 +124,10 @@ async function goVet(file, { cwd, signal }) {
 }
 
 const LANG_CHECKERS = {
-  js:  [eslintCheck],
-  mjs: [eslintCheck],
-  cjs: [eslintCheck],
-  jsx: [eslintCheck],
-  ts:  [eslintCheck, tscCheck],
-  tsx: [eslintCheck, tscCheck],
-  mts: [eslintCheck, tscCheck],
-  cts: [eslintCheck, tscCheck],
+  ts:  [tscCheck],
+  tsx: [tscCheck],
+  mts: [tscCheck],
+  cts: [tscCheck],
   py:  [ruffCheck],
   rs:  [cargoCheck],
   go:  [goVet],

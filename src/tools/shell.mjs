@@ -17,7 +17,6 @@ import { BASH_TIMEOUT_MS, MAX_STREAM_BUF, makeDecoder, sanitizeOutput, truncate 
 
 /** Strip ANSI escape sequences from terminal stream data (colors, cursor moves, OSC). */
 function stripAnsi(s) {
-  // eslint-disable-next-line no-control-regex -- ANSI escape stripping legitimately matches control chars
   return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
 }
 

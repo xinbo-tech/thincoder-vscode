@@ -43,7 +43,6 @@ export function makeDecoder() {
 /** Strip ANSI escape sequences and normalize newlines (CLI shared.mjs parity). */
 export function sanitizeOutput(s) {
   return s
-    // eslint-disable-next-line no-control-regex -- ANSI stripping legitimately matches control chars
     .replace(/\x1b\[[0-9;?]*[\x40-\x7E]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>#][0-9]?/g, "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")

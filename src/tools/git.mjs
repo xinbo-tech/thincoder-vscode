@@ -8,7 +8,7 @@
  */
 import { runGit, truncate } from "./shared.mjs"
 import { execFileSync } from "node:child_process"
-import { resolve, relative, isAbsolute, sep } from "node:path"
+import { resolve } from "node:path"
 import { runGitStrict, validateRef, gitConfigArgs, snapshotBefore, executeExtAction } from "./git-ext.mjs"
 import { executeCheckpointAction } from "./git-checkpoint.mjs"
 
@@ -22,20 +22,11 @@ function runGitRaw(cwd, cmdArgs, config = []) {
   }
 }
 
-/** True when `abs` is inside `root` (handles `..` and cross-drive, which relative()
- *  returns as an absolute path on Windows). */
-function isInside(root, abs) {
-  const rel = relative(root, abs)
-  if (isAbsolute(rel)) return false
-  return rel !== ".." && !rel.startsWith(".." + sep)
-}
-
-/** Resolve workdir relative to cwd, asserting it stays within the workspace. */
+/** Resolve workdir relative to cwd (no workspace boundary assertion — bash parity,
+ *  TOOLS.md §10.1 D-W1: git itself is not directory-restricted). */
 function resolveBaseDir(cwd, workdir) {
   if (!workdir || typeof workdir !== "string") return cwd
-  const abs = resolve(cwd, workdir)
-  if (!isInside(cwd, abs)) throw new Error(`workdir escapes the workspace: ${workdir}`)
-  return abs
+  return resolve(cwd, workdir)
 }
 
 export const gitTool = {
@@ -59,7 +50,7 @@ export const gitTool = {
     "- path: (diff/log/add/commit/checkout/restore/rm/apply/archive/blame/mv/worktree) file/dir to scope/stage/restore\n" +
     "- ref: (show/diff/checkout/reset/revert/merge/cherry-pick/rebase/worktree:add/archive) commit/branch/ref; (push/pull/fetch) branch or tag (space-separated for multiple)\n" +
     "- name: (branch/tag/switch) the branch or tag name — remote: (push/fetch/pull/remote) remote name — tags: (push) push all tags\n" +
-    "- workdir: run git in this workspace subdirectory (monorepo / multi-repo). Confined to the workspace. Default: cwd\n" +
+    "- workdir: run git in this workspace subdirectory (monorepo / multi-repo). No directory restrictions — paths are resolved, not restricted (TOOLS.md §10.1). Default: cwd\n" +
     "- config: (network actions push/fetch/pull/ls-remote/clone) git -c overrides, e.g. [\"http.proxy=http://10.2.2.112:3128\"] for blocked remotes\n" +
     "- staged: (diff/restore) staged copy — count/oneline: (log) — message: (commit/stash) — filter: (read-only) output-line regex\n" +
     "- mode: (reset) soft/mixed/hard — tagAction/branchAction/stashAction: the sub-action\n" +
@@ -78,7 +69,7 @@ export const gitTool = {
       filter: { type: "string", description: "(read-only actions) Regex to filter output lines by (case-insensitive)" },
       name: { type: "string", description: "(branch/tag/switch) The branch or tag name (create/delete/switch)" },
       remote: { type: "string", description: "(push/fetch/pull/remote/clone) Remote name (e.g. origin) or URL. Default: current upstream" },
-      workdir: { type: "string", description: "Run git in this workspace subdirectory (monorepo / multi-repo). Confined to the workspace. Default: cwd" },
+      workdir: { type: "string", description: "Run git in this workspace subdirectory (monorepo / multi-repo). No directory restrictions. Default: cwd" },
       config: { type: "array", items: { type: "string" }, description: "(network actions: push/fetch/pull/ls-remote/clone) git -c overrides, e.g. [\"http.proxy=http://10.2.2.112:3128\"] for blocked remotes" },
       tags: { type: "boolean", description: "(push) Also push all tags (--tags)" },
       mode: { type: "string", enum: ["soft", "mixed", "hard"], description: "(reset) reset mode — hard snapshots the tree first + needs confirmation（操作前自动快照，checkpointAction=rewind 恢复）" },
@@ -100,7 +91,7 @@ export const gitTool = {
   },
   async execute(args, ctx) {
     // workdir: run git in a workspace subdirectory (monorepo / multi-repo) — shadow ctx.cwd so
-    // every action + snapshotBefore + checkpoint resolves against it, confined to the workspace.
+    // every action + snapshotBefore + checkpoint resolves against it (no boundary assertion).
     if (args.workdir) ctx = { ...ctx, cwd: resolveBaseDir(ctx.cwd, args.workdir) }
     const out = await this._execute(args, ctx)
     return out
