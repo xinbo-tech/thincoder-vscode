@@ -5,6 +5,8 @@
  */
 import { chat } from "./provider.mjs"
 import { specForModel } from "./config.mjs"
+import { safeSliceUTF16 } from "./agent/run-helpers.mjs"
+import { performance } from "node:perf_hooks"
 
 // ─── Model-aware compaction thresholds ──────────────────────────
 
@@ -112,10 +114,16 @@ function estimateTokens(messages) {
  * @param {AbortSignal|null} [signal] - user interrupt (CLI parity). The summary LLM call can
  *   take minutes on slow reasoning models — without the signal, Stop waits for the summary
  *   to finish (or the 10-minute fetch ceiling) before the loop notices the abort.
+ * @param {object|null} [callbacks] - { onCompressStart } — fires RIGHT BEFORE the summary LLM
+ *   call with { messages: N } (CONTEXT-COMPACTION §7 D-C1: compression lifecycle visibility —
+ *   the webview status line; never the summary body). No-op when absent (F4).
+ * @param {object|null} [agent] - carrier for completion info (CLI parity): sets
+ *   agent._lastCompressInfo = { mode:"summary", tokensFreed, elapsedMs } so the caller's
+ *   onCompress renders "Compressed: N tokens freed (Xs)".
  * @throws when the summarization LLM fails — the CALLER counts consecutive failures and
  *   degrades to truncateFallback (CLI parity D6; the heuristic summary is deprecated).
  */
-export async function compactHistory(history, systemPrompt, provider, explicitThreshold = null, baseline = null, tools = null, signal = null) {
+export async function compactHistory(history, systemPrompt, provider, explicitThreshold = null, baseline = null, tools = null, signal = null, callbacks = null, agent = null) {
   const threshold = explicitThreshold != null ? explicitThreshold : compactionThreshold(provider)
   const overhead = estimateText(systemPrompt) + (tools ? estimateText(JSON.stringify(tools)) : 0)
   const total = baseline?.lastPromptTokens != null
@@ -192,7 +200,7 @@ export async function compactHistory(history, systemPrompt, provider, explicitTh
       let text = ""
       if (typeof m.content === "string") text = m.content
       else if (Array.isArray(m.content)) text = m.content.filter((p) => p?.type === "text").map((p) => p.text ?? "").join(" ")
-      return `${prefix} ${text.slice(0, cap)}`
+      return `${prefix} ${safeSliceUTF16(text, cap)}`
     })
     .join("\n")
 
@@ -202,13 +210,19 @@ export async function compactHistory(history, systemPrompt, provider, explicitTh
   // Silent by design (D11): no streaming callbacks — the compaction process must not reach the frontend.
   // The signal rides along (CLI parity): Stop cancels the in-flight summary instead of
   // waiting for it to finish.
+  // Compression visibility (CONTEXT-COMPACTION §7 D-C1/D-C3): the frontend learns the
+  // compression STARTED right before the LLM call ("Compressing context… / summarizing
+  // N messages" status line) — only the lifecycle is surfaced, never the summary body.
+  // N = the number of history messages being summarized.
+  callbacks?.onCompressStart?.({ messages: oldMessages.length })
+  const startedAt = performance.now()
   const resp = await chat({ ...provider, thinking: null, reasoningEffort: null }, {
     messages: [{ role: "user", content: SUMMARIZE_PROMPT + serialized }],
     signal: signal ?? null,
   })
   const summary = resp.content || ""
 
-  return [
+  const result = [
     ...history.slice(0, headEnd), // head (empty by default — KEEP_HEAD=0, CLI parity)
     {
       role: "user",
@@ -224,6 +238,19 @@ export async function compactHistory(history, systemPrompt, provider, explicitTh
     },
     ...recentMessages,
   ]
+
+  // Completion info for the compression status line (D-C2/D-C3): tokens freed = the
+  // pre-compression prompt estimate (`total` — the value that tripped the threshold,
+  // incl. system/tools overhead) minus the post-compression estimate on the same basis.
+  // Elapsed = the summary call + splice duration. agent.mjs forwards this to onCompress.
+  if (agent) {
+    agent._lastCompressInfo = {
+      mode: "summary",
+      tokensFreed: Math.max(0, Math.round(total - (estimateTokens(result) + overhead))),
+      elapsedMs: performance.now() - startedAt,
+    }
+  }
+  return result
 }
 
 /**
@@ -373,7 +400,7 @@ function serializeExplorationMessages(messages) {
       let text = ""
       if (typeof m.content === "string") text = m.content
       else if (Array.isArray(m.content)) text = m.content.filter((p) => p?.type === "text").map((p) => p.text ?? "").join(" ")
-      return `[${m.role}]${toolNote} ${text.slice(0, cap)}`
+      return `[${m.role}]${toolNote} ${safeSliceUTF16(text, cap)}`
     })
     .join("\n")
 }
