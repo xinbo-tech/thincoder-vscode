@@ -172,6 +172,14 @@ export async function handlePanelMessage(panel, msg) {
       panel._refreshStatus()
       break
     }
+    case "batchPermissionResponse": {
+      // §16 D-B1: merged ask — approveAll / oneByOne / deny (deny → whole batch refused,
+      // no second ask; oneByOne → execute-tools falls back to per-item asks).
+      const entry = panel._batchPermissionQueue?.shift()
+      entry?.resolve(msg.choice === "approveAll" ? "approveAll" : msg.choice === "oneByOne" ? "oneByOne" : "deny")
+      panel._refreshStatus()
+      break
+    }
     case "settings": await panel._pushSettings(); break
     case "saveProviderKey": await panel._saveProviderKey(msg.name, msg.key); break
     case "saveCustomProvider": await panel._saveCustomProvider(msg.config); break
