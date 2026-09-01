@@ -11,7 +11,7 @@ Design docs in `docs/design/`. Independent product — no dependency on thincode
 - **Zero npm runtime dependencies**: only `node:` standard library and VS Code Extension API (`vscode` module). No TypeScript, no build/bundling step.
 - ESM (`.mjs`) throughout — `package.json` declares `"type": "module"`.
 - LLM calls go through native `fetch` with SSE streaming, same as thincoder core.
-- Tool implementations are adapted for VS Code context (workspace root = cwd, but directory confinement is relative to the first workspace folder).
+- Tool implementations are adapted for VS Code context (workspace root = cwd; no directory restriction on tools since 2026-09-02 — paths resolve relative to cwd, approval gate is the guard).
 
 ## Key Conventions
 
