@@ -132,7 +132,7 @@ export function handleTaskProgress(m) {
   renderStatusBar()
 }
 
-/** subagent message: track lifecycle; collapse consult blocks on terminal state. */
+/** subagent message: track lifecycle; collapse activity blocks on terminal state. */
 export function handleSubagentMessage(m) {
   if (m.status === "started") {
     S._subagentMap[m.id] = { role: m.role, status: "started", startedAt: m.startedAt || Date.now(), tool: null, model: m.model ?? null }
@@ -144,6 +144,22 @@ export function handleSubagentMessage(m) {
     if (m.role === "consult" && m.model && m.status !== "started") {
       const block = S._subBlocks.get(`sub:consult ${m.model} #${m.sessionId}`)
       if (block) block.open = false
+    }
+    // Subagent/escalate terminal state → collapse the activity block too
+    // (2026-09-02 fix round: the subagent block had no completion state — it
+    // stayed "live" until the turn ended. CLI parity with the ⟦ev⟧done freeze:
+    // done = collapsed, kept in the conversation, expandable — not removed.
+    // The done notification fires at child settle (subagent.mjs runChild), so
+    // this collapses the moment the child completes — no turn-end wait.)
+    // Block keys: subagents `sub:${role}#${id}`, escalate `sub:escalate ${tag} #${id}`
+    // (tag = model) — match by role prefix + `#${id}` suffix (ids are unique per
+    // turn via _subIdCounter).
+    if (m.role !== "consult" && m.status !== "started") {
+      for (const [name, block] of S._subBlocks) {
+        if (name.startsWith(`sub:${m.role}`) && name.endsWith(`#${m.id}`)) {
+          block.open = false
+        }
+      }
     }
   }
   renderSubagentPanel()
