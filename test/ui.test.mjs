@@ -233,3 +233,50 @@ describe("subagent activity stream — one block per #subId channel", () => {
     assert.doesNotMatch(blocks[1].textContent, /read x/, "#2's block untouched")
   })
 })
+
+// ─── handleSubagentMessage: 完成态即折叠活动区块（2026-09-02 修复轮，CLI ⟦ev⟧done 对齐）───
+// async 子代理 settle 即发 onSubagent({status:"done"})（subagent.mjs runChild）——webview
+// 收到 done/error 即折叠对应活动区块（保留可展开、不移除；此前只有 consult 区块在终态
+// 折叠，subagent 区块会保持"运行中"外观直到回合结束）。依赖上一 describe 已加载的
+// index.html body + chat.js（模块缓存，不重复执行；不重置 body——state.js 的
+// ctx.messagesEl 是导入时捕获的旧元素引用）。
+describe("subagent 完成态 — done/error 通知即折叠活动区块", () => {
+  before(async () => {
+    await import("../webview/chat.js") // module cache — no re-init, no body reset
+  })
+
+  const post = (msg) => window.dispatchEvent(new window.MessageEvent("message", { data: msg }))
+  const findBlock = (label) =>
+    [...document.querySelectorAll("#messages .sub-block")].find((b) => b.querySelector("summary")?.textContent === label)
+
+  it("done 通知 → 该子代理活动区块折叠（保留可展开，不移除）", () => {
+    post({ type: "toolPanel", name: "sub:eng-coder#3", kind: "text", text: "working…" })
+    const block = findBlock("eng-coder#3")
+    assert.ok(block, "活动区块已创建")
+    assert.equal(block.open, true, "运行中区块展开")
+    post({ type: "subagent", id: 3, role: "eng-coder", status: "done" })
+    assert.equal(block.open, false, "done 即折叠（完成即冻结）")
+    assert.ok(findBlock("eng-coder#3"), "区块保留在会话流（可重新展开——非移除）")
+  })
+
+  it("error 终态同样折叠；started 不折叠", () => {
+    post({ type: "toolPanel", name: "sub:eng-coder#4", kind: "text", text: "risky…" })
+    const errBlock = findBlock("eng-coder#4")
+    post({ type: "subagent", id: 4, role: "eng-coder", status: "error", error: "boom" })
+    assert.equal(errBlock.open, false, "error 终态折叠")
+
+    post({ type: "toolPanel", name: "sub:eng-coder#5", kind: "text", text: "live…" })
+    const liveBlock = findBlock("eng-coder#5")
+    post({ type: "subagent", id: 5, role: "eng-coder", status: "started" })
+    assert.equal(liveBlock.open, true, "started 不折叠")
+  })
+
+  it("escalate done（区块键含 model tag）→ 同款折叠", () => {
+    post({ type: "toolPanel", name: "sub:escalate glm-5.2 #6", kind: "text", text: "surgery…" })
+    const block = [...document.querySelectorAll("#messages .sub-block")].find((b) => b.querySelector("summary")?.textContent === "escalate glm-5.2 #6")
+    assert.ok(block, "escalate 区块已创建")
+    post({ type: "subagent", id: 6, role: "escalate", status: "done", model: "glm-5.2" })
+    assert.equal(block.open, false, "escalate 终态同款折叠（键含 model tag）")
+  })
+})
+
