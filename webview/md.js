@@ -66,7 +66,6 @@ export function md(raw) {
   text = text.replace(/\n/g, "<br>")
 
   // 13. Restore placeholders
-  // eslint-disable-next-line no-control-regex
   text = text.replace(/\x00B(\d+)\x00/g, (_, i) => blocks[+i] || "")
 
   return text
