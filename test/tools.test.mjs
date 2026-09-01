@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, mkdirSync, symlinkSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
@@ -280,12 +280,13 @@ describe("lint — language-aware cascade (ported from CLI)", () => {
     assert.match(r, /Syntax OK/)
   })
 
-  it("full cascade: eslint finds no issues in this repo (config present)", async () => {
-    // Run inside the vscode repo itself which has eslint.config.mjs
+  it("full cascade on JS falls back to node --check (eslint removed 2026-09-02)", async () => {
+    // eslint was removed for zero-dependency (TOOLS.md §10.2): a JS file with
+    // full=true now goes through node --check, not the eslint cascade.
     const repoCwd = join(import.meta.dirname, "..")
     const f = join(repoCwd, "src", "tools", "linter.mjs")
     const r = await lintTool.execute({ path: f, full: true }, { cwd: repoCwd })
-    assert.match(r, /eslint: no issues/)
+    assert.match(r, /Syntax OK/)
   })
 })
 
@@ -559,7 +560,7 @@ describe("git — unified tool (CLI parity: action subcommands)", () => {
     assert.match(await gitTool.execute({ action: "merge" }, ctx()), /requires ref/)
   })
 
-  it("workdir 在 workspace 子目录的 git 仓库运行；越界报错", async () => {
+  it("workdir 在 workspace 子目录的 git 仓库运行；越界不再拒绝（TOOLS.md §10.1 T-w-2：git 本身不限目录）", async () => {
     const { gitTool } = await import("../src/tools/git.mjs")
     const { execFileSync } = await import("node:child_process")
     const { mkdirSync } = await import("node:fs")
@@ -585,7 +586,70 @@ describe("git — unified tool (CLI parity: action subcommands)", () => {
 
     const log = await gitTool.execute({ action: "log", workdir: "sub" }, ctx())
     assert.match(log, /init/)
-    await assert.rejects(() => gitTool.execute({ action: "status", workdir: "../escape" }, ctx()), /escapes the workspace/)
+    // 边界断言已移除（2026-09-02）：workdir 越界正常解析执行——git 在该目录跑并返回自身错误信息
+    const outside = await gitTool.execute({ action: "status", workdir: "../escape" }, ctx())
+    assert.ok(!/escapes the workspace/.test(outside), `不再拒绝越界 workdir: ${outside.slice(0, 120)}`)
+  })
+})
+
+describe("scope removal — 外部路径/symlink 正常解析执行（TOOLS.md §10.1 T-W1/T-W5）", () => {
+  beforeEach(setup)
+  afterEach(cleanup)
+
+  it("T-W1: read 外部路径（../outside.txt）正常解析执行，不再抛 Access denied", async () => {
+    const { readTool } = await import("../src/tools/file.mjs")
+    writeFileSync(join(tmpdir(), "scope-outside.txt"), "outside content\n")
+    try {
+      const out = await readTool.execute({ path: "../scope-outside.txt" }, ctx())
+      assert.match(out, /outside content/)
+    } finally {
+      rmSync(join(tmpdir(), "scope-outside.txt"), { force: true })
+    }
+  })
+
+  it("T-W1: write 外部路径正常写（与 bash 一致——路径解析，不做目录限制）", async () => {
+    const { writeTool } = await import("../src/tools/file.mjs")
+    const outside = join(tmpdir(), "scope-outside-write.txt")
+    try {
+      const out = await writeTool.execute({ path: "../scope-outside-write.txt", content: "written outside\n" }, ctx())
+      assert.match(out, /wrote/i)
+      assert.equal(readFileSync(outside, "utf8").replace(/\r\n/g, "\n"), "written outside\n")
+    } finally {
+      rmSync(outside, { force: true })
+    }
+  })
+
+  it("T-W1: edit 外部路径正常解析执行（不再抛 Access denied）", async () => {
+    const { editTool } = await import("../src/tools/file.mjs")
+    const outside = join(tmpdir(), "scope-outside-edit.txt")
+    writeFileSync(outside, "before\n")
+    try {
+      const out = await editTool.execute({ path: "../scope-outside-edit.txt", old_string: "before", new_string: "after" }, ctx())
+      assert.match(out, /Replaced 1 occurrence/)
+      assert.equal(readFileSync(outside, "utf8").replace(/\r\n/g, "\n"), "after\n")
+    } finally {
+      rmSync(outside, { force: true })
+    }
+  })
+
+  it("T-W5: workspace 内 symlink 指向外部文件 → read 正常解析执行（realpath 断言移除后语义）", async (t) => {
+    const { readTool } = await import("../src/tools/file.mjs")
+    const outside = join(tmpdir(), "scope-symlink-target.txt")
+    writeFileSync(outside, "via symlink\n")
+    const link = join(cwd, "link.txt")
+    try {
+      symlinkSync(outside, link)
+    } catch {
+      // Windows 无开发者模式时 symlink 创建需要管理员权限——跳过而非失败
+      t.skip("symlink creation not permitted on this host")
+      return
+    }
+    try {
+      const out = await readTool.execute({ path: "link.txt" }, ctx())
+      assert.match(out, /via symlink/)
+    } finally {
+      rmSync(outside, { force: true })
+    }
   })
 })
 

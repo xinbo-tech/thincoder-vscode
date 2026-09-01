@@ -11,7 +11,7 @@ import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { tmpdir } from "node:os"
 import { compactHistory, truncateFallback, shrinkOversized, summarizeRunExplorations, SUMMARIZE_PROMPT, EXPLORE_TOOLS } from "../src/compact.mjs"
-import { specForModel, ctxPercentForModel, contextWindowForModel } from "../src/config.mjs"
+import { specForModel, ctxPercentForModel, contextWindowForModel, providerSpec } from "../src/config.mjs"
 import { _setConfigPathForTest } from "../src/config-io.mjs"
 import { MAX_ADVISOR_PUSHBACKS } from "../src/agent/run-helpers.mjs"
 import { runAgent } from "../src/agent.mjs"
@@ -127,16 +127,48 @@ describe("model specs", () => {
   it("ctxPercentForModel divides by the REAL spec context (1M models, not 128K)", () => {
     // Regression: the status bar read a non-existent `contextWindow` field and
     // fell back to 128K — a 1M-context model at 175K tokens showed "137%".
-    assert.equal(ctxPercentForModel(175_000, "deepseek-v4-pro"), 18)
-    assert.equal(ctxPercentForModel(1_000_000, "deepseek-v4-pro"), 100)
-    assert.equal(ctxPercentForModel(200_000, "deepseek-v4-pro"), 20)
+    // Provider-aware since PROVIDER.md §15: takes the provider object (context
+    // override included), not the bare model name.
+    assert.equal(ctxPercentForModel(175_000, { model: "deepseek-v4-pro" }), 18)
+    assert.equal(ctxPercentForModel(1_000_000, { model: "deepseek-v4-pro" }), 100)
+    assert.equal(ctxPercentForModel(200_000, { model: "deepseek-v4-pro" }), 20)
     assert.equal(contextWindowForModel("deepseek-v4-pro"), 1_000_000)
   })
 
   it("ctxPercentForModel returns null without token data and 128K for unknown models", () => {
-    assert.equal(ctxPercentForModel(0, "deepseek-v4-pro"), null)
-    assert.equal(ctxPercentForModel(null, "deepseek-v4-pro"), null)
-    assert.equal(ctxPercentForModel(64_000, `no-such-${Date.now()}`), 50)  // 128K default window
+    assert.equal(ctxPercentForModel(0, { model: "deepseek-v4-pro" }), null)
+    assert.equal(ctxPercentForModel(null, { model: "deepseek-v4-pro" }), null)
+    assert.equal(ctxPercentForModel(64_000, { model: `no-such-${Date.now()}` }), 50)  // 128K default window
+  })
+
+  it("T-C1: providerSpec 用 providers[].context（K 单位）覆盖 spec；specForModel 纯函数不受污染", () => {
+    const p = { model: "deepseek-v4-pro", context: 128 }
+    assert.equal(providerSpec(p).context, 131_072, "128K override → 128 × 1024")
+    assert.equal(providerSpec(p).maxOutput, 384_000, "其余字段拷贝保留")
+    assert.equal(specForModel("deepseek-v4-pro").context, 1_000_000, "specForModel 不受覆盖污染")
+    // 未配置 → spec 值（T-C4 回归）
+    assert.equal(providerSpec({ model: "deepseek-v4-pro" }).context, 1_000_000)
+    assert.equal(providerSpec({ model: "deepseek-v4-pro", context: undefined }).context, 1_000_000)
+    // 拷贝覆盖：每次返回独立对象，不共享可变状态
+    const a = providerSpec(p)
+    a.context = 1
+    assert.equal(providerSpec(p).context, 131_072, "每次调用返回独立拷贝")
+  })
+
+  it("T-C3: context 非法值（0/负数/非数字/小数/带单位串）→ providerSpec 忽略，用 spec 值", () => {
+    for (const bad of [0, -5, "abc", 1.5, "128k", null]) {
+      assert.equal(
+        providerSpec({ model: "deepseek-v4-pro", context: bad }).context,
+        1_000_000,
+        `invalid context ${JSON.stringify(bad)} must be ignored`,
+      )
+    }
+  })
+
+  it("T-C6: 显示跟随——ctxPercentForModel 用覆盖后的 provider 窗口", () => {
+    // 覆盖 128K：65_536 tokens = 50%（1M spec 下只有 7%）
+    assert.equal(ctxPercentForModel(65_536, { model: "deepseek-v4-pro", context: 128 }), 50)
+    assert.equal(ctxPercentForModel(131_072, { model: "deepseek-v4-pro", context: 128 }), 100)
   })
 })
 
@@ -204,6 +236,33 @@ describe("compaction — threshold is model-aware", () => {
       assert.notEqual(result, null, "should trigger compaction")
       assert.ok(result.some((m) => m.content?.includes("compacted")), "should have compaction notice")
       assert.ok(result.some(m => m.role === "assistant"), "should have assistant ack")
+    } finally {
+      server.close()
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("T-C2: providers[].context 覆盖后压缩阈值跟随（128K 覆盖 → 触发；同消息在 1M spec 下不触发）", async () => {
+    const cwd = setupTempDir()
+    const { server, port } = await mockLLMServer()
+    try {
+      const messages = []
+      for (let i = 0; i < 600; i++) {
+        messages.push({ role: "user", content: `test message number ${i} `.repeat(80) })
+        messages.push({ role: "assistant", content: `response number ${i} `.repeat(60) })
+      }
+
+      // 同批消息 ~90K tokens：1M spec 阈值 600K 不触发；providers[].context=128
+      // （128K 覆盖）阈值 = 131072×0.6 ≈ 76.8K → 触发（PROVIDER.md §15 T-C2）。
+      const noOverride = await compactHistory(messages, "system prompt", mockProvider("deepseek-v4-pro", port))
+      assert.equal(noOverride, null, "1M spec (no override): 90K must NOT trigger")
+
+      const overridden = await compactHistory(
+        messages, "system prompt",
+        { ...mockProvider("deepseek-v4-pro", port), context: 128 },
+      )
+      assert.notEqual(overridden, null, "128K override: same messages MUST trigger")
+      assert.ok(overridden.some((m) => m.content?.includes("compacted")), "压缩提示存在")
     } finally {
       server.close()
       rmSync(cwd, { recursive: true, force: true })

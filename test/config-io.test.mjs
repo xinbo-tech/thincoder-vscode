@@ -148,6 +148,42 @@ describe("resolveProviders", () => {
       delete process.env.THINCODER_ACTIVE_PROVIDER
     }
   })
+
+  it("T-C3: 非法 providers[].context（0/负数/非数字）→ 忽略 + console.warn 一次，合法值保留（PROVIDER.md §15 D-C1）", () => {
+    const warns = []
+    const orig = console.warn
+    console.warn = (...a) => warns.push(a.join(" "))
+    try {
+      writeCfg({
+        providers: [
+          { name: "good", context: 128 },
+          { name: "bad-zero", context: 0 },
+          { name: "bad-neg", context: -5 },
+          { name: "bad-str", context: "abc" },
+        ],
+      })
+      const { providers } = resolveProviders()
+      const byName = Object.fromEntries(providers.map((p) => [p.name, p]))
+      assert.equal(byName.good.context, 128, "合法值保留")
+      assert.equal(byName["bad-zero"].context, undefined, "0 → 删除（用 spec 值）")
+      assert.equal(byName["bad-neg"].context, undefined, "负数 → 删除")
+      assert.equal(byName["bad-str"].context, undefined, "非数字 → 删除")
+      assert.equal(warns.length, 3, "三个非法 provider 各 warn 一次")
+      assert.ok(warns.every((w) => w.includes("invalid context")), "warn 文案指向 context 字段")
+      // warn 只发生一次：再次解析不再重复
+      warns.length = 0
+      resolveProviders()
+      assert.equal(warns.length, 0, "同名非法 provider 只 warn 一次")
+    } finally {
+      console.warn = orig
+    }
+  })
+
+  it("T-C4: 未配置 context → 行为不变（回归）", () => {
+    writeCfg({ providers: [{ name: "a", baseURL: "https://x.test/v1//", model: "deepseek-v4-pro" }] })
+    const { providers } = resolveProviders()
+    assert.equal(providers[0].context, undefined)
+  })
 })
 
 describe("findProvider", () => {
@@ -336,6 +372,17 @@ describe("migrateCore", () => {
     assert.equal(custom.apiKey, "sk-c")
     assert.equal(custom.baseURL, "https://c.test/v1")
     assert.equal(custom.model, "cm")
+  })
+
+  it("T-C5: legacy settings 的 context 字段随迁移透传（migrate-settings 同源，PROVIDER.md §15 D-C4）", async () => {
+    await migrateCore({
+      secrets: makeSecrets(),
+      flags: makeFlags(),
+      legacySettings: { custom: { key: "sk-c", baseURL: "https://c.test/v1", model: "cm", context: 128 } },
+      clearLegacySettings: async () => {},
+    })
+    const custom = readCfg().providers.find((p) => p.name === "custom")
+    assert.equal(custom.context, 128, "settings 里的 context（K 单位）透传进 config.json")
   })
 
   it("drops orphan keys that cannot be reconstructed", async () => {

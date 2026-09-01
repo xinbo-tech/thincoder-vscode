@@ -174,9 +174,10 @@ describe("execute — async / import / console / workdir / filter", () => {
     assert.equal(out, "export const x = 1")
   })
 
-  it("workdir escaping the workspace is rejected", async () => {
+  it("workdir outside the workspace resolves and runs (bash parity, TOOLS.md §10.1)", async () => {
+    // Boundary assertion removed 2026-09-02: paths are resolved, not restricted.
     const out = await run('log("x")', { workdir: ".." })
-    assert(out.includes("escapes the workspace"))
+    assert.equal(out, "x")
   })
 
   it("filter keeps only matching output lines", async () => {
@@ -208,8 +209,18 @@ describe("execute — scriptFile (node <file> / nodeArgs)", () => {
     assert.match(await executeTool.execute({ scriptFile: "bad.mjs", nodeArgs: ["--check"] }, ctx()), /SyntaxError|Unexpected/)
   })
 
-  it("scriptFile escaping the workspace is rejected; missing code+scriptFile errors", async () => {
-    assert.match(await executeTool.execute({ scriptFile: "../escape.mjs" }, ctx()), /escapes the workspace/)
+  it("scriptFile outside the workspace runs (bash parity — execute can run any script)", async () => {
+    // Boundary rejection removed 2026-09-02 (TOOLS.md §10.1 T-e-3): bash can run
+    // arbitrary scripts, so execute scriptFile resolves the path without restriction.
+    writeFileSync(join(tmpdir(), "thincoder-outside-escape.mjs"), 'console.log("outside script ran")\n')
+    try {
+      assert.equal(await executeTool.execute({ scriptFile: "../thincoder-outside-escape.mjs" }, ctx()), "outside script ran")
+    } finally {
+      rmSync(join(tmpdir(), "thincoder-outside-escape.mjs"), { force: true })
+    }
+  })
+
+  it("missing code+scriptFile errors; eval-like nodeArgs rejected", async () => {
     assert.match(await executeTool.execute({}, ctx()), /either code or scriptFile/)
     assert.match(await executeTool.execute({ scriptFile: "hello.mjs", nodeArgs: ["--eval", "1"] }, ctx()), /not allowed/)
   })
