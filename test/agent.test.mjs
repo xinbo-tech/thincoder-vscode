@@ -746,6 +746,16 @@ describe("prompt borrowing increments (kimi-code comparison)", () => {
     assert.ok(text.includes("Disclosing a downgrade after delivery is not compliance"), "disclose-after is not compliance")
     assert.ok(text.includes("reported instead of avoided"), "transparency duty prevents, not reports")
   })
+
+  it("system.md: parallelize aggressively — parallel discipline with F7 trigger conditions and do-not-parallelize boundaries (2026-09-01)", () => {
+    const text = readFileSync(join(PROMPTS_DIR, "system.md"), "utf8")
+    assert.match(text, /Parallelize aggressively/, "proactive parallel guidance present")
+    assert.match(text, /splitting changes across independent sub-projects/, "F7: split changes across independent sub-projects")
+    assert.match(text, /share no files, have no cross-dependencies, and each has its own tests/, "F7 trigger conditions (all required)")
+    assert.match(text, /Do NOT parallelize/, "do-not-parallelize boundary guidance")
+    assert.match(text, /approval storms/, "approval-storm boundary named")
+    assert.match(text, /micro-parallelism/, "micro-parallelism skipped (value judgment)")
+  })
 })
 
 // ─── Pre-work plan confirmation discipline (2026-08-21) ───

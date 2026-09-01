@@ -20,15 +20,21 @@
  * Zero dependencies — uses only node:fs sync APIs.
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from "node:fs"
+import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 import { getEmbedder } from "./embed-config.mjs"
 import { loadIndexManifest, searchIndex } from "./indexer.mjs"
 
 const VALID_TYPES = new Set(["rule", "knowledge", "decision", "pattern"])
+const VALID_SCOPES = new Set(["personal", "project"])
 
 function memoryDir(cwd) {
   return join(cwd, ".thincoder", "memory")
+}
+
+/** Storage directory for a scope: memoryDir(cwd)/<scope> — scope validation is directory-based (NF3). */
+function scopeDir(cwd, scope) {
+  return join(memoryDir(cwd), scope)
 }
 
 function ensureDir(dir) {
@@ -162,6 +168,13 @@ function readAllEntries(dir) {
   return entries
 }
 
+/** Read all memory entries: legacy root plus every scope subdirectory (search surface). */
+function readAllScopeEntries(cwd) {
+  const entries = readAllEntries(memoryDir(cwd))
+  for (const scope of VALID_SCOPES) entries.push(...readAllEntries(scopeDir(cwd, scope)))
+  return entries
+}
+
 // ─── Tokenization & scoring ─────────────────────────────────────
 
 function tokenizeQuery(query) {
@@ -240,7 +253,8 @@ export const memoryPutTool = {
     "- title (required): Short title\n" +
     "- content (required): Full content to remember\n" +
     "- tags (optional): Space-separated tags (include bilingual keywords)\n" +
-    "- scope (optional): \"personal\" or \"project\" (default \"personal\")",
+    "- scope (optional): \"personal\" or \"project\" (default \"personal\")\n" +
+    "The result includes the entry id (filename) — use it with memory_delete.",
   parameters: {
     type: "object",
     properties: {
@@ -252,17 +266,18 @@ export const memoryPutTool = {
     },
     required: ["type", "title", "content"],
   },
-  execute({ type, title, content, tags }, ctx) {
+  execute({ type, title, content, tags, scope }, ctx) {
     if (!VALID_TYPES.has(type)) {
       return `Error: invalid type "${type}". Must be one of: ${[...VALID_TYPES].join(", ")}`
     }
-    const dir = memoryDir(ctx.cwd)
+    const dir = scopeDir(ctx.cwd, scope || "personal")
     ensureDir(dir)
 
-    const filePath = join(dir, entryFilename(title))
+    const filename = entryFilename(title)
+    const filePath = join(dir, filename)
     const markdown = serializeEntry({ type, title: title.trim(), content: content.trim(), tags })
     writeFileSync(filePath, markdown, "utf8")
-    return `Saved memory entry "${title}" (type: ${type})`
+    return `Saved memory entry "${title.trim()}" (type: ${type}, scope: ${scope || "personal"}, id=${filename})`
   },
 }
 
@@ -271,10 +286,9 @@ export const memoryPutTool = {
  * Used by both the memory_search tool and automatic context injection.
  */
 export function search(cwd, query, { limit = 5 } = {}) {
-  const dir = memoryDir(cwd)
-  if (!existsSync(dir)) return []
+  if (!existsSync(memoryDir(cwd))) return []
 
-  const entries = readAllEntries(dir)
+  const entries = readAllScopeEntries(cwd)
   if (entries.length === 0) return []
 
   const keywords = tokenizeQuery(query)
@@ -324,7 +338,7 @@ export const memorySearchTool = {
             const vecResults = await searchIndex(ctx.cwd, embedder, query, { kind: "memory", limit: limit || 5 })
             if (vecResults.length > 0) {
               return vecResults.map((r) =>
-                `${r.file}:${r.startLine}-${r.endLine} (score:${r.score.toFixed(3)})\n${r.snippet}`
+                `${r.file}:${r.startLine}-${r.endLine} (id=${r.file.split("/").pop()}, score:${r.score.toFixed(3)})\n${r.snippet}`
               ).join("\n\n")
             }
           } catch {}
@@ -347,6 +361,47 @@ function formatResults(entries) {
     const tags = e.tags ? ` [${e.tags}]` : ""
     const content = (e.content || "").slice(0, 200)
     const truncated = e.content && e.content.length > 200 ? "..." : ""
-    return `[${type}]${tags} ${title}\n  ${content}${truncated}`
+    return `[${type}]${tags} ${title} (id=${e._file})\n  ${content}${truncated}`
   }).join("\n\n")
+}
+
+/**
+ * Delete a memory entry by id (filename) and scope. Scope locates the storage directory
+ * (memoryDir(cwd)/<scope>) — an id that is not in that scope's directory is an error (NF2/NF3).
+ * Reads the entry content before deleting (F3 — auditable, recoverable).
+ */
+export const memoryDeleteTool = {
+  name: "memory_delete",
+  description:
+    "Delete a memory entry by its id (filename, as returned by memory_put / memory_search) and scope. " +
+    "Scope is required and locates the storage directory — an entry not in that scope's directory is an error. " +
+    "Returns the deleted entry's title and content so the deletion is auditable and recoverable.",
+  parameters: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Entry id (filename, e.g. 20260901-rule-ab12.md)" },
+      scope: { type: "string", enum: [...VALID_SCOPES], description: "Scope of the entry to delete (required)" },
+    },
+    required: ["id", "scope"],
+  },
+  execute({ id, scope }, ctx) {
+    if (!VALID_SCOPES.has(scope)) {
+      return `Error: invalid scope "${scope}". Must be one of: ${[...VALID_SCOPES].join(", ")}`
+    }
+    // id must be a bare filename: separators / ".." would escape the scope directory (NF3)
+    const bare = id && !id.includes("/") && !id.includes("\\") && id !== "." && id !== ".."
+    if (!bare) {
+      return `Error: memory ${id ?? ""} not found in scope ${scope}`
+    }
+    const filePath = join(scopeDir(ctx.cwd, scope), id)
+    if (!existsSync(filePath)) {
+      return `Error: memory ${id} not found in scope ${scope}`
+    }
+    const raw = readFileSync(filePath, "utf8")
+    const parsed = parseEntry(raw)
+    const title = parsed?.title ?? "(untitled)"
+    const content = parsed?.content ?? raw
+    unlinkSync(filePath)
+    return `Deleted ${id}: ${title}\n${content}`
+  },
 }

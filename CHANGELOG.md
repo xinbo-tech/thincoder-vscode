@@ -11,6 +11,7 @@ All notable changes to ThinCoder VS Code are documented here.
 ### Changed
 
 - **跨端会话共享一致性（会诊 4 模型收敛）**：sessionStart 打点（saveLines 只赋一次）；F2 写前磁盘校验（同会话并发追加 → 轮转 .bak 保留）；legacy transient 读+写双点过滤；contextHistory 机读线判定（length>0）；listSlots 懒加载元数据
+- **提示词同步**：`system.md` 追加操作并行化纪律条款（Parallelize aggressively——独立只读调用批并行 / `edits` 数组多文件编辑 / 独立子项目拆分子 agent（F7 触发条件：不共享文件 + 无交叉依赖 + 各自有测试）+ 不并行边界（同文件写入 / 依赖链 / 审批风暴 / 同仓库并发 git / 有状态操作）+ 微操作不并行）——与 CLI byte-identical
 
 ### Fixed
 

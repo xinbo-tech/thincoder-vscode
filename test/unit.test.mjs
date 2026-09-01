@@ -6,14 +6,14 @@
 
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs"
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, existsSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
 
 // ─── memory.mjs ──────────────────────────────────────────────
 
-import { tokenizeQuery, scoreEntry, search } from "../src/memory.mjs"
+import { tokenizeQuery, scoreEntry, search, memoryPutTool, memorySearchTool, memoryDeleteTool } from "../src/memory.mjs"
 
 describe("memory — tokenizeQuery", () => {
   it("deduplicates repeated keywords", () => {
@@ -124,6 +124,57 @@ describe("memory — search (integration)", () => {
     assert.equal(results.length, 0)
   })
 })
+
+describe("memory — memory_delete (integration, MEMORY.md §0/§0.1 T5/T6/T10)", () => {
+  let tmpDir, memDir
+
+  before(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "thincoder-test-mdel-"))
+    memDir = join(tmpDir, ".thincoder", "memory")
+  })
+
+  after(() => {
+    try { rmSync(tmpDir, { recursive: true }) } catch {}
+  })
+
+  it("T5: put → memory_delete → 文件删 + search 零命中 + 返回内容", () => {
+    const putOut = memoryPutTool.execute({ type: "rule", title: "Delete me", content: "this must vanish after delete", scope: "personal" }, { cwd: tmpDir })
+    const id = putOut.match(/id=([\w-]+\.md)/)?.[1]
+    assert.ok(id, `put 输出应含 id（文件名）: ${putOut}`)
+    const delOut = memoryDeleteTool.execute({ id, scope: "personal" }, { cwd: tmpDir })
+    assert.ok(delOut.includes(id), `删除返回应含 id: ${delOut}`)
+    assert.ok(delOut.includes("Delete me"), `删除返回应含标题: ${delOut}`)
+    assert.equal(existsSync(join(memDir, "personal", id)), false, "文件已删")
+    assert.equal(search(tmpDir, "vanish", { limit: 5 }).length, 0, "搜索零命中")
+  })
+
+  it("T6: 不存在 / scope 目录校验（NF2/NF3 同语义）", () => {
+    const putOut = memoryPutTool.execute({ type: "knowledge", title: "Scoped entry", content: "lives in personal", scope: "personal" }, { cwd: tmpDir })
+    const id = putOut.match(/id=([\w-]+\.md)/)?.[1]
+    assert.ok(id)
+    // 文件在 personal/ 目录 → project scope 必须报 not found（目录定位校验）
+    const wrongScope = memoryDeleteTool.execute({ id, scope: "project" }, { cwd: tmpDir })
+    assert.match(wrongScope, /not found in scope project/)
+    // 不存在 id
+    const missing = memoryDeleteTool.execute({ id: "20260101-nope-ab12.md", scope: "personal" }, { cwd: tmpDir })
+    assert.match(missing, /not found in scope personal/)
+    // 路径逃逸拒绝（分隔符 / ".." 不可能是合法文件名 id）
+    const evil = memoryDeleteTool.execute({ id: "../outside.md", scope: "personal" }, { cwd: tmpDir })
+    assert.match(evil, /not found in scope personal/)
+    // 条目未被误删
+    assert.equal(existsSync(join(memDir, "personal", id)), true)
+  })
+
+  it("T10: memory_put / memory_search 输出带 id（文件名）", async () => {
+    const putOut = memoryPutTool.execute({ type: "decision", title: "Id visible", content: "agent can find this id", scope: "project" }, { cwd: tmpDir })
+    const id = putOut.match(/id=([\w-]+\.md)/)?.[1]
+    assert.ok(id, `put 输出应含 id: ${putOut}`)
+    assert.equal(existsSync(join(memDir, "project", id)), true, "project scope 写入 scope 子目录")
+    const searchOut = await memorySearchTool.execute({ query: "Id visible", limit: 5 }, { cwd: tmpDir })
+    assert.match(searchOut, new RegExp(id), `search 输出应含 id: ${searchOut}`)
+  })
+})
+
 
 // ─── context.mjs ─────────────────────────────────────────────
 
