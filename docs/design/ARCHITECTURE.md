@@ -421,3 +421,34 @@ GitHub thincoder-vscode#2 / thincoder#5 同根修复（CHANGELOG 0.8.3）。根�
 - `webview/permission.js`：`showBatchPermissionRequest` 合并行 UI（"N 个工具需要权限：A、B、C" + approve all / one by one / deny 三选项）；`webview/chat.js` 路由；`locales/{en,zh}.json` `perm.batch.*` 键
 
 测试：`test/permission.test.mjs`（T-B1 一次合并询问 / T-B2a deny 全批 / T-B2b oneByOne 回退 / T-B6 无 handler 缺省 / autoApprove 短路 / planMode 前置门禁不计入批）。
+### 工具作用域限制移除（2026-09-02 · 引用）
+
+需求与设计见 CLI `docs/design/TOOLS.md` §10.1（10.1 D-W1..W3/T-W1..W5，单一权威源，本文件不复制）。残留风险声明（权限门禁 + 破坏性快照不变）适用。本仓库改动点：
+
+- `src/tools/execute.mjs`：`isInside` 删除；`resolveBaseDir` 去断言（纯 resolve——workdir 越界正常执行）；scriptFile 越界拒绝删除（可指向 workspace 外文件，bash 一致性）；工具描述 "confined to the workspace" 措辞改 "no directory restrictions"
+- `src/tools/git.mjs`：同上（`isInside` 删除、`resolveBaseDir` 去断言、workdir 描述同步）
+- `src/tools/exec-prelude.mjs`：**保留**（safe() 的 workspace-root 约束是 execute 内联辅助 API 的 orthopedic guard——同一调用内可经 require()/process 绕过，不产生失败往返；设计定稿枚举未列，照设计不动）
+- 逃逸测试更新：`test/execute.test.mjs`（workdir 越界正常执行 / scriptFile 指向外部文件正常执行；prelude 的 Path traversal denied 测试保留）、`test/tools.test.mjs`（git workdir 越界不再拒绝 + T-W1 外部路径 read/write + T-W5 symlink——Windows 无权限时 skip）
+
+### lint 基建零依赖化（2026-09-02 · 引用）
+
+需求与设计见 CLI `docs/design/TOOLS.md` §10.2（10.2 D-L1..L4/T-L1..L4，单一权威源，本文件不复制）。检测能力损失声明（node --check 仅语法级）适用。本仓库改动点：
+
+- `package.json`：devDependencies 删 `@eslint/js` + `eslint`；`scripts.lint` 改 `node scripts/check-syntax.mjs`；`package-lock.json` 经 npm install 更新（eslint 全套移除）
+- `eslint.config.mjs` 删除；`scripts/check-syntax.mjs` 新增——遍历 **src/ + test/ + webview/ + scripts/ + extension.mjs**（VS Code 文件集与 CLI 不同），逐个 `node --check`，非零退出汇总报错文件清单（含脚本自检）
+- `src/tools/linter.mjs`：eslintCheck 级联删除（js/mjs/cjs/jsx 的 full 级联回退 node --check，TS 保留 tsc）、描述同步
+- eslint-disable 注释清理（`src/tools/shared.mjs` / `shell.mjs` / `webview/md.js` / `test/terminal-bash.test.mjs`）；CI `.github/workflows/test.yml` 的 `npx eslint` 改 `npm run lint`
+- `src/prompts/discipline.md`：lint 行 "ad-hoc eslint runs" → "ad-hoc node --check"（两端 prompts byte-identical——**CLI 端需同步镜像**）
+
+测试：`test/tools.test.mjs`（full cascade 对 JS 回退 node --check）。
+
+### 模型上下文长度可配置（2026-09-02 · 引用）
+
+需求与设计见 CLI `docs/design/PROVIDER.md` §15（15.2 D-C1..C5/T-C1..C6，单一权威源，本文件不复制）。本仓库改动点：
+
+- `src/config.mjs`：新增 `providerSpec(provider)`（specForModel + `providers[].context` K 单位拷贝覆盖 ×1024；非法值防御性忽略；specForModel 纯函数不变）；`ctxPercentForModel(promptTokens, provider)` 改 provider 感知（签名变更——webview 状态栏 context % 跟随覆盖值）
+- `src/specs.mjs`：re-export `providerSpec`；`src/config-io.mjs`：`resolveProviders` 校验 `providers[].context`（0/负数/非数字 → 删除 + `console.warn` 一次/每 provider，loadConfig 等价校验点）
+- 调用方换 providerSpec：`src/compact.mjs`（compactionThreshold + keepTailSize——压缩阈值跟随覆盖）、`src/extension/panel-chat.mjs`（onUsage → ctxPercentForModel(u.prompt_tokens, p)）
+- 配置界面 = `~/.thincoder/config.json` 的 `providers[].context`（VS Code 设置 UI 编辑，migrate-settings 同源——`src/config-migrate.mjs` 迁移时透传 context 字段；**不做会话面板入口**，settings 是 provider 配置唯一权威，评审 round2 #10 定死）
+
+测试：`test/agent.test.mjs`（providerSpec 覆盖/非法值/未配置/独立拷贝 + ctxPercentForModel 显示跟随 + T-C2 压缩阈值跟随——同批消息 1M spec 不触发、128K 覆盖触发）、`test/config-io.test.mjs`（resolveProviders 非法值 warn 一次 + 合法保留 + 未配置回归 + migrate 透传）。

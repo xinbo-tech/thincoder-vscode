@@ -84,7 +84,7 @@ npx @vscode/vsce publish minor   # 0.1.1 → 0.2.0
 npx @vscode/vsce publish major   # 0.2.0 → 1.0.0
 ```
 
-`vsce publish` 自动执行:`vscode:prepublish`(eslint)→ 打包 → 上传。
+`vsce publish` 自动执行:`vscode:prepublish`(lint + test，check-syntax)→ 打包 → 上传。
 首次发布会经过市场验证扫描(通常几分钟),通过后即可搜索 "ThinCoder",安装 ID 为 `xinbo-tech.thincoder-vscode`。
 **发完这里只是完成了一半**——必须继续 §5b 的 `ovsx publish`(同一 vsix),两个 registry 都成功才算发布完成(2026-08-29 0.8.4 漏发 Open VSX,Cursor 用户滞留旧版)。
 
@@ -99,7 +99,7 @@ npm run package            # 产物 thincoder-vscode-<version>.vsix
 code --install-extension thincoder-vscode-0.1.0.vsix   # 本地安装验证
 ```
 
-`.vscodeignore` 已排除:`.vscode/`、`test/`、`docs/`、`node_modules/`、`*.vsix`、锁文件、eslint 配置等。
+`.vscodeignore` 已排除:`.vscode/`、`test/`、`docs/`、`node_modules/`、`*.vsix`、锁文件、配置等（eslint 全套 2026-09-02 §10.2 删除）。
 
 ## 5. 回滚 / 问题
 
