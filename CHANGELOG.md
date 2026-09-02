@@ -2,26 +2,23 @@
 
 All notable changes to ThinCoder VS Code are documented here.
 
-## [0.12.58] - 2026-09-02
-
-### Changed
-
-- **开发体验三项（与 CLI 同批，TOOLS.md §10 / PROVIDER.md §15）**：① lint 零依赖化（eslint 全套删除 → check-syntax 197 文件，workflow/vscodeignore 同步）；② 工具作用域限制移除（execute/git 边界断言删除，描述同步）；③ 模型上下文可配置（settings.json providers[].context K 单位——providerSpec 拷贝覆盖、压缩阈值/状态栏跟随、migrate 透传）
-
-## [0.12.57] - 2026-09-02
+## [0.8.10] — 2026-09-01
 
 ### Added
 
+- **subagent 异步化 + 批确认（AGENT-LOOP.md §15/§16）**：async spawn（槽位队列 / subagent_check / 上限 4）+ approval 合并询问（approveAll/oneByOne/deny 三选项 webview UI）
 - **deepseek 400 对齐（PROVIDER.md §14.7）**：escape v5（sanitizeLoneSurrogates 孤立代理 → U+FFFD + arguments/reasoning_content 覆盖 + hex odd-run 修复）；UTF-16 安全截断 5 处（context doc 注入 / code.mjs 预览 / offloadToolResult / compact 序列化）；续写构造对齐（prefix 过滤工具消息 + ≤8 文本 + reasoning_content 回传继续而非跳过 + 失败 _warnings）
 - **压缩可见性（CONTEXT-COMPACTION.md §7 D-C3）**：onCompressStart/onCompressFail 回调 + webview 压缩状态行（Compressing context… → Compressed: N tokens freed (Xs) / failed；3 次失败降级说明）
-- **subagent 异步化 + 批确认（AGENT-LOOP.md §15/§16）**：async spawn（槽位队列 / subagent_check / 上限 4）+ approval 合并询问（approveAll/oneByOne/deny 三选项 webview UI）
 - **批量形态引导**：edit/apply_patch 描述批量句（两端 parity）+ system.md/engineering.md/main.md 同步
+- **开发体验三项（TOOLS.md §10 / PROVIDER.md §15）**：① lint 零依赖化（eslint 全套删除 → check-syntax 197 文件，workflow/vscodeignore 同步）；② 工具作用域限制移除（execute/git 边界断言删除，描述同步）；③ 模型上下文可配置（settings.json providers[].context K 单位——providerSpec 拷贝覆盖、压缩阈值/状态栏跟随、migrate 透传）
+### Added
 
-### Fixed
+- **MCP Streamable POST 误判修复（CLI parity，MCP.md §4）+ 面板 [Edit]/[Test]**：http transport 增 postOnly 标记——GET SSE 405 降级后的纯 POST 模式 `isAlive()` 不再误判死（glm-websearch 类 server 的 reconnect failed 根因，与 CLI 同构）；`probeMcpServer` 镜像导出（一次性探活 initialize + tools/list，零副作用）；MCP 面板每行新增 [Edit]/[Test] 按钮——edit 复用添加表单（name 锁定、逐字段预填、token 字段、headers 逗号分隔提示 `k=v, k2=v2`），test 结果（工具数/延迟/错误透传）渲染到服务器行下；config-io 增 `updateMcpServer` 原位更新（数组序保持）；**[Reconnect] 死按钮修复**——webview 一直在发 `reconnectMcp` 消息但路由表无 case（路由拆分时丢失），面板重连按钮此前完全无效；token 一等字段（connect 链合成 `Authorization: Bearer <token>`，显式 headers 优先）随面板 token 表单字段一并落地
 
-- **code review #1-#5**：batch edits 缺类型校验（TypeError → 错误消息）；write/edit/apply_patch 补 touchedPaths（批量文件记入 _touchedFiles、工程 docs 豁免恢复）；apply_patch 两段式原子（never write a partial patch，CLI parity）；deleteTool 补 isDirty 守卫（防静默删脏文件）
+### Changed
 
-## [0.8.10] — 2026-09-01
+- **multi-design 并行令牌（designId slots）**（CLI parity）：eng-coder 子 agent 多设计并行 spawn 各带 `{designId, token}` 互不覆盖
+- **memory_delete 工具**（CLI parity）：三层记忆条目删除
 
 ### Added
 
