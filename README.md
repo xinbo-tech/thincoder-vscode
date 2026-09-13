@@ -1,5 +1,15 @@
 # ThinCoder for VS Code
 
+> [!IMPORTANT]
+> **This repository is retired / read-only as of 2026-09-13.**
+> `thincoder-vscode` has been merged into the **`thincoder` monorepo**, where it now lives at
+> `thincoder-vscode/` alongside the CLI at `thincoder/`:
+> <https://github.com/xinbo-tech/thincoder> · <https://gitee.com/shanghai-xinbo/thincoder>
+>
+> Please file issues and send pull requests to the merged repository. The code here is kept for
+> history only and is **no longer maintained**. Historical tags and releases stay in this repository.
+
+
 **Full AI coding agent, inside your editor. Zero bloat.**
 
 ThinCoder VS Code gives you the complete ThinCoder agent — multi-turn tool-calling, subagents, plan mode, task tracking — in a side panel. It reads your project, writes code, runs commands, searches the web, and explains its work as it goes.
